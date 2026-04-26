@@ -1,0 +1,870 @@
+import {
+  app,
+  BrowserWindow,
+  desktopCapturer,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeImage,
+  screen,
+  session,
+  shell,
+} from "electron";
+import { autoUpdater } from "electron-updater";
+import * as path from "node:path";
+import * as fs from "node:fs";
+import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
+import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
+import type {
+  AppInfo,
+  CaptureSource,
+  CropRect,
+  CropSelectionResult,
+  FinalizeParams,
+  RecordingProgress,
+  StartRecordingParams,
+} from "./types";
+
+const DEV_URL = process.env.VITE_DEV_SERVER_URL;
+
+// Wayland boot setup: must run BEFORE app is ready. Tells Chromium's Ozone
+// layer to use Wayland natively and enables the PipeWire screencast capturer
+// — without these, screen capture goes through the legacy X11 path under
+// XWayland and the portal handshake doesn't kick in.
+{
+  const isLinux = process.platform === "linux";
+  const isWayland =
+    isLinux &&
+    (process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY));
+  if (isWayland) {
+    if (!process.env.ELECTRON_OZONE_PLATFORM_HINT) {
+      process.env.ELECTRON_OZONE_PLATFORM_HINT = "wayland";
+    }
+    app.commandLine.appendSwitch("enable-features", "WebRTCPipeWireCapturer");
+  }
+  if (isLinux) {
+    // Set the wm_class / Wayland app_id so the compositor matches us against
+    // a bundled .desktop file (or any user-installed one) and uses the Cove
+    // icon in the taskbar instead of the generic Electron one. Must be set
+    // before app is ready.
+    app.commandLine.appendSwitch("class", "cove-screen-recorder");
+    app.setName("Cove Screen Recorder");
+  }
+}
+
+let mainWindow: BrowserWindow | null = null;
+
+interface WindowBounds {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  maximized?: boolean;
+}
+
+function boundsFile(): string {
+  return path.join(app.getPath("userData"), "window-bounds.json");
+}
+
+function readBounds(): WindowBounds | null {
+  try {
+    const raw = fs.readFileSync(boundsFile(), "utf-8");
+    const parsed = JSON.parse(raw) as WindowBounds;
+    // Discard saved sizes from the old 1.x layout (980x720 default) — the
+    // 2.x two-column layout collapses below ~1100px, so those bounds make
+    // the app look broken on first 2.x launch.
+    if (
+      typeof parsed.width === "number" &&
+      typeof parsed.height === "number" &&
+      parsed.width >= 1100 &&
+      parsed.height >= 880
+    ) {
+      return parsed;
+    }
+  } catch {
+    // first run / corrupt — fall back to defaults
+  }
+  return null;
+}
+
+function writeBounds(b: WindowBounds): void {
+  try {
+    fs.mkdirSync(path.dirname(boundsFile()), { recursive: true });
+    fs.writeFileSync(boundsFile(), JSON.stringify(b));
+  } catch {
+    // best effort
+  }
+}
+
+function debounce<T extends (...args: unknown[]) => void>(fn: T, ms: number): T {
+  let t: NodeJS.Timeout | null = null;
+  return ((...args: unknown[]) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  }) as T;
+}
+
+function createWindow(): void {
+  const saved = readBounds();
+  // Bumped minimum past the 980px breakpoint so the two-column layout always
+  // gets to render. Saved bounds from older 1.x runs could be < 1100; we
+  // ignore them in `readBounds` and fall back to the default below.
+  const defaultWidth = 1320;
+  const defaultHeight = 920;
+  const iconPath = path.join(app.getAppPath(), "cove_icon.png");
+
+  mainWindow = new BrowserWindow({
+    width: saved?.width ?? defaultWidth,
+    height: saved?.height ?? defaultHeight,
+    x: saved?.x,
+    y: saved?.y,
+    minWidth: 1100,
+    minHeight: 640,
+    backgroundColor: "#0b0b10",
+    show: false,
+    frame: false,
+    titleBarStyle: "hidden",
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // sandbox: true broke Chromium's `chromeMediaSource: "desktop"` audio
+      // constraint on Windows — getUserMedia returned a video-only stream
+      // with no audio tracks, even with system audio toggled on. The legacy
+      // desktop-loopback path needs the renderer's privileged process to
+      // resolve. Stay sandbox-off here; contextIsolation + nodeIntegration
+      // off + no remote content keeps the threat model reasonable.
+      sandbox: false,
+    },
+  });
+
+  // Linux window managers often ignore BrowserWindow.icon, leaving the
+  // taskbar with the default Electron icon. setIcon() forces it through.
+  if (process.platform === "linux") {
+    try {
+      const img = nativeImage.createFromPath(iconPath);
+      if (!img.isEmpty()) mainWindow.setIcon(img);
+    } catch {
+      // best effort
+    }
+  }
+
+  mainWindow.once("ready-to-show", () => mainWindow?.show());
+
+  if (saved?.maximized) mainWindow.maximize();
+
+  if (DEV_URL) {
+    mainWindow.loadURL(DEV_URL);
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  } else {
+    mainWindow.loadFile(path.join(app.getAppPath(), "dist", "index.html"));
+  }
+
+  const persist = () => {
+    if (!mainWindow) return;
+    const isMax = mainWindow.isMaximized();
+    const bounds = isMax ? saved ?? mainWindow.getBounds() : mainWindow.getBounds();
+    writeBounds({ ...bounds, maximized: isMax });
+  };
+  mainWindow.on("close", persist);
+  mainWindow.on("resize", debounce(persist, 250));
+  mainWindow.on("move", debounce(persist, 250));
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
+
+function sendProgress(p: RecordingProgress): void {
+  mainWindow?.webContents.send("cove:progress", p);
+}
+
+function detectSessionType(): string | null {
+  const t = process.env.XDG_SESSION_TYPE;
+  if (t) return t;
+  if (process.env.WAYLAND_DISPLAY) return "wayland";
+  if (process.env.DISPLAY) return "x11";
+  return null;
+}
+
+let overlayWindow: BrowserWindow | null = null;
+let pendingSelection:
+  | {
+      resolve: (value: CropSelectionResult | null) => void;
+      displayId: string;
+      displayWidth: number;
+      displayHeight: number;
+      // Omitted on Wayland: the source is picked through the portal at capture
+      // time, not chosen up-front from a desktopCapturer enumeration.
+      source: CaptureSource | null;
+    }
+  | null = null;
+
+// Cache desktopCapturer.getSources because each call triggers a fresh
+// xdg-desktop-portal prompt on Wayland. Cache for 30s — long enough to cover
+// a single record-flow, short enough to pick up new windows reasonably fast.
+const SOURCE_CACHE_TTL_MS = 30_000;
+let cachedSourcesAt = 0;
+let cachedSources: import("electron").DesktopCapturerSource[] = [];
+let cachedSourceKey = "";
+
+async function getSourcesCached(
+  types: Array<"screen" | "window">,
+  fetchWindowIcons: boolean,
+): Promise<import("electron").DesktopCapturerSource[]> {
+  const key = types.slice().sort().join(",") + ":" + (fetchWindowIcons ? "icons" : "noicons");
+  const fresh = Date.now() - cachedSourcesAt < SOURCE_CACHE_TTL_MS;
+  if (fresh && cachedSourceKey === key && cachedSources.length > 0) {
+    return cachedSources;
+  }
+  cachedSources = await desktopCapturer.getSources({
+    types,
+    thumbnailSize: { width: 320, height: 200 },
+    fetchWindowIcons,
+  });
+  cachedSourcesAt = Date.now();
+  cachedSourceKey = key;
+  return cachedSources;
+}
+
+function invalidateSourceCache(): void {
+  cachedSourcesAt = 0;
+  cachedSources = [];
+  cachedSourceKey = "";
+}
+
+function destroyOverlay(): void {
+  if (overlayWindow) {
+    try {
+      // destroy() is non-cancellable and faster than close() — important on
+      // Wayland/KDE where close() can deadlock if focus transitions race.
+      if (!overlayWindow.isDestroyed()) overlayWindow.destroy();
+    } catch {
+      // already gone
+    }
+    overlayWindow = null;
+  }
+}
+
+function showMainSafely(): void {
+  // Defer to next tick — synchronously calling show() right after the overlay
+  // is destroyed has been observed to deadlock the main process on KDE Wayland.
+  setImmediate(() => {
+    try {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    } catch (err) {
+      console.warn("show main failed", err);
+    }
+  });
+}
+
+function resolveSelection(value: CropSelectionResult | null): void {
+  const pending = pendingSelection;
+  pendingSelection = null;
+  destroyOverlay();
+  showMainSafely();
+  pending?.resolve(value);
+}
+
+function makeCaptureSource(
+  s: import("electron").DesktopCapturerSource,
+): CaptureSource {
+  return {
+    id: s.id,
+    name: s.name,
+    kind: s.id.startsWith("screen") ? "screen" : "window",
+    thumbnailDataUrl: s.thumbnail.toDataURL(),
+    appIconDataUrl: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : undefined,
+    display_id: s.display_id || undefined,
+  };
+}
+
+async function startCropSelection(): Promise<CropSelectionResult | null> {
+  if (pendingSelection) return null;
+
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor) ?? screen.getPrimaryDisplay();
+
+  // On Wayland, calling desktopCapturer.getSources() here would trigger an
+  // xdg-desktop-portal prompt up front — and the renderer is going to call
+  // getDisplayMedia() afterwards anyway, which fires its own prompt. So skip
+  // the enumeration on Wayland and let the portal pick handle it. On X11 /
+  // Windows the enumeration is silent, so we still resolve a source up front
+  // and the renderer takes the legacy getUserMedia path.
+  const onWayland = detectSessionType() === "wayland";
+  let source: CaptureSource | null = null;
+  if (!onWayland) {
+    const sources = await getSourcesCached(["screen"], false);
+    if (sources.length === 0) return null;
+    let raw = sources.find((s) => s.display_id && Number(s.display_id) === display.id);
+    if (!raw) raw = sources[0];
+    source = makeCaptureSource(raw);
+  }
+
+  if (mainWindow && mainWindow.isVisible()) mainWindow.hide();
+
+  return new Promise<CropSelectionResult | null>((resolve) => {
+    pendingSelection = {
+      resolve,
+      displayId: String(display.id),
+      displayWidth: display.size.width,
+      displayHeight: display.size.height,
+      source,
+    };
+
+    overlayWindow = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      hasShadow: false,
+      fullscreenable: false,
+      focusable: true,
+      backgroundColor: "#00000000",
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, "overlay-preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    overlayWindow.setAlwaysOnTop(true, "screen-saver");
+    try {
+      overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    } catch {
+      // not supported on every platform — ignore
+    }
+
+    const overlayHtml = path.join(app.getAppPath(), "dist", "overlay.html");
+    overlayWindow.loadFile(overlayHtml);
+
+    overlayWindow.once("ready-to-show", () => {
+      try {
+        overlayWindow?.show();
+        overlayWindow?.focus();
+      } catch (err) {
+        console.warn("overlay show failed", err);
+      }
+    });
+
+    overlayWindow.on("closed", () => {
+      overlayWindow = null;
+      // If closed without a commit/cancel, treat as cancel.
+      if (pendingSelection) {
+        const p = pendingSelection;
+        pendingSelection = null;
+        showMainSafely();
+        p.resolve(null);
+      }
+    });
+  });
+}
+
+async function listSources(kind: "screen" | "window" | "all"): Promise<CaptureSource[]> {
+  // On Wayland, source enumeration is not passive: Electron reaches the
+  // xdg-desktop-portal picker. Keep all Wayland capture requests on the
+  // getDisplayMedia path so a recording flow cannot show two portal dialogs.
+  if (detectSessionType() === "wayland") return [];
+
+  const types: Array<"screen" | "window"> =
+    kind === "all" ? ["screen", "window"] : [kind];
+  const raw = await getSourcesCached(types, kind !== "screen");
+  return raw.map<CaptureSource>(makeCaptureSource);
+}
+
+// Non-Wayland getDisplayMedia path: the renderer can hint which source kind it
+// wants before calling navigator.mediaDevices.getDisplayMedia().
+//
+// On Linux, keep this handler installed. Electron's default getDisplayMedia path
+// is not supported reliably there, so the handler must fulfill the request via
+// desktopCapturer.getSources(). Do not pass useSystemPicker on Linux: that can
+// make Chromium try a portal request before this handler opens the portal again.
+let nextDisplayMediaTypes: Array<"screen" | "window"> = ["screen", "window"];
+let nextDisplayMediaSelected: { id: string; name: string; kind: "screen" | "window" } | null = null;
+// On Windows/X11, the renderer pre-selects a source via the Cove SourceModal
+// and tells the handler to use exactly that one — instead of guessing
+// sources[0]. This is also how we get audio working on Windows: routing
+// through getDisplayMedia (handler returns picked source + audio:"loopback")
+// instead of the legacy getUserMedia({audio:{mandatory:{chromeMediaSource:
+// "desktop"}}}) constraint, which Electron 32+ no longer honors reliably.
+let pendingPickedSourceId: string | null = null;
+
+function getLastDisplayMediaSelection(): { id: string; name: string; kind: "screen" | "window" } | null {
+  const v = nextDisplayMediaSelected;
+  nextDisplayMediaSelected = null;
+  return v;
+}
+
+function installDisplayMediaHandler(): void {
+  session.defaultSession.setDisplayMediaRequestHandler(
+    async (request, callback) => {
+      const types: Array<"screen" | "window"> =
+        nextDisplayMediaTypes.length > 0 ? nextDisplayMediaTypes : ["screen", "window"];
+      // Reset for next call.
+      nextDisplayMediaTypes = ["screen", "window"];
+      // Always pass "loopback" when audio was requested. On Windows this
+      // captures system-audio output; on Linux/macOS it's a no-op but
+      // satisfies the request contract — without it (audio:undefined when
+      // audioRequested:true) Chromium errors with "Error starting capture"
+      // before the portal even opens. Wayland system-audio capture itself
+      // is a deeper Electron limitation tracked separately.
+      const audio = request.audioRequested ? "loopback" : undefined;
+
+      // The Wayland double-prompt bug: PipeWire portal sessions can't be
+      // shared between enumeration and capture. If we call
+      // desktopCapturer.getSources() here it opens session A (prompt 1), then
+      // when Chromium uses the returned source ID it opens session B (prompt
+      // 2). The fix is to NOT enumerate — pass a placeholder source and let
+      // Chromium drive the portal once when capture starts.
+      // Reference: github.com/electron/electron/issues/30652
+      if (detectSessionType() === "wayland") {
+        // The placeholder ID is intentionally not a valid PipeWire node. It
+        // satisfies Electron's API contract; the actual source comes from
+        // Chromium's portal handshake on Start. The renderer falls back to
+        // the resulting MediaStreamTrack's label/displaySurface for naming.
+        nextDisplayMediaSelected = null;
+        callback({
+          video: { id: "screen:0:0", name: "Screen" } as Electron.DesktopCapturerSource,
+          audio,
+        });
+        return;
+      }
+
+      try {
+        // Re-enumerate sources so we can hand back a real DesktopCapturerSource
+        // (Chromium needs a fresh handle, not just the cached id+name we held).
+        const sources = await desktopCapturer.getSources({
+          types: ["screen", "window"],
+          thumbnailSize: { width: 0, height: 0 },
+          fetchWindowIcons: false,
+        });
+        if (sources.length === 0) {
+          sendProgress({ stage: "muxing", message: "displayMedia handler: no sources available" });
+          callback({});
+          return;
+        }
+
+        let picked: import("electron").DesktopCapturerSource | undefined;
+        const wantedId = pendingPickedSourceId;
+        if (wantedId) {
+          picked = sources.find((s) => s.id === wantedId);
+          pendingPickedSourceId = null;
+        }
+        const matchedPick = !!picked;
+        if (!picked) {
+          picked =
+            sources.find((s) => types.includes(s.id.startsWith("window") ? "window" : "screen")) ??
+            sources[0];
+        }
+
+        nextDisplayMediaSelected = {
+          id: picked.id,
+          name: picked.name,
+          kind: picked.id.startsWith("screen") ? "screen" : "window",
+        };
+
+        // Diagnostic line — surfaces what the handler actually decided so a
+        // 0-audio-track stream on the renderer side can be traced to the
+        // exact source/audio pair we handed Chromium.
+        const pickedKind = picked.id.startsWith("window") ? "window" : "screen";
+        sendProgress({
+          stage: "muxing",
+          message:
+            `displayMedia handler: ${pickedKind} id=${picked.id} ` +
+            `name="${picked.name}" audio=${audio ?? "off"} ` +
+            `wantedId=${wantedId ?? "(none)"} matchedPick=${matchedPick}`,
+        });
+
+        callback({ video: picked, audio });
+      } catch (err) {
+        console.warn("display media request failed", err);
+        sendProgress({ stage: "error", message: `displayMedia handler error: ${err instanceof Error ? err.message : String(err)}` });
+        callback({});
+      }
+    },
+  );
+}
+
+function defaultOutputDir(): string {
+  const videos = app.getPath("videos");
+  const dir = path.join(videos, "Cove Recordings");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    return videos;
+  }
+  return dir;
+}
+
+interface HotkeyBindings {
+  toggle: string;
+  gif: string;
+}
+
+const DEFAULT_HOTKEYS: HotkeyBindings = {
+  toggle: "Control+Shift+R",
+  gif: "Control+Shift+G",
+};
+
+let activeHotkeys: HotkeyBindings = { ...DEFAULT_HOTKEYS };
+let hotkeysEnabled = false;
+
+// Translate UI-style accelerators ("Ctrl+Shift+R") into Electron's expected
+// form ("Control+Shift+R") and validate the basic shape.
+function normalizeAccelerator(accel: string): string | null {
+  if (!accel) return null;
+  const cleaned = accel
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/^Ctrl\b/i, "Control")
+    .replace(/\+Ctrl\b/gi, "+Control")
+    .replace(/^Cmd\b/i, "Command")
+    .replace(/\+Cmd\b/gi, "+Command")
+    .replace(/^Win\b/i, "Super")
+    .replace(/\+Win\b/gi, "+Super");
+  // Must end in a non-modifier key.
+  const parts = cleaned.split("+");
+  const tail = parts[parts.length - 1];
+  if (!tail || /^(Control|Shift|Alt|Command|Super|Meta)$/i.test(tail)) return null;
+  return cleaned;
+}
+
+function applyHotkeys(): void {
+  globalShortcut.unregisterAll();
+  if (!hotkeysEnabled) return;
+  const tryRegister = (raw: string, action: "toggle" | "gif" | "preview") => {
+    const accel = normalizeAccelerator(raw);
+    if (!accel) return false;
+    try {
+      return globalShortcut.register(accel, () => {
+        mainWindow?.webContents.send("cove:hotkey", action);
+      });
+    } catch {
+      return false;
+    }
+  };
+  tryRegister(activeHotkeys.toggle, "toggle");
+  tryRegister(activeHotkeys.gif, "gif");
+}
+
+function setHotkeysEnabled(enabled: boolean): void {
+  hotkeysEnabled = enabled;
+  applyHotkeys();
+}
+
+function setHotkeyBindings(bindings: Partial<HotkeyBindings>): void {
+  activeHotkeys = {
+    toggle: normalizeAccelerator(bindings.toggle ?? activeHotkeys.toggle) ?? activeHotkeys.toggle,
+    gif: normalizeAccelerator(bindings.gif ?? activeHotkeys.gif) ?? activeHotkeys.gif,
+  };
+  applyHotkeys();
+}
+
+function registerIpc(): void {
+  ipcMain.handle("cove:get-app-info", async (): Promise<AppInfo> => {
+    return {
+      version: app.getVersion(),
+      platform: process.platform,
+      sessionType: detectSessionType(),
+      ffmpeg: detectFfmpeg(),
+    };
+  });
+
+  ipcMain.handle(
+    "cove:list-sources",
+    async (_e, kind: "screen" | "window" | "all" = "all") => {
+      try {
+        return await listSources(kind);
+      } catch (err) {
+        console.warn("listSources failed", err);
+        return [];
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "cove:select-crop-region",
+    async (): Promise<CropSelectionResult | null> => {
+      try {
+        return await startCropSelection();
+      } catch (err) {
+        console.warn("crop selection failed", err);
+        return null;
+      }
+    },
+  );
+
+  ipcMain.on(
+    "cove:selection-commit",
+    (_e, rect: { x: number; y: number; width: number; height: number; dpr: number }) => {
+      if (!pendingSelection) {
+        destroyOverlay();
+        return;
+      }
+      const p = pendingSelection;
+      const result: CropRect = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        dpr: rect.dpr,
+        displayId: p.displayId,
+        displayWidth: p.displayWidth,
+        displayHeight: p.displayHeight,
+        sourceId: p.source?.id ?? "",
+      };
+      resolveSelection(p.source ? { rect: result, source: p.source } : { rect: result });
+    },
+  );
+
+  ipcMain.on("cove:selection-cancel", () => {
+    resolveSelection(null);
+  });
+
+  ipcMain.handle("cove:pick-output-dir", async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Select output folder",
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: defaultOutputDir(),
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle("cove:open-folder", async (_e, dir: string) => {
+    if (dir && fs.existsSync(dir)) await shell.openPath(dir);
+  });
+
+  ipcMain.handle("cove:reveal", async (_e, p: string) => {
+    if (p && fs.existsSync(p)) shell.showItemInFolder(p);
+  });
+
+  ipcMain.handle("cove:begin-recording", async (_e, params: StartRecordingParams) => {
+    const outDir = params.outputDir || defaultOutputDir();
+    const { recordingId } = begin({ ...params, outputDir: outDir });
+    // Recording started — invalidate the source cache so the next "Add window"
+    // session sees the current state of the desktop, not a stale snapshot.
+    invalidateSourceCache();
+    sendProgress({ recordingId, stage: "encoding", percent: 0, message: "recording" });
+    return { recordingId };
+  });
+
+  ipcMain.handle(
+    "cove:save-chunk",
+    async (_e, recordingId: string, buffer: ArrayBuffer) => {
+      appendChunk(recordingId, buffer);
+    },
+  );
+
+  ipcMain.handle("cove:finalize-recording", async (_e, params: FinalizeParams) => {
+    sendProgress({ recordingId: params.recordingId, stage: "muxing", percent: 50, message: "encoding" });
+    const result = await finalize(params, (line) => {
+      sendProgress({ recordingId: params.recordingId, stage: "muxing", message: line.trim().slice(0, 200) });
+    });
+    if (result.ok) {
+      sendProgress({
+        recordingId: params.recordingId,
+        stage: "done",
+        percent: 100,
+        message: result.error ?? "saved",
+        outputPath: result.outputPath,
+      });
+    } else {
+      sendProgress({
+        recordingId: params.recordingId,
+        stage: "error",
+        message: result.error,
+      });
+    }
+    return result;
+  });
+
+  ipcMain.handle("cove:cancel-recording", async (_e, recordingId: string) => {
+    cancel(recordingId);
+  });
+
+  ipcMain.handle("cove:register-hotkeys", async (_e, enabled: boolean) => {
+    setHotkeysEnabled(enabled);
+  });
+
+  ipcMain.handle(
+    "cove:set-hotkey-bindings",
+    async (_e, bindings: Partial<HotkeyBindings>) => {
+      setHotkeyBindings(bindings);
+    },
+  );
+
+  // Grow / shrink the main window vertically without ever shrinking past the
+  // user's manually-resized footprint. Used when the renderer expands the log
+  // panel so users see more content without an inner scrollbar.
+  ipcMain.handle(
+    "cove:adjust-window-height",
+    async (_e, deltaPx: number) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isFullScreen() || mainWindow.isMaximized()) return;
+      const [w, h] = mainWindow.getSize();
+      const next = Math.max(540, Math.round(h + deltaPx));
+      // Cap to the display's working area so we never push the titlebar off-screen.
+      const display = screen.getDisplayMatching(mainWindow.getBounds());
+      const maxH = display.workArea.height - 8;
+      mainWindow.setSize(w, Math.min(next, maxH), true);
+    },
+  );
+
+  ipcMain.handle(
+    "cove:set-next-display-media",
+    async (_e, kind: "screen" | "window" | "all" = "all") => {
+      nextDisplayMediaTypes =
+        kind === "all" ? ["screen", "window"] : [kind];
+      nextDisplayMediaSelected = null;
+    },
+  );
+
+  ipcMain.handle(
+    "cove:get-last-display-media-selection",
+    async () => getLastDisplayMediaSelection(),
+  );
+
+  ipcMain.handle(
+    "cove:set-picked-display-media-source",
+    async (_e, sourceId: string | null) => {
+      pendingPickedSourceId = typeof sourceId === "string" && sourceId ? sourceId : null;
+    },
+  );
+
+  ipcMain.on("cove:window-minimize", () => mainWindow?.minimize());
+  ipcMain.on("cove:window-toggle-maximize", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.on("cove:window-close", () => mainWindow?.close());
+}
+
+// On Linux the AppImage isn't registered with the desktop environment, so
+// Wayland compositors fall back to the generic Electron icon. Drop a tiny
+// .desktop file + icon into ~/.local/share so the WM can map our wm_class /
+// app_id back to the Cove icon. Idempotent — only writes if missing or stale.
+function installLinuxDesktopFile(): void {
+  if (process.platform !== "linux") return;
+  try {
+    const home = app.getPath("home");
+    const desktopDir = path.join(home, ".local", "share", "applications");
+    const iconDir = path.join(home, ".local", "share", "icons", "hicolor", "256x256", "apps");
+    fs.mkdirSync(desktopDir, { recursive: true });
+    fs.mkdirSync(iconDir, { recursive: true });
+
+    const wmClass = "cove-screen-recorder";
+    const desktopPath = path.join(desktopDir, `${wmClass}.desktop`);
+    const iconDestPath = path.join(iconDir, `${wmClass}.png`);
+    const iconSrcPath = path.join(app.getAppPath(), "cove_icon.png");
+
+    if (fs.existsSync(iconSrcPath)) {
+      try {
+        const srcStat = fs.statSync(iconSrcPath);
+        let needsCopy = true;
+        try {
+          const destStat = fs.statSync(iconDestPath);
+          needsCopy = destStat.size !== srcStat.size;
+        } catch { /* missing — copy */ }
+        if (needsCopy) fs.copyFileSync(iconSrcPath, iconDestPath);
+      } catch { /* best-effort */ }
+    }
+
+    // Best Exec target: the actual launched binary. For AppImage that's
+    // process.env.APPIMAGE; for unpacked dev runs it's process.execPath.
+    const execTarget = process.env.APPIMAGE || process.execPath;
+    const desktopBody =
+      `[Desktop Entry]
+Type=Application
+Name=Cove Screen Recorder
+Comment=Pick a region, hit record, save. Hardware-accelerated MP4 + one-click GIF.
+Exec=${execTarget} %U
+Icon=${wmClass}
+Terminal=false
+Categories=AudioVideo;Recorder;
+StartupWMClass=${wmClass}
+`;
+
+    let existing: string | null = null;
+    try { existing = fs.readFileSync(desktopPath, "utf8"); } catch { /* missing */ }
+    if (existing !== desktopBody) fs.writeFileSync(desktopPath, desktopBody);
+  } catch (err) {
+    console.warn("desktop file install skipped:", err);
+  }
+}
+
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
+  installLinuxDesktopFile();
+  registerIpc();
+  installDisplayMediaHandler();
+  // Detect GPU vendor so the encoder picker can skip e.g. h264_nvenc on AMD
+  // boxes (where it's compiled into ffmpeg but fails because nvcuda.dll
+  // isn't loadable). Fire-and-forget — pickHardwareVideoEncoder treats an
+  // unset vendor as "try everything in order".
+  app.getGPUInfo("basic").then((info) => {
+    const blob = JSON.stringify(info).toLowerCase();
+    let vendor: "nvidia" | "amd" | "intel" | "unknown" = "unknown";
+    if (/nvidia|geforce|quadro|tesla/.test(blob)) vendor = "nvidia";
+    else if (/\bamd\b|radeon|advanced micro devices/.test(blob)) vendor = "amd";
+    else if (/\bintel\b/.test(blob)) vendor = "intel";
+    setDetectedGpuVendor(vendor);
+  }).catch(() => {
+    // best-effort; the picker falls back to "try all encoders" on unknown
+  });
+  // Pipe recorder diagnostics (audio sidecar status, etc.) into the renderer
+  // log panel via the existing progress channel.
+  setRecorderLogger((line) => {
+    sendProgress({ stage: "muxing", message: line });
+  });
+  // Force light theme out — we ship dark only.
+  if (!app.isPackaged) {
+    // Avoid a console warning when Vite reloads.
+    app.commandLine.appendSwitch("disable-features", "OverlayScrollbar");
+  }
+  createWindow();
+
+  // Default-pick output dir if nothing is set yet — done lazily in IPC handler.
+  // Pre-warm: nothing.
+  // App icon for taskbar.
+  try {
+    const icon = nativeImage.createFromPath(path.join(app.getAppPath(), "cove_icon.png"));
+    if (!icon.isEmpty() && process.platform === "linux") app.dock?.setIcon?.(icon);
+  } catch {
+    // ignore
+  }
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      console.warn("auto-update check failed:", err);
+    });
+  }
+});
+
+app.on("window-all-closed", () => {
+  cancelAll();
+  globalShortcut.unregisterAll();
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  cancelAll();
+  globalShortcut.unregisterAll();
+});

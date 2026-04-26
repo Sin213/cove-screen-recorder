@@ -1,0 +1,47 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./src/**/*.{ts,tsx,html}"],
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        bg: "rgb(var(--bg) / <alpha-value>)",
+        "bg-2": "rgb(var(--bg-2) / <alpha-value>)",
+        surface: "rgb(var(--panel) / <alpha-value>)",
+        "surface-2": "rgb(var(--panel-2) / <alpha-value>)",
+        "surface-3": "rgb(var(--panel-hi) / <alpha-value>)",
+        panel: "rgb(var(--panel) / <alpha-value>)",
+        "panel-2": "rgb(var(--panel-2) / <alpha-value>)",
+        "panel-hi": "rgb(var(--panel-hi) / <alpha-value>)",
+        border: "rgb(var(--border) / <alpha-value>)",
+        "border-strong": "rgb(var(--border-hi) / <alpha-value>)",
+        "border-hi": "rgb(var(--border-hi) / <alpha-value>)",
+        text: "rgb(var(--text) / <alpha-value>)",
+        "text-dim": "rgb(var(--text-2) / <alpha-value>)",
+        "text-faint": "rgb(var(--text-3) / <alpha-value>)",
+        "text-2": "rgb(var(--text-2) / <alpha-value>)",
+        "text-3": "rgb(var(--text-3) / <alpha-value>)",
+        accent: "rgb(var(--accent) / <alpha-value>)",
+        "accent-2": "rgb(var(--accent-2) / <alpha-value>)",
+        "accent-ink": "rgb(var(--accent-ink) / <alpha-value>)",
+        "accent-soft": "rgb(var(--accent) / 0.10)",
+        "accent-ring": "rgb(var(--accent) / 0.22)",
+        good: "rgb(var(--ok) / <alpha-value>)",
+        ok: "rgb(var(--ok) / <alpha-value>)",
+        warn: "rgb(var(--warn) / <alpha-value>)",
+        danger: "rgb(var(--danger) / <alpha-value>)",
+      },
+      fontFamily: {
+        sans: ['"Inter"', "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+      },
+      borderRadius: {
+        DEFAULT: "8px",
+        lg: "10px",
+        xl: "12px",
+        "2xl": "14px",
+      },
+    },
+  },
+  plugins: [],
+};
