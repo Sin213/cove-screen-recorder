@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+vendor/
+*.log
+.DS_Store
+.vite/
+
+# Codex helper marker, debug screenshots that aren't shipped artifacts
+.codex
+screenshots/

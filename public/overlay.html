@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cove · Select region</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+      html, body { width: 100%; height: 100%; overflow: hidden; cursor: crosshair; background: rgba(0, 0, 0, 0.001); }
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+        color: #fff;
+      }
+
+      /* Dimmed backdrop with a "hole" cut out for the selection. */
+      .backdrop {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background: rgba(8, 10, 14, 0.45);
+        transition: background 80ms ease;
+      }
+      .backdrop.dragging { background: rgba(8, 10, 14, 0.55); }
+
+      .selection {
+        position: fixed;
+        border: 1.5px solid #50e6cf;
+        background: transparent;
+        box-shadow:
+          0 0 0 1px rgba(80, 230, 207, 0.35),
+          0 0 0 9999px rgba(8, 10, 14, 0.55);
+        pointer-events: none;
+        display: none;
+      }
+
+      /* Marching ants */
+      .selection::before {
+        content: "";
+        position: absolute;
+        inset: -1.5px;
+        border: 1.5px dashed rgba(255, 255, 255, 0.85);
+        animation: ants 0.6s linear infinite;
+        pointer-events: none;
+      }
+      @keyframes ants {
+        from { border-color: rgba(255, 255, 255, 0.85); }
+        50%  { border-color: rgba(80, 230, 207, 0.85); }
+        to   { border-color: rgba(255, 255, 255, 0.85); }
+      }
+
+      .size-tag {
+        position: absolute;
+        top: -28px;
+        left: 0;
+        padding: 3px 8px;
+        background: rgba(11, 11, 16, 0.92);
+        border: 1px solid rgba(80, 230, 207, 0.6);
+        border-radius: 6px;
+        font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+        font-size: 11px;
+        font-weight: 600;
+        color: #50e6cf;
+        white-space: nowrap;
+      }
+
+      .help {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 18px;
+        background: rgba(11, 11, 16, 0.92);
+        border: 1px solid rgba(80, 230, 207, 0.4);
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 500;
+        color: #ececf1;
+        backdrop-filter: blur(6px);
+        pointer-events: none;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+      .help b { color: #50e6cf; font-weight: 600; }
+      .help.fade { opacity: 0; transition: opacity 240ms ease; }
+    </style>
+  </head>
+  <body>
+    <div class="backdrop" id="backdrop"></div>
+    <div class="selection" id="selection">
+      <div class="size-tag" id="sizeTag">0 × 0</div>
+    </div>
+    <div class="help" id="help">
+      <b>Drag</b> to select a region · <b>Esc</b> to cancel
+    </div>
+
+    <script>
+      (function () {
+        const backdrop = document.getElementById("backdrop");
+        const selection = document.getElementById("selection");
+        const sizeTag = document.getElementById("sizeTag");
+        const help = document.getElementById("help");
+        const dpr = window.devicePixelRatio || 1;
+
+        let dragging = false;
+        let startX = 0;
+        let startY = 0;
+        let curX = 0;
+        let curY = 0;
+        let committed = false;
+
+        function update() {
+          const x = Math.min(startX, curX);
+          const y = Math.min(startY, curY);
+          const w = Math.abs(curX - startX);
+          const h = Math.abs(curY - startY);
+          selection.style.display = "block";
+          selection.style.left = x + "px";
+          selection.style.top = y + "px";
+          selection.style.width = w + "px";
+          selection.style.height = h + "px";
+          sizeTag.textContent = `${Math.round(w)} × ${Math.round(h)}`;
+          // Position size tag inside the rectangle if it would clip off-screen
+          if (y < 32) {
+            sizeTag.style.top = "4px";
+            sizeTag.style.color = "#0b0b10";
+            sizeTag.style.background = "rgba(80, 230, 207, 0.92)";
+          } else {
+            sizeTag.style.top = "-28px";
+            sizeTag.style.color = "#50e6cf";
+            sizeTag.style.background = "rgba(11, 11, 16, 0.92)";
+          }
+        }
+
+        window.addEventListener("mousedown", function (e) {
+          if (committed || e.button !== 0) return;
+          dragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          curX = e.clientX;
+          curY = e.clientY;
+          backdrop.classList.add("dragging");
+          help.classList.add("fade");
+          update();
+        });
+
+        window.addEventListener("mousemove", function (e) {
+          if (!dragging) return;
+          curX = e.clientX;
+          curY = e.clientY;
+          update();
+        });
+
+        window.addEventListener("mouseup", function (e) {
+          if (!dragging || committed) return;
+          dragging = false;
+          curX = e.clientX;
+          curY = e.clientY;
+          const x = Math.min(startX, curX);
+          const y = Math.min(startY, curY);
+          const w = Math.abs(curX - startX);
+          const h = Math.abs(curY - startY);
+          if (w < 12 || h < 12) {
+            // treat as cancel-ish — ignore tiny selections
+            selection.style.display = "none";
+            backdrop.classList.remove("dragging");
+            help.classList.remove("fade");
+            return;
+          }
+          committed = true;
+          // Round to even pixels to keep encoders happy.
+          const rect = {
+            x: Math.round(x),
+            y: Math.round(y),
+            width: Math.max(2, Math.round(w / 2) * 2),
+            height: Math.max(2, Math.round(h / 2) * 2),
+            dpr,
+          };
+          window.cove.commitSelection(rect);
+        });
+
+        window.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            window.cove.cancelSelection();
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,122 @@
+{
+  "name": "cove-screen-recorder",
+  "version": "1.0.0",
+  "description": "Desktop screen recorder with hardware-accelerated encoding, live preview, and a dark UI. Linux + Windows builds from a single repo.",
+  "homepage": "https://github.com/Sin213/cove-screen-recorder",
+  "main": "dist-electron/main.js",
+  "author": {
+    "name": "Cove",
+    "email": "79215527+Sin213@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k -s first -n VITE,ELECTRON \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "tsc -p tsconfig.electron.json && wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run build:renderer && npm run build:electron",
+    "dist": "npm run build && electron-builder && npm run dist:sha",
+    "dist:linux": "npm run build && electron-builder --linux AppImage && npm run dist:sha",
+    "dist:linux:full": "npm run build && electron-builder --linux && npm run dist:sha",
+    "dist:win": "npm run build && electron-builder --win && npm run dist:sha",
+    "dist:win:portable": "npm run build && electron-builder --win portable && npm run dist:sha",
+    "dist:sha": "bash scripts/sha256.sh",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^32.1.2",
+    "electron-builder": "^25.0.5",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.cove.screenrecorder",
+    "productName": "Cove Screen Recorder",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist/**/*",
+      "cove_icon.png",
+      "cove_icon.ico",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "cove_icon.png",
+      "category": "AudioVideo",
+      "maintainer": "Cove <79215527+Sin213@users.noreply.github.com>",
+      "artifactName": "Cove-Screen-Recorder-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": [
+        "ffmpeg",
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0"
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "cove_icon.ico",
+      "extraResources": [
+        {
+          "from": "vendor/win/ffmpeg.exe",
+          "to": "ffmpeg.exe"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cove Screen Recorder",
+      "artifactName": "Cove-Screen-Recorder-${version}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Cove-Screen-Recorder-${version}-Portable.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Sin213",
+      "repo": "cove-screen-recorder",
+      "releaseType": "release"
+    }
+  }
+}
