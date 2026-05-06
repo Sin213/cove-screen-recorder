@@ -1,6 +1,6 @@
 {
   "name": "cove-screen-recorder",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop screen recorder with hardware-accelerated encoding, live preview, and a dark UI. Linux + Windows builds from a single repo.",
   "homepage": "https://github.com/Sin213/cove-screen-recorder",
   "main": "dist-electron/main.js",

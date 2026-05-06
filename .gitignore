@@ -10,3 +10,12 @@ vendor/
 # Codex helper marker, debug screenshots that aren't shipped artifacts
 .codex
 screenshots/
+
+# Local AI/audit scratch files
+.audit/
+codex-reviews/
+
+# Personal agent / workflow config
+CLAUDE.md
+WORKFLOW.md
+RELEASES.md

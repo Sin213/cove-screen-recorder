@@ -1,5 +1,11 @@
-import type { CaptureSource, CropRect, PresetId } from "./types";
-import { GIF_MAX_DURATION_MS, PRESETS } from "./presets";
+import type { CaptureSource, CropRect, CustomQuality, PresetId } from "./types";
+import {
+  GIF_MAX_DURATION_MS,
+  PRESETS,
+  REPLAY_QUALITY_PRESETS,
+  effectivePreset,
+  type ReplayQualityPreset,
+} from "./presets";
 
 // On Linux, source-audio from getDisplayMedia/getUserMedia is unreliable
 // (Wayland: mono mid-portal trick; X11: may double-up with the PulseAudio
@@ -49,10 +55,18 @@ export interface CaptureSession {
 export interface StartCaptureOptions {
   source: CaptureSource;
   preset: PresetId;
+  // Live values used when preset === "custom". Pass-through so we don't
+  // have to reach into the store from this layer.
+  customQuality?: CustomQuality;
   outputDir: string;
   withMic: boolean;
   withSystemAudio: boolean;
   cropRect?: CropRect | null;
+  // Recording encoder target. When set (and not in crop / custom / gif
+  // mode), the source stream is canvas-downscaled before MediaRecorder
+  // sees it — same fix applied to the replay buffer. Drives the source
+  // frameRate constraint, output mime/bitrate, and target dimensions.
+  captureQuality?: ReplayQualityPreset;
   onChunk?: () => void;
   onAutoStop?: () => void;
   onError?: (message: string) => void;
@@ -65,6 +79,9 @@ export interface StartDisplayMediaOptions {
   // Used to label the recording when the picked source has no readable name.
   fallbackName?: string;
   preset: PresetId;
+  customQuality?: CustomQuality;
+  // See StartCaptureOptions.captureQuality.
+  captureQuality?: ReplayQualityPreset;
   outputDir: string;
   withMic: boolean;
   withSystemAudio: boolean;
@@ -81,7 +98,11 @@ export interface StartDisplayMediaOptions {
 }
 
 export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSession> {
-  const preset = PRESETS[opts.preset];
+  const preset = opts.customQuality ? effectivePreset(opts.preset, opts.customQuality) : PRESETS[opts.preset];
+  // captureQuality.fps overrides the preset fps when present — no point
+  // asking the OS for 60 fps when we'll cap at 30 (Performance), and the
+  // mismatch was part of why MediaRecorder used to choke on 4K@60.
+  const sourceFps = opts.captureQuality?.fps ?? preset.fps;
 
   // Modern path: route through setDisplayMediaRequestHandler so Chromium
   // accepts `audio: "loopback"` for system audio on Windows. The legacy
@@ -103,7 +124,7 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
     // mono. On Linux this branch isn't hit when sysaudio is on (sidecar
     // handles it), so this can't regress the Linux flow.
     sourceStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: preset.fps, max: preset.fps } },
+      video: { frameRate: { ideal: sourceFps, max: sourceFps } },
       audio: opts.withSystemAudio
         ? {
             channelCount: { ideal: 2 },
@@ -132,7 +153,7 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
         mandatory: {
           chromeMediaSource: "desktop",
           chromeMediaSourceId: opts.source.id,
-          maxFrameRate: preset.fps,
+          maxFrameRate: sourceFps,
           minFrameRate: 5,
         },
       },
@@ -168,6 +189,8 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
     sourceId: opts.source.id,
     sourceName: opts.source.name,
     preset: opts.preset,
+    customQuality: opts.customQuality,
+    captureQuality: opts.captureQuality,
     outputDir: opts.outputDir,
     withMic: opts.withMic,
     withSystemAudio: opts.withSystemAudio,
@@ -186,12 +209,13 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
 export async function startCaptureViaDisplayMedia(
   opts: StartDisplayMediaOptions,
 ): Promise<CaptureSession> {
-  const preset = PRESETS[opts.preset];
+  const preset = opts.customQuality ? effectivePreset(opts.preset, opts.customQuality) : PRESETS[opts.preset];
+  const sourceFps = opts.captureQuality?.fps ?? preset.fps;
 
   await window.cove.setNextDisplayMedia(opts.kind);
 
   const sourceStream = await navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: { ideal: preset.fps, max: preset.fps } },
+    video: { frameRate: { ideal: sourceFps, max: sourceFps } },
     // System audio is best-effort on Wayland — depends on portal + PipeWire.
     audio: opts.withSystemAudio,
   });
@@ -228,6 +252,8 @@ export async function startCaptureViaDisplayMedia(
     sourceId,
     sourceName,
     preset: opts.preset,
+    customQuality: opts.customQuality,
+    captureQuality: opts.captureQuality,
     outputDir: opts.outputDir,
     withMic: opts.withMic,
     withSystemAudio: opts.withSystemAudio,
@@ -246,6 +272,8 @@ interface WrapOptions {
   sourceId: string;
   sourceName: string;
   preset: PresetId;
+  customQuality?: CustomQuality;
+  captureQuality?: ReplayQualityPreset;
   outputDir: string;
   withMic: boolean;
   withSystemAudio: boolean;
@@ -262,7 +290,7 @@ interface WrapOptions {
 }
 
 async function wrapStreamIntoSession(opts: WrapOptions): Promise<CaptureSession> {
-  const preset = PRESETS[opts.preset];
+  const preset = opts.customQuality ? effectivePreset(opts.preset, opts.customQuality) : PRESETS[opts.preset];
   const { sourceStream } = opts;
 
   let micStream: MediaStream | null = null;
@@ -274,14 +302,42 @@ async function wrapStreamIntoSession(opts: WrapOptions): Promise<CaptureSession>
     }
   }
 
-  // If we have a crop rect, run the screen frames through a canvas first and
-  // record the canvas's captureStream — that way we encode only the cropped
-  // region, not the whole screen.
+  // Pipeline selection: crop wins (user explicitly chose a region), else
+  // captureQuality builds a downscale canvas (same fix that unblocked
+  // replay), else passthrough. Crop / gif / custom intentionally skip the
+  // downscale because their dimensions are user-driven; captureQuality is
+  // suppressed for those cases by App.tsx so we don't need to re-check it
+  // here, but the cropPipeline branch wins anyway.
   const cropPipeline = opts.cropRect ? buildCropPipeline(sourceStream, opts.cropRect, preset.fps) : null;
+  const sourceVideoTrack = sourceStream.getVideoTracks()[0] ?? null;
+  const downscalePipeline = !cropPipeline && opts.captureQuality && sourceVideoTrack
+    ? buildDownscalePipeline(sourceStream, sourceVideoTrack, opts.captureQuality)
+    : null;
+  const activePipeline = cropPipeline ?? downscalePipeline;
+
+  // Source diagnostics — pair with the encoder-target log so the user can
+  // see at a glance that e.g. a 4K@60 source is being recorded as 1080p60.
+  if (downscalePipeline && sourceVideoTrack) {
+    const ts = sourceVideoTrack.getSettings() as MediaTrackSettings & {
+      displaySurface?: string;
+      logicalSurface?: boolean;
+      cursor?: string;
+    };
+    const trackFps = typeof ts.frameRate === "number" ? Math.round(ts.frameRate * 10) / 10 : null;
+    const summary = [
+      `${ts.width ?? "?"}×${ts.height ?? "?"}`,
+      `${trackFps ?? "?"}fps`,
+      ts.displaySurface ? `surface=${ts.displaySurface}` : null,
+      typeof ts.logicalSurface === "boolean" ? `logical=${ts.logicalSurface}` : null,
+      ts.cursor ? `cursor=${ts.cursor}` : null,
+    ].filter(Boolean).join(" · ");
+    const trackLabel = sourceVideoTrack.label || "(no label)";
+    opts.onLog?.("info", `Recording capture source — ${summary} · "${trackLabel}"`);
+  }
 
   const composedStream = new MediaStream();
-  if (cropPipeline) {
-    for (const t of cropPipeline.stream.getVideoTracks()) composedStream.addTrack(t);
+  if (activePipeline) {
+    for (const t of activePipeline.stream.getVideoTracks()) composedStream.addTrack(t);
   } else {
     for (const t of sourceStream.getVideoTracks()) composedStream.addTrack(t);
   }
@@ -290,16 +346,33 @@ async function wrapStreamIntoSession(opts: WrapOptions): Promise<CaptureSession>
   }
   if (micStream) for (const t of micStream.getAudioTracks()) composedStream.addTrack(t);
 
-  const mimeType = pickSupportedMime(preset.mimeType);
+  // Codec + bitrate: when captureQuality is driving the pipeline, use the
+  // performance-first mime list (VP8 → H.264 → VP9 → webm) and the
+  // preset's bitrate budget. The preset.mimeType "vp9" path is kept for
+  // crop / gif / custom flows, where the source is already user-sized
+  // and VP9 quality can be afforded.
+  const hasAudio = composedStream.getAudioTracks().length > 0;
+  const mimeType = downscalePipeline ? pickFastMime(hasAudio) : pickSupportedMime(preset.mimeType);
   if (!mimeType) {
+    activePipeline?.stop();
     sourceStream.getTracks().forEach((t) => t.stop());
     micStream?.getTracks().forEach((t) => t.stop());
     throw new Error("No supported MediaRecorder MIME type for this preset");
   }
 
+  if (downscalePipeline) {
+    const codecMatch = /codecs=([^;,)]+)/i.exec(mimeType);
+    opts.onLog?.(
+      "info",
+      `Recording encoder target — ${downscalePipeline.output.width}×${downscalePipeline.output.height} · `
+      + `${downscalePipeline.output.fps}fps · codec=${codecMatch?.[1] ?? mimeType} · `
+      + `preset=${opts.captureQuality?.label ?? "?"}`,
+    );
+  }
+
   const recorder = new MediaRecorder(composedStream, {
     mimeType,
-    videoBitsPerSecond: preset.videoBitsPerSecond,
+    videoBitsPerSecond: opts.captureQuality?.videoBitsPerSecond ?? preset.videoBitsPerSecond,
     audioBitsPerSecond: preset.audioBitsPerSecond || undefined,
   });
 
@@ -341,8 +414,11 @@ async function wrapStreamIntoSession(opts: WrapOptions): Promise<CaptureSession>
     opts.onError?.(message);
   };
 
-  // Browser surface ended (user clicked the OS "stop sharing" button) → auto-stop.
-  for (const t of composedStream.getVideoTracks()) {
+  // Browser surface ended (user clicked the OS "stop sharing" button) →
+  // auto-stop. Listen on the *source* tracks: when a downscale pipeline
+  // is active, composedStream contains canvas tracks that keep firing
+  // even after the source dies, so they would never raise 'ended'.
+  for (const t of sourceStream.getVideoTracks()) {
     t.addEventListener("ended", () => opts.onAutoStop?.());
   }
 
@@ -362,7 +438,7 @@ async function wrapStreamIntoSession(opts: WrapOptions): Promise<CaptureSession>
         // Drain any chunk writes still in flight before letting finalize
         // close the temp file.
         await Promise.allSettled([...pendingChunks]);
-        cropPipeline?.stop();
+        activePipeline?.stop();
         for (const t of composedStream.getTracks()) t.stop();
         sourceStream.getTracks().forEach((t) => t.stop());
         micStream?.getTracks().forEach((t) => t.stop());
@@ -382,7 +458,7 @@ async function wrapStreamIntoSession(opts: WrapOptions): Promise<CaptureSession>
     } catch {
       // ignore
     }
-    cropPipeline?.stop();
+    activePipeline?.stop();
     for (const t of composedStream.getTracks()) t.stop();
     sourceStream.getTracks().forEach((t) => t.stop());
     micStream?.getTracks().forEach((t) => t.stop());
@@ -490,9 +566,509 @@ function pickSupportedMime(preferred: string): string | null {
   return null;
 }
 
+// Codec preference is performance-first: VP8 is real-time at 1080p30 on any
+// CPU we ship to, H.264 hits hardware encoders in some Chromium builds, and
+// VP9 stays in the list only as a last-resort floor. Used for both replay
+// buffer and quality-preset normal recording.
+function pickFastMime(hasAudio: boolean): string | null {
+  const audioSuffix = hasAudio ? ",opus" : "";
+  const candidates = [
+    `video/webm;codecs=vp8${audioSuffix}`,
+    `video/webm;codecs=h264${audioSuffix}`,
+    `video/webm;codecs=vp9${audioSuffix}`,
+    "video/webm",
+  ];
+  for (const m of candidates) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return null;
+}
+
+interface DownscalePipeline {
+  stream: MediaStream;
+  output: { width: number; height: number; fps: number };
+  stop: () => void;
+}
+
+// Render the source displayMedia stream into a hidden canvas at the
+// quality preset's max dimensions / fps cap, then expose
+// canvas.captureStream() as the video source for MediaRecorder. Same
+// canvas pattern as the crop path; target dimensions come from the
+// preset rather than a user-drawn region. Aspect ratio is preserved;
+// sources at or below the preset max are kept at native dimensions
+// (we never upscale).
+function buildDownscalePipeline(
+  sourceStream: MediaStream,
+  videoTrack: MediaStreamTrack,
+  qualityPreset: ReplayQualityPreset,
+): DownscalePipeline | null {
+  const settings = videoTrack.getSettings();
+  const srcW = settings.width ?? 0;
+  const srcH = settings.height ?? 0;
+  const srcFps = typeof settings.frameRate === "number" && settings.frameRate > 0
+    ? settings.frameRate
+    : qualityPreset.fps;
+  if (srcW < 2 || srcH < 2) return null;
+
+  const scale = srcW > qualityPreset.maxWidth || srcH > qualityPreset.maxHeight
+    ? Math.min(qualityPreset.maxWidth / srcW, qualityPreset.maxHeight / srcH)
+    : 1;
+  // Even-pixel dimensions — H.264/VP9 chroma subsampling requires it and
+  // VP8 silently right-pads otherwise (causing a 1-px green column).
+  const outW = Math.max(2, Math.round((srcW * scale) / 2) * 2);
+  const outH = Math.max(2, Math.round((srcH * scale) / 2) * 2);
+  const outFps = Math.min(qualityPreset.fps, Math.max(1, Math.round(srcFps)));
+
+  const video = document.createElement("video");
+  video.srcObject = sourceStream;
+  video.muted = true;
+  video.playsInline = true;
+  video.autoplay = true;
+  void video.play().catch(() => { /* ignore — first-frame gating already succeeded */ });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+  if (!ctx) return null;
+
+  let stopped = false;
+  const frameInterval = 1000 / outFps;
+  let lastDraw = 0;
+
+  const draw = (now: number) => {
+    if (stopped) return;
+    if (now - lastDraw >= frameInterval - 1) {
+      lastDraw = now;
+      try {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (vw > 0 && vh > 0) {
+          ctx.drawImage(video, 0, 0, vw, vh, 0, 0, outW, outH);
+        }
+      } catch {
+        // drawImage can throw briefly while video metadata loads — ignore.
+      }
+    }
+    requestAnimationFrame(draw);
+  };
+  requestAnimationFrame(draw);
+
+  const stream = canvas.captureStream(outFps);
+
+  return {
+    stream,
+    output: { width: outW, height: outH, fps: outFps },
+    stop: () => {
+      stopped = true;
+      try { video.pause(); } catch { /* ignore */ }
+      video.srcObject = null;
+      stream.getTracks().forEach((t) => t.stop());
+    },
+  };
+}
+
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/* ============================================================ Replay buffer */
+
+export interface ReplayBufferOptions {
+  source: CaptureSource | null;  // null → constrained display-media flow
+  sourceKind: "screen" | "window";
+  preset: PresetId;
+  customQuality?: CustomQuality;
+  outputDir: string;
+  withMic: boolean;
+  withSystemAudio: boolean;
+  lengthSeconds: number;
+  // Quality preset for the replay capture pipeline (dimensions, fps cap,
+  // bitrate). When omitted, defaults to the conservative `performance`
+  // preset — but App.tsx always passes the user-selected one from the
+  // store so this default rarely applies.
+  replayQuality?: ReplayQualityPreset;
+  onState: (state: { active: boolean; bufferedSeconds: number; chunks: number; error?: string }) => void;
+  onError: (msg: string) => void;
+  // Optional plumbing for buffer-side diagnostics — capture track settings
+  // at start, save lifecycle notes — so they show up in the in-app log
+  // panel and not just devtools.
+  onLog?: (level: "info" | "warn" | "error" | "good", text: string) => void;
+}
+
+export interface ReplayBufferHandle {
+  stop: () => Promise<void>;
+  save: () => Promise<{ outputPath?: string; error?: string }>;
+  state: () => { active: boolean; bufferedSeconds: number; chunks: number };
+}
+
+/**
+ * Continuous capture session for instant replay. Save keeps the MediaRecorder
+ * output as one complete stream and asks ffmpeg to trim the tail; it must not
+ * splice arbitrary rolling timeslice blobs into a synthetic WebM.
+ */
+export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<ReplayBufferHandle> {
+  const preset = opts.customQuality ? effectivePreset(opts.preset, opts.customQuality) : PRESETS[opts.preset];
+  if (preset.format === "gif") throw new Error("Replay buffer doesn't support the GIF preset.");
+  const qualityPreset = opts.replayQuality ?? REPLAY_QUALITY_PRESETS.performance;
+  const targetLostMessage = "Selected window was closed. Replay buffer stopped.";
+
+  // Acquire source — same dance as normal capture, just without finalize.
+  let sourceStream: MediaStream;
+  if (opts.source) {
+    await window.cove.setPickedDisplayMediaSource(opts.source.id);
+    await window.cove.setNextDisplayMedia(opts.source.kind === "window" ? "window" : "screen");
+  } else {
+    await window.cove.setNextDisplayMedia(opts.sourceKind);
+  }
+  try {
+    sourceStream = await navigator.mediaDevices.getDisplayMedia({
+      // Constrain source fps to the replay quality target — no point
+      // asking the portal for 60 fps when we'll cap at 30 (Performance),
+      // and asking for 60 only when the preset actually wants it spares
+      // the OS unnecessary frame production.
+      video: { frameRate: { ideal: qualityPreset.fps, max: qualityPreset.fps } },
+      audio: opts.withSystemAudio
+        ? { channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 },
+            echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        : false,
+    });
+  } catch (err) {
+    if (opts.source?.kind === "window") {
+      throw new Error(targetLostMessage);
+    }
+    throw err;
+  }
+  // Wait for first frame (Wayland portal session may not be live yet).
+  const videoTrack = sourceStream.getVideoTracks()[0];
+  if (videoTrack) await waitForFirstFrame(sourceStream, videoTrack);
+
+  // Replay-buffer diagnostic: surface what the source actually delivered.
+  // When playback turns out choppy, this is where to look first — a
+  // PipeWire portal handing back 9 fps for a window capture is invisible
+  // from the saved mp4 alone, and the choppiness is otherwise easy to
+  // misread as an encoder problem. Logged once at start so the log isn't
+  // spammed during the buffer's lifetime.
+  if (videoTrack) {
+    const ts = videoTrack.getSettings() as MediaTrackSettings & {
+      displaySurface?: string;
+      logicalSurface?: boolean;
+      cursor?: string;
+    };
+    const trackFps = typeof ts.frameRate === "number" ? Math.round(ts.frameRate * 10) / 10 : null;
+    const summary = [
+      `${ts.width ?? "?"}×${ts.height ?? "?"}`,
+      `${trackFps ?? "?"}fps`,
+      ts.displaySurface ? `surface=${ts.displaySurface}` : null,
+      typeof ts.logicalSurface === "boolean" ? `logical=${ts.logicalSurface}` : null,
+      ts.cursor ? `cursor=${ts.cursor}` : null,
+    ].filter(Boolean).join(" · ");
+    const trackLabel = videoTrack.label || "(no label)";
+    opts.onLog?.("info", `Replay capture source — ${summary} · "${trackLabel}"`);
+    // Compared against the chosen quality preset's fps target. The
+    // preset.fps from the recording config doesn't apply — the replay
+    // pipeline caps at qualityPreset.fps independently. Anything below
+    // half of that target is already too low for a smooth save no matter
+    // what we do downstream; the main-process probe is the authoritative
+    // cadence check at save time.
+    if (trackFps !== null && trackFps > 0 && trackFps < qualityPreset.fps * 0.5) {
+      opts.onLog?.(
+        "warn",
+        `Replay source is reporting only ${trackFps} fps — below the ${qualityPreset.fps} fps target `
+        + `for the ${qualityPreset.label} preset. Capture will look choppy regardless of downscale.`,
+      );
+    }
+  }
+
+  // Optional mic.
+  let micStream: MediaStream | null = null;
+  if (opts.withMic) {
+    try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
+    catch { /* ignore — replay carries on without mic */ }
+  }
+
+  // Downscale + fps-cap the source before MediaRecorder sees it. Without
+  // this, Chromium's software VP9 encoder gets pinned encoding 4K@60 and
+  // silently drops to ~10 fps. This is the single biggest perf win for
+  // replay capture. The quality preset controls how aggressive the cap
+  // is — Performance keeps the original 1080p30 floor; Native effectively
+  // disables the resolution cap (60 fps cap remains).
+  const downscale = videoTrack
+    ? buildDownscalePipeline(sourceStream, videoTrack, qualityPreset)
+    : null;
+  if (!downscale) {
+    sourceStream.getTracks().forEach((t) => t.stop());
+    micStream?.getTracks().forEach((t) => t.stop());
+    throw new Error("Replay buffer couldn't construct a capture canvas.");
+  }
+
+  const composedStream = new MediaStream();
+  for (const t of downscale.stream.getVideoTracks()) composedStream.addTrack(t);
+  if (!IS_LINUX) for (const t of sourceStream.getAudioTracks()) composedStream.addTrack(t);
+  if (micStream) for (const t of micStream.getAudioTracks()) composedStream.addTrack(t);
+
+  const hasAudio = composedStream.getAudioTracks().length > 0;
+  const mimeType = pickFastMime(hasAudio);
+  if (!mimeType) {
+    downscale.stop();
+    sourceStream.getTracks().forEach((t) => t.stop());
+    micStream?.getTracks().forEach((t) => t.stop());
+    throw new Error("No supported MediaRecorder MIME type for replay buffer.");
+  }
+
+  // Replay-target log: pairs with the "Replay capture source" line above
+  // so the user can see at a glance that a 4K source is being recorded
+  // as 1080p, what codec is in use, what the encoder fps cap is, and
+  // which preset is driving the choice.
+  const codecMatch = /codecs=([^;,)]+)/i.exec(mimeType);
+  opts.onLog?.(
+    "info",
+    `Replay encoder target — ${downscale.output.width}×${downscale.output.height} · `
+    + `${downscale.output.fps}fps · codec=${codecMatch?.[1] ?? mimeType} · preset=${qualityPreset.label}`,
+  );
+
+  const cleanup = () => {
+    downscale.stop();
+    for (const t of composedStream.getTracks()) t.stop();
+    sourceStream.getTracks().forEach((t) => t.stop());
+    micStream?.getTracks().forEach((t) => t.stop());
+  };
+
+  interface ReplayRecording {
+    recordingId: string;
+    recorder: MediaRecorder;
+    pendingChunks: Set<Promise<void>>;
+    startedAt: number;
+    startedAtWallMs: number;
+    stoppedAtWallMs?: number;
+    chunks: number;
+  }
+
+  const beginReplayRecording = async (): Promise<ReplayRecording> => {
+    const { recordingId } = await window.cove.beginRecording({
+      mode: opts.sourceKind,
+      preset: opts.preset,
+      outputDir: opts.outputDir,
+      withMic: opts.withMic,
+      withSystemAudio: opts.withSystemAudio,
+      isReplay: true,
+      sourceId: opts.source?.id ?? "replay",
+      sourceName: opts.source?.name ?? "Replay buffer",
+    });
+    try {
+      const recorder = new MediaRecorder(composedStream, {
+        mimeType,
+        // Replay overrides the recording-preset bitrate — that one is sized
+        // for the *source* resolution (e.g. 16 Mbps for 4K). The replay
+        // bitrate scales with the quality preset's pixels/sec budget so
+        // Performance gets a tight 6 Mbps floor and Native gets enough
+        // headroom for 4K motion without bloating shorter buffers.
+        videoBitsPerSecond: qualityPreset.videoBitsPerSecond,
+        audioBitsPerSecond: preset.audioBitsPerSecond || undefined,
+      });
+      const session: ReplayRecording = {
+        recordingId,
+        recorder,
+        pendingChunks: new Set<Promise<void>>(),
+        startedAt: performance.now(),
+        startedAtWallMs: 0,
+        chunks: 0,
+      };
+
+      recorder.ondataavailable = (ev) => {
+        if (!ev.data || ev.data.size === 0) return;
+        const write = (async () => {
+          try {
+            const buf = await ev.data.arrayBuffer();
+            await window.cove.saveChunk(recordingId, buf);
+            session.chunks += 1;
+            const t = performance.now() - session.startedAt;
+            opts.onState({
+              active: !stopped,
+              bufferedSeconds: Math.min(opts.lengthSeconds, t / 1000),
+              chunks: session.chunks,
+            });
+          } catch (err) {
+            opts.onError(describeError(err));
+          }
+        })();
+        session.pendingChunks.add(write);
+        void write.finally(() => session.pendingChunks.delete(write));
+      };
+
+      recorder.onerror = (ev: Event) => {
+        const msg = (ev as unknown as { error?: { message?: string } }).error?.message ?? "MediaRecorder error";
+        opts.onError(msg);
+      };
+
+      recorder.start(1000);
+      session.startedAtWallMs = Date.now();
+      return session;
+    } catch (err) {
+      await window.cove.cancelRecording(recordingId);
+      throw err;
+    }
+  };
+
+  let stopped = false;
+  let saving = false;
+  let targetLost = false;
+  let activeRecording: ReplayRecording;
+  try {
+    activeRecording = await beginReplayRecording();
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
+
+  const markTargetLost = () => {
+    if (stopped || targetLost) return;
+    targetLost = true;
+    opts.onError(targetLostMessage);
+    void handleStop(targetLostMessage);
+  };
+
+  let frameWatchStop: (() => void) | null = null;
+  // Listen on the *source* video tracks, not composedStream's. The canvas
+  // downscale pipeline keeps drawing the last frame even after the source
+  // dies, so canvas-track 'ended' would never fire on its own. Source
+  // tracks still fire normally (user pressed OS "stop sharing", window
+  // closed, portal session ended).
+  for (const t of sourceStream.getVideoTracks()) {
+    t.addEventListener("ended", () => {
+      if (opts.sourceKind === "window") markTargetLost();
+      else void handleStop();
+    });
+    if (opts.sourceKind === "window") {
+      t.addEventListener("mute", () => {
+        window.setTimeout(() => {
+          if (!stopped && t.muted) markTargetLost();
+        }, 3000);
+      });
+    }
+  }
+
+  if (opts.sourceKind === "window") {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = sourceStream;
+    let lastFrameAt = performance.now();
+    let frameCallback = 0;
+    const videoWithFrames = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+      cancelVideoFrameCallback?: (handle: number) => void;
+    };
+    const onFrame = () => {
+      lastFrameAt = performance.now();
+      if (!stopped && videoWithFrames.requestVideoFrameCallback) {
+        frameCallback = videoWithFrames.requestVideoFrameCallback(onFrame);
+      }
+    };
+    if (videoWithFrames.requestVideoFrameCallback) {
+      frameCallback = videoWithFrames.requestVideoFrameCallback(onFrame);
+    }
+    const interval = window.setInterval(() => {
+      if (!stopped && performance.now() - lastFrameAt > 5000) markTargetLost();
+    }, 1000);
+    void video.play().catch(() => { /* first-frame gating already succeeded */ });
+    frameWatchStop = () => {
+      window.clearInterval(interval);
+      if (frameCallback && videoWithFrames.cancelVideoFrameCallback) {
+        videoWithFrames.cancelVideoFrameCallback(frameCallback);
+      }
+      try { video.pause(); } catch { /* ignore */ }
+      video.srcObject = null;
+    };
+  }
+
+  const handleStop = async (error?: string) => {
+    if (stopped) return;
+    stopped = true;
+    try {
+      if (activeRecording.recorder.state !== "inactive") activeRecording.recorder.stop();
+    } catch { /* ignore */ }
+    await Promise.allSettled([...activeRecording.pendingChunks]);
+    await window.cove.cancelRecording(activeRecording.recordingId);
+    frameWatchStop?.();
+    cleanup();
+    opts.onState({ active: false, bufferedSeconds: 0, chunks: 0, error });
+  };
+
+  const save = async (): Promise<{ outputPath?: string; error?: string }> => {
+    if (saving) return { error: "Replay save already in progress." };
+    if (targetLost) return { error: targetLostMessage };
+    if (stopped) return { error: "Replay buffer is not running." };
+    if (activeRecording.chunks === 0) return { error: "Replay buffer hasn't captured any data yet." };
+    saving = true;
+
+    const sessionToSave = activeRecording;
+
+    try {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          sessionToSave.recorder.removeEventListener("stop", finish);
+          sessionToSave.stoppedAtWallMs = Date.now();
+          resolve();
+        };
+        if (sessionToSave.recorder.state === "inactive") {
+          sessionToSave.stoppedAtWallMs = sessionToSave.stoppedAtWallMs ?? Date.now();
+          resolve();
+        } else {
+          sessionToSave.recorder.addEventListener("stop", finish);
+          sessionToSave.recorder.stop();
+        }
+      });
+      await Promise.allSettled([...sessionToSave.pendingChunks]);
+      if (targetLost) {
+        await window.cove.cancelRecording(sessionToSave.recordingId);
+        return { error: targetLostMessage };
+      }
+
+      const result = await window.cove.finalizeRecording({
+        recordingId: sessionToSave.recordingId,
+        preset: opts.preset,
+        format: preset.format,
+        durationMs: Math.round((sessionToSave.stoppedAtWallMs ?? Date.now()) - sessionToSave.startedAtWallMs),
+        trimLastMs: opts.lengthSeconds * 1000,
+        mediaStartedAtMs: sessionToSave.startedAtWallMs,
+        mediaStoppedAtMs: sessionToSave.stoppedAtWallMs,
+        // Send the *encoder target* fps (e.g. 30) instead of the preset's
+        // 60 — the main-process cadence check needs to compare what we
+        // actually asked MediaRecorder for, not what the preset would have
+        // requested if we hadn't downscaled.
+        fps: downscale.output.fps,
+      });
+      if (!stopped) {
+        try {
+          activeRecording = await beginReplayRecording();
+        } catch (err) {
+          stopped = true;
+          cleanup();
+          opts.onError(`Replay buffer stopped after save: ${describeError(err)}`);
+        }
+      }
+      if (result.ok && result.outputPath) {
+        return { outputPath: result.outputPath };
+      }
+      return { error: result.error ?? "Replay save failed." };
+    } finally {
+      saving = false;
+    }
+  };
+
+  return {
+    stop: handleStop,
+    save,
+    state: () => ({
+      active: !stopped,
+      bufferedSeconds: activeRecording.chunks > 0
+        ? Math.min(opts.lengthSeconds, (performance.now() - activeRecording.startedAt) / 1000)
+        : 0,
+      chunks: activeRecording.chunks,
+    }),
+  };
 }
 
 // Resolve when the source actually starts producing frames. Used to gate

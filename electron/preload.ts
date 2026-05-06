@@ -7,6 +7,8 @@ import type {
   FinalizeParams,
   FinalizeResult,
   RecordingProgress,
+  ReplayStartParams,
+  ReplayState,
   StartRecordingParams,
 } from "./types";
 
@@ -41,8 +43,19 @@ const api: CoveApi = {
     >,
   setPickedDisplayMediaSource: (sourceId) =>
     ipcRenderer.invoke("cove:set-picked-display-media-source", sourceId) as Promise<void>,
+  openFile: (p) => ipcRenderer.invoke("cove:open-file", p) as Promise<void>,
+
+  replayStart: (opts: ReplayStartParams) =>
+    ipcRenderer.invoke("cove:replay-start", opts) as Promise<{ ok: boolean; error?: string }>,
+  replayStop: () => ipcRenderer.invoke("cove:replay-stop") as Promise<void>,
+  replaySave: () => ipcRenderer.invoke("cove:replay-save") as Promise<{ ok: boolean; outputPath?: string; error?: string }>,
+  onReplayState: (cb: (s: ReplayState) => void) => {
+    const listener = (_: unknown, state: ReplayState) => cb(state);
+    ipcRenderer.on("cove:replay-state", listener);
+    return () => ipcRenderer.removeListener("cove:replay-state", listener);
+  },
   onHotkey: (cb) => {
-    const listener = (_: unknown, action: "toggle" | "gif" | "preview") => cb(action);
+    const listener = (_: unknown, action: "toggle" | "gif" | "preview" | "replay") => cb(action);
     ipcRenderer.on("cove:hotkey", listener);
     return () => ipcRenderer.removeListener("cove:hotkey", listener);
   },

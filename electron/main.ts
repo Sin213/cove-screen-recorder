@@ -460,6 +460,14 @@ function installDisplayMediaHandler(): void {
         if (wantedId) {
           picked = sources.find((s) => s.id === wantedId);
           pendingPickedSourceId = null;
+          if (!picked) {
+            sendProgress({
+              stage: "muxing",
+              message: `displayMedia handler: picked source unavailable id=${wantedId}`,
+            });
+            callback({});
+            return;
+          }
         }
         const matchedPick = !!picked;
         if (!picked) {
@@ -510,11 +518,13 @@ function defaultOutputDir(): string {
 interface HotkeyBindings {
   toggle: string;
   gif: string;
+  replay: string;
 }
 
 const DEFAULT_HOTKEYS: HotkeyBindings = {
-  toggle: "Control+Shift+R",
-  gif: "Control+Shift+G",
+  toggle: "F9",
+  gif: "F10",
+  replay: "F8",
 };
 
 let activeHotkeys: HotkeyBindings = { ...DEFAULT_HOTKEYS };
@@ -543,19 +553,38 @@ function normalizeAccelerator(accel: string): string | null {
 function applyHotkeys(): void {
   globalShortcut.unregisterAll();
   if (!hotkeysEnabled) return;
-  const tryRegister = (raw: string, action: "toggle" | "gif" | "preview") => {
+  const tryRegister = (raw: string, action: "toggle" | "gif" | "preview" | "replay") => {
     const accel = normalizeAccelerator(raw);
-    if (!accel) return false;
-    try {
-      return globalShortcut.register(accel, () => {
-        mainWindow?.webContents.send("cove:hotkey", action);
+    if (!accel) {
+      sendProgress({
+        stage: "muxing",
+        message: `hotkey error — invalid accelerator "${raw}" for ${action}`,
       });
-    } catch {
       return false;
     }
+    let ok = false;
+    try {
+      ok = globalShortcut.register(accel, () => {
+        mainWindow?.webContents.send("cove:hotkey", action);
+      });
+    } catch (err) {
+      sendProgress({
+        stage: "muxing",
+        message: `hotkey error — register threw for ${accel}: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return false;
+    }
+    if (!ok) {
+      sendProgress({
+        stage: "muxing",
+        message: `hotkey error — couldn't register ${accel} for ${action}; likely conflicts with another app`,
+      });
+    }
+    return ok;
   };
   tryRegister(activeHotkeys.toggle, "toggle");
   tryRegister(activeHotkeys.gif, "gif");
+  tryRegister(activeHotkeys.replay, "replay");
 }
 
 function setHotkeysEnabled(enabled: boolean): void {
@@ -567,6 +596,7 @@ function setHotkeyBindings(bindings: Partial<HotkeyBindings>): void {
   activeHotkeys = {
     toggle: normalizeAccelerator(bindings.toggle ?? activeHotkeys.toggle) ?? activeHotkeys.toggle,
     gif: normalizeAccelerator(bindings.gif ?? activeHotkeys.gif) ?? activeHotkeys.gif,
+    replay: normalizeAccelerator((bindings as { replay?: string }).replay ?? activeHotkeys.replay) ?? activeHotkeys.replay,
   };
   applyHotkeys();
 }
@@ -651,9 +681,13 @@ function registerIpc(): void {
     if (p && fs.existsSync(p)) shell.showItemInFolder(p);
   });
 
+  ipcMain.handle("cove:open-file", async (_e, p: string) => {
+    if (p && fs.existsSync(p)) await shell.openPath(p);
+  });
+
   ipcMain.handle("cove:begin-recording", async (_e, params: StartRecordingParams) => {
     const outDir = params.outputDir || defaultOutputDir();
-    const { recordingId } = begin({ ...params, outputDir: outDir });
+    const { recordingId } = await begin({ ...params, outputDir: outDir });
     // Recording started — invalidate the source cache so the next "Add window"
     // session sees the current state of the desktop, not a stale snapshot.
     invalidateSourceCache();
@@ -806,11 +840,36 @@ StartupWMClass=${wmClass}
   }
 }
 
+// Sweep stale temp files left in <userData>/recordings/ from a previous
+// crash mid-finalize. finalize()/cancel() unlink on the happy path; this
+// just covers SIGKILL etc. Runs before begin() ever opens a fresh temp,
+// and Chromium's userData lock prevents a concurrent Cove writer, so any
+// file present at this point is an orphan. Best-effort — a failure here
+// must not block startup.
+function sweepStaleRecordings(): void {
+  try {
+    const dir = path.join(app.getPath("userData"), "recordings");
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      try {
+        const st = fs.statSync(full);
+        if (st.isFile()) fs.unlinkSync(full);
+      } catch {
+        // skip — can't stat / unlink, leave it for next pass
+      }
+    }
+  } catch {
+    // best effort
+  }
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   installLinuxDesktopFile();
   registerIpc();
   installDisplayMediaHandler();
+  sweepStaleRecordings();
   // Detect GPU vendor so the encoder picker can skip e.g. h264_nvenc on AMD
   // boxes (where it's compiled into ffmpeg but fails because nvcuda.dll
   // isn't loadable). Fire-and-forget — pickHardwareVideoEncoder treats an

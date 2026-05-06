@@ -1,5 +1,20 @@
 export type CaptureMode = "screen" | "window" | "area";
-export type PresetId = "regular" | "gaming" | "gif";
+export type PresetId = "regular" | "gaming" | "gif" | "custom";
+
+export interface CustomQuality {
+  fps: number;            // 15-120
+  videoBitsPerSecond: number;  // 1_000_000 - 50_000_000
+  scaleHeight: number;    // 360 - 2160 (output height; aspect preserved)
+}
+
+export interface LibraryEntry {
+  path: string;
+  name: string;          // basename
+  bytes: number;
+  modified: number;      // unix ms
+  durationSec: number | null;  // probed via ffmpeg, null if unknown
+  thumbDataUrl: string | null;  // generated lazily, may be null
+}
 export type CaptureFormat = "mp4" | "webm" | "gif";
 export type LogLevel = "info" | "good" | "warn" | "error";
 
@@ -32,6 +47,12 @@ export interface StartRecordingParams {
   withSystemAudio: boolean;
   sourceId: string;
   sourceName: string;
+  // Skip the Linux PulseAudio sidecar for sessions that intentionally do not
+  // want main-process system audio capture.
+  skipAudioSidecar?: boolean;
+  // Instant replay cannot silently degrade when Linux system audio was
+  // requested because the save is expected to include that audio.
+  isReplay?: boolean;
 }
 
 export interface SaveChunkParams {
@@ -44,6 +65,19 @@ export interface FinalizeParams {
   preset: PresetId;
   format: CaptureFormat;
   durationMs: number;
+  // When set, finalize keeps only the last N ms of the captured stream.
+  // Used by replay saves so the input remains one continuous MediaRecorder
+  // WebM and ffmpeg performs the actual tail trim.
+  trimLastMs?: number;
+  // Replay timing metadata, in Date.now() milliseconds, used to align Linux
+  // sidecar audio with the MediaRecorder video timeline.
+  mediaStartedAtMs?: number;
+  mediaStoppedAtMs?: number;
+  // Nominal capture fps from the resolved preset. Plumbed through so the
+  // mp4 remux path can pin CFR output and write consistent r_frame_rate /
+  // avg_frame_rate metadata — without it many players read the WebM's
+  // VFR cluster timestamps and stop after ~1 s of playback.
+  fps: number;
 }
 
 export interface FinalizeResult {
@@ -109,7 +143,7 @@ export interface CoveApi {
   cancelRecording: (recordingId: string) => Promise<void>;
 
   registerHotkeys: (enabled: boolean) => Promise<void>;
-  setHotkeyBindings: (bindings: { toggle?: string; gif?: string }) => Promise<void>;
+  setHotkeyBindings: (bindings: { toggle?: string; gif?: string; replay?: string }) => Promise<void>;
   adjustWindowHeight: (deltaPx: number) => Promise<void>;
 
   // Wayland: control which source kinds the next getDisplayMedia() call asks
@@ -126,11 +160,35 @@ export interface CoveApi {
   // also how we get system audio working — Chromium honors `audio:"loopback"`
   // through this path; the legacy chromeMediaSource constraint doesn't.
   setPickedDisplayMediaSource: (sourceId: string | null) => Promise<void>;
+  openFile: (path: string) => Promise<void>;
 
-  onHotkey: (cb: (action: "toggle" | "gif" | "preview") => void) => () => void;
+  // Instant replay buffer (driven entirely from the renderer in v1.0.1 —
+  // these IPC entries are reserved for moving the buffer into the main
+  // process if memory pressure becomes an issue).
+  replayStart: (opts: ReplayStartParams) => Promise<{ ok: boolean; error?: string }>;
+  replayStop: () => Promise<void>;
+  replaySave: () => Promise<{ ok: boolean; outputPath?: string; error?: string }>;
+  onReplayState: (cb: (state: ReplayState) => void) => () => void;
+
+  onHotkey: (cb: (action: "toggle" | "gif" | "preview" | "replay") => void) => () => void;
   onProgress: (cb: (p: RecordingProgress) => void) => () => void;
 
   windowMinimize: () => void;
   windowToggleMaximize: () => void;
   windowClose: () => void;
+}
+
+export interface ReplayStartParams {
+  outputDir: string;
+  preset: PresetId;
+  withMic: boolean;
+  withSystemAudio: boolean;
+  lengthSeconds: number;
+  source: CaptureSource | null;  // user-picked source or null for portal flow
+}
+
+export interface ReplayState {
+  active: boolean;
+  bufferedSeconds: number;
+  error?: string;
 }

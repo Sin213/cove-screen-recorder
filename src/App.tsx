@@ -6,9 +6,19 @@ import type { AppInfo, CaptureSource, CropRect, PresetId } from "./types";
 import {
   startCapture,
   startCaptureViaDisplayMedia,
+  startReplayBuffer,
   type CaptureSession,
+  type ReplayBufferHandle,
 } from "./recorder-client";
-import { PRESETS, PRESET_LIST } from "./presets";
+import {
+  PRESETS,
+  PRESET_LIST,
+  REPLAY_QUALITY_LIST,
+  REPLAY_QUALITY_PRESETS,
+  effectivePreset,
+  CUSTOM_QUALITY_LIMITS,
+} from "./presets";
+import type { ReplayQuality } from "./types";
 
 type IntentMode = "screen" | "window";
 
@@ -64,13 +74,23 @@ export function App() {
   const appInfo = useStore((s) => s.appInfo);
   const mode = useStore((s) => s.mode);
   const setMode = useStore((s) => s.setMode);
+  const customQuality = useStore((s) => s.customQuality);
+  const setCustomQuality = useStore((s) => s.setCustomQuality);
+  const replay = useStore((s) => s.replay);
+  const setReplay = useStore((s) => s.setReplay);
   const logs = useStore((s) => s.logs);
   const clearLogs = useStore((s) => s.clearLogs);
   const logCollapsed = useStore((s) => s.logCollapsed);
   const setLogCollapsed = useStore((s) => s.setLogCollapsed);
 
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
+  const [pendingReplaySource, setPendingReplaySource] = useState<IntentMode | null>(null);
   const [hotkeysOpen, setHotkeysOpen] = useState(false);
+  const [replayHandle, setReplayHandle] = useState<ReplayBufferHandle | null>(null);
+  const [replayBuffered, setReplayBuffered] = useState(0);
+  const [replaySaving, setReplaySaving] = useState(false);
+  const replayHandleRef = useRef<ReplayBufferHandle | null>(null);
+  useEffect(() => { replayHandleRef.current = replayHandle; }, [replayHandle]);
   const [livePreview, setLivePreview] = useState<MediaStream | null>(null);
   const sessionRef = useRef<CaptureSession | null>(null);
   const stopFlowRef = useRef<((manual: boolean) => Promise<void>) | null>(null);
@@ -118,6 +138,7 @@ export function App() {
           m.startsWith("frame=") ||
           m.startsWith("audio sidecar") ||
           m.startsWith("displayMedia handler") ||
+          m.startsWith("replay") ||
           /error|warning|fail/i.test(m);
         if (interesting && !m.startsWith("size=")) {
           log("info", m.slice(0, 200));
@@ -143,9 +164,17 @@ export function App() {
       setLastError(null);
       try {
         const dir = outputDir ?? "";
+        // captureQuality drives the canvas downscale + fast codec path
+        // for normal recording. Skipped for crop (region already user-
+        // sized), gif (own pipeline), and custom (user-tuned values).
+        const captureQuality = (cropRect || presetId === "gif" || presetId === "custom")
+          ? undefined
+          : REPLAY_QUALITY_PRESETS[replay.quality];
         const session = await startCapture({
           source,
           preset: presetId,
+          customQuality,
+          captureQuality,
           outputDir: dir,
           withMic,
           withSystemAudio,
@@ -168,7 +197,7 @@ export function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [outputDir, withMic, withSystemAudio, setStatus, setRecording, setLastError, log],
+    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, setStatus, setRecording, setLastError, log],
   );
 
   const startWaylandCapture = useCallback(
@@ -178,10 +207,15 @@ export function App() {
       setLastError(null);
       try {
         const dir = outputDir ?? "";
+        const captureQuality = (cropRect || presetId === "gif" || presetId === "custom")
+          ? undefined
+          : REPLAY_QUALITY_PRESETS[replay.quality];
         const session = await startCaptureViaDisplayMedia({
           kind,
           fallbackName: kind === "window" ? "Window" : "Screen",
           preset: presetId,
+          customQuality,
+          captureQuality,
           outputDir: dir,
           withMic,
           withSystemAudio,
@@ -213,7 +247,7 @@ export function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [outputDir, withMic, withSystemAudio, appInfo, setStatus, setRecording, setLastError, log],
+    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, appInfo, setStatus, setRecording, setLastError, log],
   );
 
   const beginScreen = useCallback(
@@ -284,6 +318,7 @@ export function App() {
       catch (err) { log("warn", `Stop error: ${describe(err)}`); }
       const presetId = session.preset;
       const presetMeta = PRESETS[presetId];
+      const resolvedPreset = effectivePreset(presetId, customQuality);
       const durationMs = Math.round(performance.now() - session.startedAt);
       log("info", manual ? "Stop requested — finalizing…" : "Auto-stop — finalizing…");
       const result = await window.cove.finalizeRecording({
@@ -291,6 +326,7 @@ export function App() {
         preset: presetId,
         format: presetMeta.format,
         durationMs,
+        fps: resolvedPreset.fps,
       });
       if (result.ok && result.outputPath) {
         setLastOutput(result.outputPath);
@@ -302,12 +338,97 @@ export function App() {
       setRecording(null);
       setStatus("idle");
     },
-    [log, setLastOutput, setLastError, setRecording, setStatus],
+    [customQuality, log, setLastOutput, setLastError, setRecording, setStatus],
   );
 
   // Keep ref synced so onAutoStop can call the latest stopFlow without
   // re-creating the session.
   useEffect(() => { stopFlowRef.current = stopFlow; }, [stopFlow]);
+
+  const startReplayWithSource = useCallback(async (source: CaptureSource | null, sourceKind: IntentMode) => {
+    if (replayHandle) return;
+    setPendingReplaySource(null);
+    setLastError(null);
+    try {
+      const dir = outputDir ?? "";
+      const handle = await startReplayBuffer({
+        source,
+        sourceKind,
+        preset,
+        customQuality,
+        outputDir: dir,
+        withMic,
+        withSystemAudio,
+        lengthSeconds: replay.lengthSeconds,
+        replayQuality: REPLAY_QUALITY_PRESETS[replay.quality],
+        onState: (s) => {
+          setReplayBuffered(s.bufferedSeconds);
+          if (!s.active) {
+            setReplayHandle(null);
+            if (s.error) setLastError(s.error);
+          }
+        },
+        onError: (msg) => { log("error", `Replay buffer: ${msg}`); setLastError(msg); },
+        onLog: (level, text) => log(level, text),
+      });
+      setReplayHandle(handle);
+      log("good", `Replay buffer started (${Math.round(replay.lengthSeconds / 60)} min window)`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        log("info", "Replay buffer cancelled");
+      } else {
+        log("error", `Couldn't start replay buffer: ${msg}`);
+        setLastError(msg);
+      }
+    }
+  }, [replayHandle, outputDir, preset, customQuality, withMic, withSystemAudio, replay.lengthSeconds, log, setLastError]);
+
+  const startReplay = useCallback(async () => {
+    if (replayHandle) return;
+    const replayKind: IntentMode = mode === "window" ? "window" : "screen";
+    const info = await getCurrentAppInfo();
+    if (replayKind === "window" && !isWaylandSession(info)) {
+      setPendingReplaySource("window");
+      return;
+    }
+    await startReplayWithSource(null, replayKind);
+  }, [replayHandle, mode, getCurrentAppInfo, startReplayWithSource]);
+
+  const stopReplay = useCallback(async () => {
+    const h = replayHandleRef.current;
+    if (!h) return;
+    await h.stop();
+    setReplayHandle(null);
+    setReplayBuffered(0);
+    log("info", "Replay buffer stopped");
+  }, [log]);
+
+  const saveReplay = useCallback(async () => {
+    const h = replayHandleRef.current;
+    if (!h) {
+      log("warn", "Replay buffer isn't running — start it from the footer first.");
+      return;
+    }
+    if (replaySaving) {
+      log("info", "Replay save already in progress.");
+      return;
+    }
+    log("info", "Saving replay…");
+    setReplaySaving(true);
+    try {
+      const result = await h.save();
+      if (result.outputPath) {
+        setLastOutput(result.outputPath);
+        log("good", `Replay saved → ${result.outputPath}`);
+      } else if (result.error) {
+        log("error", `Replay save failed: ${result.error}`);
+        setLastError(result.error);
+      }
+    } finally {
+      setReplaySaving(false);
+    }
+  }, [log, setLastOutput, setLastError, replaySaving]);
 
   // Hotkey + Esc.
   useEffect(() => {
@@ -317,10 +438,12 @@ export function App() {
         else if (status === "idle") beginDefault();
       } else if (action === "gif") {
         if (status === "idle") void beginCrop("gif");
+      } else if (action === "replay") {
+        void saveReplay();
       }
     });
     return off;
-  }, [status, beginDefault, beginCrop, stopFlow]);
+  }, [status, beginDefault, beginCrop, stopFlow, saveReplay]);
 
   useEffect(() => {
     if (status !== "recording") return;
@@ -331,25 +454,27 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [status, stopFlow]);
 
-  const presetMeta = PRESETS[preset];
+  const presetMeta = effectivePreset(preset, customQuality);
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
   const isRecording = status === "recording";
   const recordingState: "ready" | "recording" | "preparing" | "error" = isRecording
     ? "recording"
-    : status === "preparing" || status === "finalizing"
+    : replaySaving || status === "preparing" || status === "finalizing"
       ? "preparing"
       : lastError
         ? "error"
         : "ready";
   const recordingLabel = isRecording
     ? "Recording"
-    : status === "preparing"
-      ? "Preparing"
-      : status === "finalizing"
-        ? "Finalizing"
-        : lastError
-          ? "Error"
-          : "Ready";
+    : replaySaving
+      ? "Saving replay"
+      : status === "preparing"
+        ? "Preparing"
+        : status === "finalizing"
+          ? "Finalizing"
+          : lastError
+            ? "Error"
+            : "Ready";
 
   const bigButtonDisabled = status !== "idle" && !isRecording;
   const triggerDefault = () => {
@@ -424,6 +549,13 @@ export function App() {
                 </button>
               ))}
             </div>
+            {preset === "custom" && (
+              <CustomQualityPanel
+                value={customQuality}
+                onChange={setCustomQuality}
+                disabled={status !== "idle"}
+              />
+            )}
           </div>
 
           {/* Output folder */}
@@ -519,17 +651,108 @@ export function App() {
             </details>
           </div>
 
+          {/* Instant replay */}
+          <div className="section">
+            <div className="section-row">
+              <div className="section-label">Instant replay</div>
+              <span className="preset-summary">
+                buffer <b>{Math.round(replay.lengthSeconds / 60 * 10) / 10}</b> min
+                <span className="sep">·</span>
+                <b>{REPLAY_QUALITY_PRESETS[replay.quality].label}</b>
+                {replayHandle && (
+                  <>
+                    <span className="sep">·</span>
+                    <span style={{ color: "var(--accent-2)" }}>
+                      ● live {Math.floor(replayBuffered)}s
+                    </span>
+                  </>
+                )}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={30}
+              max={5 * 60}
+              step={30}
+              value={replay.lengthSeconds}
+              disabled={!!replayHandle}
+              onChange={(e) => setReplay({ ...replay, lengthSeconds: Number(e.target.value) })}
+              style={{ width: "100%", accentColor: "var(--accent)" }}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+              <label
+                htmlFor="capture-quality"
+                style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}
+                title="Encoder target for both replay and normal recording. Crop, GIF, and Custom presets ignore this."
+              >
+                Capture quality
+              </label>
+              <select
+                id="capture-quality"
+                className="input"
+                disabled={!!replayHandle || status === "recording"}
+                value={replay.quality}
+                onChange={(e) =>
+                  setReplay({ ...replay, quality: e.target.value as ReplayQuality })
+                }
+                style={{ padding: "4px 8px", fontSize: 12, flex: 1 }}
+              >
+                {REPLAY_QUALITY_LIST.map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.label} — {q.hint}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="replay-actions">
+              {!replayHandle ? (
+                <button
+                  className="btn btn-outline btn-sm"
+                  disabled={status !== "idle"}
+                  onClick={() => void startReplay()}
+                >
+                  Start replay buffer
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="btn btn-record btn-sm"
+                    onClick={() => void saveReplay()}
+                    disabled={replaySaving}
+                    aria-busy={replaySaving}
+                  >
+                    {replaySaving
+                      ? "Saving replay…"
+                      : `Save last ${Math.round(replay.lengthSeconds / 60 * 10) / 10} min`}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => void stopReplay()}
+                    disabled={replaySaving}
+                  >
+                    Stop buffer
+                  </button>
+                </>
+              )}
+              <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+                Hotkey: <b style={{ color: "var(--text-dim)" }}>{hotkeyBindings.replay}</b>
+              </span>
+            </div>
+          </div>
+
           {/* Action bar */}
           <div className={`actionbar ${isRecording ? "recording" : ""}`}>
             <div className="ab-info">
               <div className="t">
                 {isRecording
                   ? `Recording · ${formatTime(elapsedSeconds)}`
-                  : status === "preparing"
-                    ? "Preparing capture…"
-                    : status === "finalizing"
-                      ? "Finalizing recording…"
-                      : "Ready to record"}
+                  : replaySaving
+                    ? "Saving replay… (encoding to mp4)"
+                    : status === "preparing"
+                      ? "Preparing capture…"
+                      : status === "finalizing"
+                        ? "Finalizing recording…"
+                        : "Ready to record"}
               </div>
               <div className="s">
                 {modeLabel(mode)} · {presetMeta.name} · {formatPresetCodec(preset)}
@@ -609,7 +832,7 @@ export function App() {
           <button className="btn btn-outline btn-sm" onClick={() => setHotkeysOpen(true)}>
             <Icons.Key /> Customize
           </button>
-          {appInfo && (
+{appInfo && (
             <span className="platform">
               <span className="pdot" /> {formatPlatform(appInfo)}
             </span>
@@ -685,6 +908,15 @@ export function App() {
         />
       )}
 
+      {pendingReplaySource && (
+        <SourceModal
+          mode={pendingReplaySource}
+          onPick={(s) => void startReplayWithSource(s, pendingReplaySource)}
+          onCancel={() => setPendingReplaySource(null)}
+        />
+      )}
+
+
       {hotkeysOpen && (
         <HotkeysDialog
           initial={hotkeyBindings}
@@ -700,6 +932,68 @@ export function App() {
   );
 }
 
+/* ============================================================ CustomQualityPanel */
+
+interface CustomQualityPanelProps {
+  value: { fps: number; videoBitsPerSecond: number; scaleHeight: number };
+  onChange: (next: { fps: number; videoBitsPerSecond: number; scaleHeight: number }) => void;
+  disabled: boolean;
+}
+
+function CustomQualityPanel({ value, onChange, disabled }: CustomQualityPanelProps) {
+  const fpsLimits = CUSTOM_QUALITY_LIMITS.fps;
+  const mbpsLimits = CUSTOM_QUALITY_LIMITS.videoMbps;
+  const heightLimits = CUSTOM_QUALITY_LIMITS.scaleHeight;
+  const mbps = Math.round(value.videoBitsPerSecond / 1_000_000);
+  return (
+    <div className="custom-quality">
+      <div className="cq-row">
+        <label>
+          <span className="cq-lbl">Frame rate <b>{value.fps}</b> fps</span>
+          <input
+            type="range"
+            min={fpsLimits.min}
+            max={fpsLimits.max}
+            step={fpsLimits.step}
+            value={value.fps}
+            disabled={disabled}
+            onChange={(e) => onChange({ ...value, fps: Number(e.target.value) })}
+          />
+        </label>
+        <label>
+          <span className="cq-lbl">Bit rate <b>{mbps}</b> Mbps</span>
+          <input
+            type="range"
+            min={mbpsLimits.min}
+            max={mbpsLimits.max}
+            step={mbpsLimits.step}
+            value={mbps}
+            disabled={disabled}
+            onChange={(e) => onChange({ ...value, videoBitsPerSecond: Number(e.target.value) * 1_000_000 })}
+          />
+        </label>
+      </div>
+      <div className="cq-row">
+        <label>
+          <span className="cq-lbl">Resolution height <b>{value.scaleHeight}</b>p</span>
+          <input
+            type="range"
+            min={heightLimits.min}
+            max={heightLimits.max}
+            step={heightLimits.step}
+            value={value.scaleHeight}
+            disabled={disabled}
+            onChange={(e) => onChange({ ...value, scaleHeight: Number(e.target.value) })}
+          />
+        </label>
+        <span className="cq-hint">
+          Height drives the encode resolution; aspect ratio follows the source.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================ Titlebar */
 
 function Titlebar() {
@@ -708,7 +1002,7 @@ function Titlebar() {
       <div className="mark"><img src="cove_icon.png" alt="" /></div>
       <div className="title">
         <b>Cove Screen Recorder</b>
-        <span className="ver">v1.0.0</span>
+        <span className="ver">v1.0.1</span>
       </div>
       <div className="spacer" />
       <button className="win-btn" onClick={() => window.cove.windowMinimize()} aria-label="Minimize">
