@@ -1002,7 +1002,7 @@ function Titlebar() {
       <div className="mark"><img src="cove_icon.png" alt="" /></div>
       <div className="title">
         <b>Cove Screen Recorder</b>
-        <span className="ver">v1.0.1</span>
+        <span className="ver">v1.1.0</span>
       </div>
       <div className="spacer" />
       <button className="win-btn" onClick={() => window.cove.windowMinimize()} aria-label="Minimize">
