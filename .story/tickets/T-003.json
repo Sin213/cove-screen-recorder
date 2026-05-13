@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-13",
   "createdDate": "2026-05-13",
-  "description": "Evaluate candidate architectures for the v2 replay engine and pick one. Candidates to compare: (1) standalone native binary (Rust or C++) invoked as a child process, (2) Node N-API addon linked into the Electron main process, (3) sidecar helper communicating over IPC/UNIX socket, (4) ffmpeg-driven helper script with PipeWire input. Evaluation axes: capture frame-drop behavior at 1440p60 and 4K60, latency for rolling replay buffer, cross-platform reach (Linux first, Windows later), packaging complexity inside electron-builder, ability to consume PipeWire on Linux and DXGI/WGC on Windows, NVENC/VAAPI/QSV access, maintenance burden. Output: a research note + decision recorded in project-state.md. No implementation.",
+  "description": "Evaluate candidate architectures for the v2 replay engine and pick one. DECIDED 2026-05-13.\n\nPRIMARY: persistent native Rust sidecar helper process. Electron launches it on app start, communicates over length-prefixed JSON-RPC on a UNIX domain socket (Linux/macOS) or named pipe (Windows). The sidecar owns capture (PipeWire on Linux, WGC on Windows later), encoder backends (NVENC / VAAPI / QSV / AMF / libx264 via libavcodec through the ffmpeg-next crate), rolling segment ring buffer, and export/remux. Electron is UI + control plane only.\n\nFALLBACK: ffmpeg-driven helper process with PipeWire input. Same sidecar shape, same IPC contract, but the inner engine is a managed ffmpeg child process. Same encoder coverage, brittle CLI driving, kept as the escape hatch and Linux-first viability check.\n\nREJECTED: on-demand native binary launched per command (cannot hold continuous rolling replay buffer); Node N-API addon (per-Electron-version ABI coupling, per-platform prebuild matrix, crash takes UI down — hostile to solo maintenance).\n\nOUTPUT: decision recorded in .story/notes/N-002.json and .story/project-state.md under 'v2.0.0 replay engine decision'. No source file changes.\n\nDOWNSTREAM: T-004 designs the PipeWire CaptureSource. T-005 designs the EncoderBackend matrix and probe order. T-006 designs the rolling segment ring buffer. T-007 designs the export/remux pipeline. T-008 designs the Electron-engine IPC contract.\n\nHARD CONSTRAINT REAFFIRMED: do not continue patching the v1 MediaRecorder pipeline as the long-term v2 solution.",
   "id": "T-003",
   "order": 20,
   "phase": "p1-research",
-  "status": "open",
+  "status": "complete",
   "title": "Research and choose native replay engine approach",
   "type": "chore"
 }
