@@ -10,8 +10,9 @@ interface Props {
 type SlotId = keyof HotkeyBindings;
 
 const SLOTS: { id: SlotId; label: string; hint: string }[] = [
-  { id: "toggle", label: "Toggle recording", hint: "Starts/stops the highlighted Crop / Screen / Window action" },
+  { id: "toggle", label: "Toggle recording",   hint: "Starts/stops the highlighted Crop / Screen / Window action" },
   { id: "gif",    label: "Crop & capture GIF", hint: "Opens crop selection and uses the GIF preset" },
+  { id: "replay", label: "Save instant replay", hint: "Saves the last N minutes from the replay buffer" },
 ];
 
 export function HotkeysDialog({ initial, onSave, onCancel }: Props) {
