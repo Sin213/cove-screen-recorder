@@ -285,6 +285,28 @@ The full validation contract is locked. Design only — no test files, no CI, no
 
 ---
 
+## v2.0.0 release umbrella split (T-010 → T-010a..e, 2026-05-13)
+
+T-010 was too broad to execute in one pass. It is now an umbrella ticket; execution lives in five children, each scoped to a single owner-on-fail layer per N-008 §3 and a single slice of the §24 release-gate checklist.
+
+| ticket | scope | gates | blocked by |
+|---|---|---|---|
+| T-010a | Scripted-local runner harness — drives the helper over JSON-RPC, executes scripted-local rows, applies N-008 §20 ffprobe/mediainfo recipes, collects evidence per N-008 §7, emits per-row JSON report. First milestone: smoke suite (N-008 §22) on M1. | enables T-010c | — |
+| T-010b | Synthetic asset / load creation per N-008 §5 (L-MOTION-60 with PTS-in-pixel frame counter; L-STATIC; L-CHANGE; L-RESIZE; L-MINIMIZE; L-PORTAL-DENY; L-SOURCE-REMOVE; L-COMP-PAUSE; L-DISK-SLOW via dm-delay; L-DISK-FULL via tmpfs; L-CRASH-CAP; L-CRASH-EXP). Excludes L-AUDIO-SYNC (audio milestone). | enables T-010c | — |
+| T-010c | Smoke + RC execution per N-008 §§22–23 on M1+M2+M3+M4. Resolution × encoder coverage gate (§18). v1.1.0 vs v2.0.0 comparison plot (§21). Diagnostics bundle redaction verified (§7, VAL-DIAG-002). Output: green/red verdict against §24 items 1–7. | enables T-010e | T-010a, T-010b |
+| T-010d | Packaging audit. AppImage + .deb (Linux); Setup.exe + Portable.exe (Windows placeholder). Every shipped artifact has a matching .sha256 sidecar (global rule). Helper extraResources at process.resourcesPath/helper/cove-replay-engine[.exe] with own .sha256 sidecar. VAL-UI-010 / VAL-UI-011 / VAL-UI-014 green on packaged build. Linux .deb Depends honoured: pipewire (>= 0.3.x), xdg-desktop-portal (>= 1.18). RELEASES.md updated with v2.0.0 entry. Output: green/red verdict against §24 items 8–9. | enables T-010e | — |
+| T-010e | Final publish. package.json bump; CHANGELOG / release notes generated from T-010c's matrix output (§24 item 10); Issues #1/#3 resolved; #2/#4 confirmed addressed; tag, push, publish artifacts + sidecars. Hard gate: T-010c green AND T-010d green AND explicit user approval. | — | T-010c, T-010d |
+
+Dependency graph: T-010a ∥ T-010b ∥ T-010d → T-010c → T-010e (T-010c also waits on T-010a and T-010b). T-010 itself does no execution; it closes when all five children close.
+
+Recommended first implementation ticket for a Sonnet session: **T-010a** (runner harness). It is unblocked, its scope is bounded by an existing locked contract (N-007 IPC surface and N-008 §§6, 7, 20, 22), it produces an artefact (per-row JSON report) that two other tickets consume, and it does not require hardware beyond M1.
+
+T-010b can run in parallel with T-010a and is also a reasonable first pick if the implementer prefers content production over RPC plumbing.
+
+T-010d can run in parallel with T-010a/b/c and is the cleanest single-machine ticket if the implementer prefers no ffmpeg/PipeWire work.
+
+---
+
 ## Open issue triage
 
 | Issue | Title | Disposition |
