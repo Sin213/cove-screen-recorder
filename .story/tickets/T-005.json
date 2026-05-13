@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Specify the encoder selection matrix and the fallback policy v2 uses at runtime. Required paths: NVIDIA -> NVENC (h264_nvenc, hevc_nvenc), AMD -> VAAPI on Linux / AMF on Windows, Intel/Arc -> QSV or VAAPI, universal fallback -> libx264. Define: detection order, capability probes (so we never repeat the v1 broken Linux hardware encoder fallback loop), per-vendor rate control defaults, GOP/keyframe policy for rolling replay, container/codec choices for the rolling segment buffer vs the final export. Replay finalization should retain the v1.1.0 lesson: when in doubt on Linux hardware paths, finalize with libx264. Output: matrix table + decision rules doc. No code.",
+  "id": "T-005",
+  "order": 20,
+  "phase": "p2-design",
+  "status": "open",
+  "title": "Design encoder backend matrix and fallback policy",
+  "type": "chore"
+}

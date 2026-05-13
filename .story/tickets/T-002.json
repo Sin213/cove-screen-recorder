@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Optional small maintenance release before committing to v2. Strictly scoped to two items: (a) Issue #2 — make the instant replay keybind configurable and colocate it with the other keybind settings in the UI, (b) Issue #4 — fix the crop/replay timer state weirdness at the UI-state layer only. Explicitly out of scope: any deeper MediaRecorder rework, any capture pipeline change, any encoder change, anything that touches Issues #1 or #3 (those are folded into v2). May be skipped entirely if the team wants to go straight to v2.0.0 work. If shipped, must publish .sha256 sidecars per global rule and update RELEASES.md.",
+  "id": "T-002",
+  "order": 10,
+  "phase": "p0-maintenance",
+  "status": "open",
+  "title": "Optional v1.1.1 maintenance: replay keybind + timer state cleanup",
+  "type": "task"
+}

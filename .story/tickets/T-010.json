@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Final v2.0.0 release gate. Required before tagging: full validation matrix from T-009 passes on Linux/Wayland and Windows, all v1.1.0 regression checks pass, typecheck clean, build clean, electron-builder produces expected artifacts for Linux (AppImage, .deb if enabled) and Windows (Portable.exe, Setup.exe), every shipped artifact has a matching .sha256 sidecar per global rule, RELEASES.md updated with v2.0.0 entry, package.json version bumped, CHANGELOG/release notes capture the architectural shift away from MediaRecorder, Issues #1 and #3 marked resolved and Issues #2 and #4 confirmed addressed (either by v1.1.1 or absorbed into v2). User explicitly approves before tag/push/publish. No commits, tags, or publishes without explicit user request.",
+  "id": "T-010",
+  "order": 10,
+  "phase": "p4-release",
+  "status": "open",
+  "title": "v2.0.0 release checklist",
+  "type": "chore"
+}

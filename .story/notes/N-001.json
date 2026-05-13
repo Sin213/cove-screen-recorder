@@ -1,0 +1,16 @@
+{
+  "content": "v1.1.0 is stable at 1080p60 replay on Linux/Wayland with the Balanced preset (1920x1080, 60fps, VP8 replay buffer, libx264 final encode). 1440p60 and 4K60 replay are NOT stable. Root cause: the Chromium/Electron MediaRecorder capture + canvas scaling stage drops frames before ffmpeg/NVENC is reached. Hardware (RTX 4080 Super) is not the bottleneck.\n\nCurrent pipeline: Electron getDisplayMedia -> canvas scaling -> MediaRecorder VP8/WebM -> ffmpeg final MP4.\n\nImplication: further encoder tuning, GOP changes, or ffmpeg flag tweaks cannot raise the ceiling because the dropped frames never reach the encoder.\n\nv2.0.0 must therefore bypass MediaRecorder for replay buffering and capture natively (PipeWire on Linux, DXGI/WGC on Windows later), feeding hardware encoders directly via a rolling segment buffer.\n\nLessons from v1.1.0 that v2 must not regress on: replay corruption fixed; fake duplicated-frame 60fps output fixed; replay freeze-during-save fixed; broken Linux hardware encoder fallback loops fixed (libx264 used directly for replay finalization on Linux); audio sidecar stable; replay save state correct; replay source diagnostics in place; replay FPS/cadence detection in place; no leftover ffmpeg/pactl processes.",
+  "createdDate": "2026-05-13",
+  "id": "N-001",
+  "status": "active",
+  "tags": [
+    "v2",
+    "architecture",
+    "replay",
+    "mediarecorder",
+    "ceiling",
+    "rationale"
+  ],
+  "title": "MediaRecorder replay ceiling — root cause and v2 rationale",
+  "updatedDate": "2026-05-13"
+}

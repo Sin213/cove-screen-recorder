@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Evaluate candidate architectures for the v2 replay engine and pick one. Candidates to compare: (1) standalone native binary (Rust or C++) invoked as a child process, (2) Node N-API addon linked into the Electron main process, (3) sidecar helper communicating over IPC/UNIX socket, (4) ffmpeg-driven helper script with PipeWire input. Evaluation axes: capture frame-drop behavior at 1440p60 and 4K60, latency for rolling replay buffer, cross-platform reach (Linux first, Windows later), packaging complexity inside electron-builder, ability to consume PipeWire on Linux and DXGI/WGC on Windows, NVENC/VAAPI/QSV access, maintenance burden. Output: a research note + decision recorded in project-state.md. No implementation.",
+  "id": "T-003",
+  "order": 20,
+  "phase": "p1-research",
+  "status": "open",
+  "title": "Research and choose native replay engine approach",
+  "type": "chore"
+}

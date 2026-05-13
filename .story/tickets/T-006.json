@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Design the rolling segment buffer that replaces the MediaRecorder VP8/WebM replay buffer. Decide: segment duration, segment count for default replay windows (e.g. 30s, 60s, 5m), on-disk vs in-memory storage, segment naming, atomic write/rotate strategy, crash safety, total disk footprint cap, container choice (fragmented MP4 vs raw .h264/.hevc + index). Define how segments are stitched on save without re-encoding when possible. Must survive long sessions without unbounded growth, and must allow concurrent capture while a save is in progress (v1.1.0 specifically fixed the freeze-during-save bug — do not regress). Output: design doc with timing, IO budget, and failure modes. No code.",
+  "id": "T-006",
+  "order": 30,
+  "phase": "p2-design",
+  "status": "open",
+  "title": "Design rolling replay segment buffer",
+  "type": "chore"
+}

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Define the contract between the Electron renderer/main and the v2 replay engine chosen in T-003. Specify: IPC channel layout (start/stop/save/status/error), lifecycle and supervision (engine crash detection, restart, orphaned ffmpeg/pactl process cleanup — v1.1.0 explicitly fixed leftover processes, do not regress), settings surface (resolution, fps, encoder preference, replay duration, region/source, hotkeys), diagnostics surface (replay source diagnostics + FPS/cadence already exist in v1.1.0; carry forward), platform packaging implications for electron-builder (extra binaries, runtime deps, code signing on Windows). Confirm Issues #1 and #3 are fully absorbed by the new capture path. Output: integration spec doc. No code.",
+  "id": "T-008",
+  "order": 10,
+  "phase": "p3-integration",
+  "status": "open",
+  "title": "Plan Electron UI integration with native/helper engine",
+  "type": "chore"
+}

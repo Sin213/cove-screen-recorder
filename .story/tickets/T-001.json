@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Establish .story as the repo memory source of truth and lock the v2.0.0 architecture boundary up front. Confirms: (1) v1.1.0 is the stable baseline for the current Electron/Chromium MediaRecorder replay architecture, (2) v2.0.0 will NOT keep patching MediaRecorder, (3) v2.0.0 targets a native or native-like replay engine fed by PipeWire with a hardware encoder matrix. This is a planning ticket only — no source changes. Definition of done: project-state.md, roadmap with phases p0-p4, tickets T-001..T-010, and a v2-bootstrap handover all exist and are internally consistent. Future sessions read .story before touching code.",
+  "id": "T-001",
+  "order": 10,
+  "phase": "p1-research",
+  "status": "open",
+  "title": "Bootstrap v2.0.0 Storybloq planning and architecture boundary",
+  "type": "chore"
+}

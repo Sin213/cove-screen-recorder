@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Design the Linux capture surface that replaces Electron getDisplayMedia for v2. Define: portal/PipeWire negotiation flow (xdg-desktop-portal ScreenCast), node selection (monitor, window, region), DMA-BUF vs SHM buffer modes, format negotiation, framerate hints, cursor handling, dynamic resolution changes, error and disconnect handling. Must surface a clean handle the encoder backend can consume directly without going through canvas. Should explicitly absorb Issue #1 (crop area selection unclear) by treating region selection as a first-class capture concept, and Issue #3 (source does not record until hovered) by removing the DOM/canvas hover dependency entirely. Windows capture (DXGI/WGC) is mentioned for symmetry but is out of scope for this ticket. Output: design doc + diagram in .story/notes or a dedicated docs path. No code.",
+  "id": "T-004",
+  "order": 10,
+  "phase": "p2-design",
+  "status": "open",
+  "title": "Design PipeWire capture backend boundary",
+  "type": "chore"
+}

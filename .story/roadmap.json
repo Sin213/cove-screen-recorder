@@ -1,0 +1,42 @@
+{
+  "blockers": [],
+  "date": "2026-05-13",
+  "phases": [
+    {
+      "description": "Optional small UI/UX maintenance window before committing to v2.0.0 work. Scope is strictly bounded: replay keybind colocation, replay/crop timer state weirdness. Do NOT chase deeper MediaRecorder root causes here — those are deferred to v2.0.0. May be skipped entirely if v2.0.0 work is starting immediately.",
+      "id": "p0-maintenance",
+      "label": "PHASE 0",
+      "name": "v1.1.1 Optional Maintenance",
+      "summary": "Small, optional v1.1.1 UI/keybind cleanup before v2 work"
+    },
+    {
+      "description": "Establish the v2.0.0 architecture boundary. Move away from Electron MediaRecorder replay buffering toward a native or native-like replay engine. Output of this phase: a chosen approach (native binary, helper process, NAPI addon, or sidecar) and a clear contract between Electron UI and the replay engine. No implementation here.",
+      "id": "p1-research",
+      "label": "PHASE 1",
+      "name": "v2.0.0 Architecture Research and Boundary",
+      "summary": "Pick the native/helper replay engine direction and lock the UI-to-engine contract"
+    },
+    {
+      "description": "Design the four core v2 subsystems: PipeWire capture backend, encoder backend matrix with fallback policy, rolling replay segment buffer, and instant replay export/remux pipeline. Each ticket produces a design doc with inputs, outputs, error handling, and integration points. No implementation.",
+      "id": "p2-design",
+      "label": "PHASE 2",
+      "name": "v2.0.0 Component Design",
+      "summary": "Design PipeWire capture, encoder matrix, rolling segments, and export pipeline"
+    },
+    {
+      "description": "Plan how the Electron UI integrates with the new native/helper replay engine, and define the validation matrix for 1080p60, 1440p60, and 4K60 across NVIDIA, AMD, and Intel encoder paths. Output: integration contract doc and a test plan that proves the v2 architecture exceeds the v1.1.0 ceiling.",
+      "id": "p3-integration",
+      "label": "PHASE 3",
+      "name": "v2.0.0 Integration and Validation Planning",
+      "summary": "Plan UI<->engine integration and the full 1080p/1440p/4K60 validation matrix"
+    },
+    {
+      "description": "Final v2.0.0 release checklist: build verification across Linux and Windows, encoder fallback smoke tests, replay save validation at every target resolution, RELEASES.md update, sha256 sidecars per global rule, tag, and publish.",
+      "id": "p4-release",
+      "label": "PHASE 4",
+      "name": "v2.0.0 Release",
+      "summary": "v2.0.0 release checklist, validation, packaging, and publish"
+    }
+  ],
+  "title": "cove-screen-recorder"
+}

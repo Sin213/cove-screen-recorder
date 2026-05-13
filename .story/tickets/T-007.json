@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Design how an instant replay save turns the current rolling segments into a final MP4. Goals: zero re-encode when codec/profile/level/timebase are compatible across segments, exact requested duration trim at the leading edge, audio sidecar muxed correctly (carry forward the v1.1.0 audio sidecar stability fix), accurate fps/cadence even when capture jitters (carry forward the v1.1.0 replay FPS/cadence detection work), no fake duplicated-frame output. Define behavior when codec is inconsistent across segments (forced single-pass libx264 finalize, mirroring the v1.1.0 replay finalization safety net). Specify the export state machine so the UI cannot enter the v1.1.x freeze-during-save state again. Output: pipeline doc + state diagram. No code.",
+  "id": "T-007",
+  "order": 40,
+  "phase": "p2-design",
+  "status": "open",
+  "title": "Design instant replay export/remux pipeline",
+  "type": "chore"
+}

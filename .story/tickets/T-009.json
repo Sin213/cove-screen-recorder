@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-13",
+  "description": "Define the validation matrix that proves v2 clears the v1.1.0 MediaRecorder ceiling. For each target (1080p60, 1440p60, 4K60), specify the test on each encoder path (NVENC, VAAPI/AMF, QSV/VAAPI, libx264). Acceptance metrics: zero dropped capture frames over a fixed-duration synthetic load, replay save completes without freeze, output duration matches requested replay window within tolerance, no fake duplicated frames, audio stays in sync, no leftover ffmpeg or pactl processes after stop. Include a regression suite for the v1.1.0 fixes (replay corruption, fake 60fps, freeze-during-save, broken hardware fallback loops, audio sidecar, replay save state). Output: validation matrix + scripted test plan. No code, no test files yet — that lives in v2 implementation work.",
+  "id": "T-009",
+  "order": 20,
+  "phase": "p3-integration",
+  "status": "open",
+  "title": "Plan validation matrix for 1080p60, 1440p60, and 4K60",
+  "type": "chore"
+}

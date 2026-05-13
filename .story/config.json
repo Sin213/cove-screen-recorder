@@ -1,0 +1,14 @@
+{
+  "features": {
+    "handovers": true,
+    "issues": true,
+    "reviews": true,
+    "roadmap": true,
+    "tickets": true
+  },
+  "language": "typescript",
+  "project": "cove-screen-recorder",
+  "schemaVersion": 1,
+  "type": "npm",
+  "version": 2
+}
