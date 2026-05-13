@@ -141,6 +141,30 @@ See `.story/notes/N-002.json` for the full decision record.
 
 ---
 
+## v2.0.0 PipeWire capture backend boundary (T-004, 2026-05-13)
+
+The Linux capture surface for the v2 sidecar is locked. Full design in `.story/notes/N-003.json`. Summary:
+
+- **Five layers, top down:** Electron UI → IPC contract (T-008) → helper capture orchestrator → `CaptureSource` trait → xdg-desktop-portal ScreenCast + PipeWire stream. Frames cross from the trait layer into the encoder *inside the helper*; they never cross IPC. Electron never sees a frame.
+- **What Electron asks for:** `capture.requestSession`, `capture.startStream`, `capture.pauseStream`/`resumeStream`, `capture.stopSession`, `capture.setRegion`, `capture.setFramerateHint`, `capture.setCursorMode`. Events back to Electron: `sessionReady` (explicit readiness — closes the v1.1.0 "guess capture is ready from a timer" gap), `formatChanged`, `streamPaused`/`Resumed`, `sessionLost`, `diagnostics`.
+- **What the helper owns:** the D-Bus portal connection, PipeWire core/loop, all `pw_stream` objects, SPA param negotiation, DMA-BUF vs SHM negotiation, restore-token persistence (`$XDG_STATE_HOME/cove-screen-recorder/portal-restore.json`), in-process frame channel to the encoder, failure classification, diagnostics emission.
+- **Selection vs acquisition boundary:** the portal owns the source picker and returns PipeWire node IDs + optional `restore_token`. PipeWire owns frame acquisition once nodes are bound. `sessionReady` only fires once `pw_stream` state reaches `Streaming` with a committed format.
+- **`CaptureSource` trait:** abstract frame producer that exposes `caps()`, `current_format()`, `frames()` (async `FrameHandle` stream with PTS, fourcc, modifier, payload variant `DmaBuf | Shm`, optional cursor metadata, and a `ReleaseToken` for buffer return). The encoder backend imports `FrameHandle` directly — zero-copy when DMA-BUF + supported modifier are negotiated.
+- **Capture modes for v2.0.0:** `monitor`, `window`, `region`. Region is composed (monitor capture + encoder-boundary crop, no portal cooperation needed — closes Issue #1). `virtual`, multi-stream replay, X11, and Wayland-without-portal are deferred.
+- **DMA-BUF vs SHM:** DMA-BUF preferred with modifier list intersected against encoder-import support; linear DMA-BUF fallback before SHM; SHM only if neither negotiates. Failure to negotiate any acceptable buffer mode is a hard `sessionLost(no-acceptable-buffer-type)` — not a silent slow path.
+- **Format negotiation:** NV12 preferred, P010 accepted when encoder supports 10-bit, RGB (XR24/AR24) accepted with encoder-side conversion. No colorspace conversion inside the capture layer. Source-native resolution accepted as-is; the capture layer never resizes or letterboxes.
+- **Framerate hints:** advisory only. No synthetic duplicate frames generated inside capture (fixes v1.1.0 "fake duplicated 60fps"). Encoder backend decides constant-fps vs VFR.
+- **Cursor handling:** maps to portal `Hidden`/`Embedded`/`Metadata`. Default `embedded` for v2.0.0; `metadata` preferred long-term but gated on compositor support detection with transparent downgrade.
+- **Dynamic resolution changes:** `OnParamChanged` triggers buffer re-negotiation, emits `formatChanged`, and surfaces the new caps through the trait. Encoder/segment layer absorbs the discontinuity. The capture layer never hides a resolution change.
+- **Failure surfaces:** distinct reason codes — `portal-denied`, `portal-restore-rejected`, `portal-unavailable`, `pipewire-disconnected`, `pipewire-state-error`, `source-removed`, `no-acceptable-buffer-type`, `format-renegotiation-failed`, `compositor-paused` (soft), `encoder-disconnected`. Bounded reconnect attempts for PipeWire daemon loss; everything else is a clean `sessionLost` with a structured `details` blob.
+- **Diagnostics invariant:** the helper reports buffers negotiated, in flight, dropped since last tick, and total produced — plus observed cadence vs hint, compositor name, PipeWire version, and last negotiation latency. A user can prove whether a dropped frame happened at capture, encode, or segment write by correlating these counters with the encoder (T-005) and segment buffer (T-006) counters. v1.1.0 cannot distinguish these layers; v2 must. On `sessionLost`, the last 60 s of diagnostics is written to `$XDG_STATE_HOME/cove-screen-recorder/diagnostics/<sessionId>.json` for triage.
+- **Issue absorption:** #1 (crop unclear) becomes the first-class `region` mode + `setRegion`. #3 (source does not record until hovered) is eliminated by removing the DOM/canvas hover dependency entirely — the validation matrix includes a 60 s minimized-preview test that must produce the expected frame count.
+- **Trait symmetry:** `CaptureSource` is shaped so a future `WgcSource` (Windows DXGI/WGC, shared D3D11 textures) and `ScreenCaptureKitSource` (macOS `IOSurface`) slot in without reshaping the encoder boundary. Out of scope for T-004.
+
+Test/validation cases are enumerated in N-003 §17 and feed directly into T-009's validation matrix.
+
+---
+
 ## Open issue triage
 
 | Issue | Title | Disposition |
