@@ -31,6 +31,13 @@
       "summary": "Plan UI<->engine integration and the full 1080p/1440p/4K60 validation matrix"
     },
     {
+      "description": "Implement the v2 native/helper replay engine in small, reviewable steps: package scaffold, JSON-RPC transport, Electron supervisor, preload/renderer stub wiring, helper simulation mode, PipeWire capture MVP, encoder probe/selection MVP, rolling fMP4 segment buffer MVP, snapshot + export/remux MVP, real renderer FSM/diagnostics wiring, and a final MVP smoke pass that unblocks T-010c.",
+      "id": "p3b-implementation",
+      "label": "PHASE 3B",
+      "name": "v2.0.0 Native/Helper Engine Implementation",
+      "summary": "Build the v2 helper engine and Electron wiring in small reviewable tickets (T-011..T-021) before T-010c smoke/RC execution."
+    },
+    {
       "description": "Final v2.0.0 release checklist: build verification across Linux and Windows, encoder fallback smoke tests, replay save validation at every target resolution, RELEASES.md update, sha256 sidecars per global rule, tag, and publish.",
       "id": "p4-release",
       "label": "PHASE 4",

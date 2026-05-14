@@ -346,3 +346,79 @@ Per `CLAUDE.md`:
 - No new features outside the v2 architectural shift.
 - No release notes, screenshots, or extra docs unless explicitly requested.
 - No commits, tags, or publishes without explicit user request.
+
+---
+
+## v2.0.0 native/helper implementation ticket series (T-011..T-021, 2026-05-13)
+
+T-010c (smoke + RC execution) cannot run yet because the v2 native/helper replay engine does not exist. T-010 was always the *release* checklist; T-009/N-008 was the *acceptance plan*; nothing in T-001..T-010 implements the helper itself. This section locks the implementation series that must complete before T-010c becomes executable.
+
+### Phase
+
+New phase `p3b-implementation` ("v2.0.0 Native/Helper Engine Implementation"), inserted after `p3-integration` and before `p4-release`. 11 tickets, ordered for one Sonnet implementation session each.
+
+### Sequence
+
+| ticket | title | blocked by | gates |
+|---|---|---|---|
+| T-011 | Scaffold native/helper replay engine package (cove-replay-engine) | — | T-012 |
+| T-012 | Implement helper JSON-RPC transport and protocol types | T-011 | T-013, T-015 |
+| T-013 | Implement Electron main helper supervisor | T-012 | T-014, T-016 |
+| T-014 | Wire preload/renderer API to helper contract (stub mode) | T-013 | T-020 |
+| T-015 | Add helper stub/simulation mode for validation harness | T-012 | T-016 |
+| T-016 | Implement PipeWire capture MVP (monitor mode, NV12, sessionReady) | T-013, T-015 | T-017 |
+| T-017 | Implement encoder probe / selection MVP (NVENC + libx264) | T-016 | T-018 |
+| T-018 | Implement rolling fMP4 segment buffer MVP | T-017 | T-019 |
+| T-019 | Implement replay snapshot + export/remux MVP (stream-copy) | T-018 | T-020 |
+| T-020 | Integrate v2 UI state/FSM and diagnostics surface in renderer | T-014, T-019 | T-021 |
+| T-021 | Run MVP smoke validation on helper + Electron; prepare for T-010c | T-020 | T-010c |
+
+Dependency graph:
+
+```
+T-011 → T-012 ┬─ T-013 ─┬─ T-014 ──────────────────────────────────┐
+              │         └─ T-016 → T-017 → T-018 → T-019 ──┐       │
+              └─ T-015 ─┘                                  │       │
+                                                           └→ T-020 → T-021 → (gates T-010c)
+```
+
+T-013 and T-015 are parallelisable once T-012 lands. T-014 runs in parallel with T-016..T-019. T-020 is the joining ticket.
+
+### Why this split
+
+- **T-011 (scaffold)** isolates the buildable-but-empty helper crate. Adding `pipewire-rs` and ffmpeg deps to an unbuilt workspace is the v1.1.0 mistake; this ticket forces an empty-but-green starting point.
+- **T-012 (transport)** locks the wire format from N-007 §§4–7 before any subsystem can drift from it. Every method is a stub returning `not-implemented`, which makes T-013 testable in isolation.
+- **T-013 (supervisor)** is the longest-lived TypeScript ticket. Boundary A (renderer↔main) is deliberately deferred to T-014 so the supervisor is testable through a console without renderer pollution.
+- **T-014 (preload/renderer stub)** exposes the v2 surface to the renderer in parallel with the real subsystems landing. The legacy v1.1.0 path stays untouched until T-020.
+- **T-015 (simulator)** is the load-bearing test ticket. It produces a deterministic event stream matching the wire format, so T-010a's runner harness can be validated against simulated success and simulated failure before any real PipeWire code exists.
+- **T-016 (PipeWire MVP)** is the first ticket that touches real frames. Monitor-mode only; window/region deferred. M1-only validation.
+- **T-017 (encoder MVP)** is the first ticket that produces real H.264 output. NVENC + libx264 only; VAAPI/QSV/AMF deferred to a follow-up.
+- **T-018 (segment buffer)** introduces atomic-commit fMP4 segments with rolling eviction + pinning + crash-recovery scaffolding.
+- **T-019 (export MVP)** closes the end-to-end loop: stream-copy export with faststart. Trim re-encode and discontinuity re-encode deferred to T-019a if T-021 needs them.
+- **T-020 (renderer migration)** flips the user-visible default to v2 and asserts the Issue #1/#3/#4 absorption proofs at the UI layer.
+- **T-021 (MVP smoke)** runs a reduced 13-row subset of N-008 §22 on M1, files any defects against the owning ticket, and produces the `Ready for T-010c?` verdict.
+
+### Recommended first ticket
+
+**T-011.** Smallest scope; no other ticket can land before it. Pure scaffolding, no PipeWire/ffmpeg dependencies, no Electron edits, no renderer edits.
+
+### Implementation boundaries (binding, inherited by every ticket)
+
+- Do NOT reintroduce Electron MediaRecorder replay buffering.
+- Do NOT send raw frames to Electron — frames live below Boundary B per N-007 §1.
+- Do NOT implement broad architecture in one ticket.
+- Do NOT jump to PipeWire (T-016) before helper process/protocol scaffolding (T-011..T-015) lands.
+- Do NOT claim 1440p60 / 4K60 success until T-010c validates it.
+- T-010c remains BLOCKED until T-021 returns a `green` verdict.
+
+### T-010c gating update
+
+T-010c's `blockedBy` is now `["T-010a", "T-010b", "T-021"]`. The ticket description was updated to call out the implementation-series gate explicitly. T-010a (runner harness) and T-010b (synthetic loads) can still proceed in parallel with the implementation series; they have no implementation dependency.
+
+### Out of scope (still)
+
+- No source code changes in this planning session. `.story/` only.
+- No CI changes.
+- No release notes.
+- No package.json / electron-builder edits.
+- No commits, tags, or publishes.
