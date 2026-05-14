@@ -203,11 +203,12 @@ fn bind_with_restricted_umask(path: &str) -> Result<UnixListener> {
     Ok(listener)
 }
 
-/// Ensure the socket's parent directory exists and is private (mode 0700).
+/// Ensure the socket's parent directory exists and has mode exactly 0700.
 ///
-/// Creates the directory if absent (with mode 0700). Rejects it if it exists but has
-/// any other mode — a world- or group-readable directory exposes the socket path to
-/// enumeration even before the socket exists.
+/// Creates the directory with 0700 if absent. Rejects any pre-existing directory whose
+/// mode is not exactly 0700: a traversable parent (e.g. 0755) lets other local users
+/// reach the socket path during the bind/fchmod window and attempt a connection while
+/// the socket still has default umask permissions.
 #[cfg(unix)]
 fn ensure_private_socket_dir(socket_path: &str) -> Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -231,13 +232,13 @@ fn ensure_private_socket_dir(socket_path: &str) -> Result<()> {
             "socket parent path {dir:?} is not a directory"
         ));
     }
-    // Reject only if group- or world-writable; 0755 (enumerable but not writable)
-    // is acceptable for pre-existing directories managed by the calling environment.
-    // Directories we CREATE above are always 0700 (strict).
+    // Require exactly 0700 for both new and pre-existing directories. A traversable
+    // parent (0755) lets other local users reach the socket path during the one-syscall
+    // bind/fchmod window while the socket's own mode has not yet been tightened.
     let mode = meta.permissions().mode() & 0o777;
-    if mode & 0o022 != 0 {
+    if mode != 0o700 {
         return Err(anyhow::anyhow!(
-            "socket directory {dir:?} has mode 0{mode:o}, must not be group- or world-writable"
+            "socket directory {dir:?} has mode 0{mode:o}, must be 0700"
         ));
     }
     Ok(())
@@ -498,16 +499,39 @@ mod tests {
     }
 
     #[test]
-    fn socket_dir_world_writable_fails() {
+    fn socket_dir_0700_existing_accepted() {
+        use std::os::unix::fs::DirBuilderExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_dir = tmp.path().join("private_dir");
+        std::fs::DirBuilder::new().mode(0o700).create(&socket_dir).unwrap();
+        let socket_path = socket_dir.join("engine.sock").to_string_lossy().into_owned();
+        let result = ensure_private_socket_dir(&socket_path);
+        assert!(result.is_ok(), "must succeed for existing 0700 directory");
+    }
+
+    #[test]
+    fn socket_dir_non_0700_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_dir = tmp.path().join("traversable_dir");
+        std::fs::create_dir(&socket_dir).unwrap();
+        // 0o755 is traversable by others — must be rejected even though not writable.
+        std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let socket_path = socket_dir.join("engine.sock").to_string_lossy().into_owned();
+        let result = ensure_private_socket_dir(&socket_path);
+        assert!(result.is_err(), "must fail when directory is not 0700 (got 0755)");
+    }
+
+    #[test]
+    fn socket_dir_world_writable_rejected() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
         let socket_dir = tmp.path().join("dangerous_dir");
         std::fs::create_dir(&socket_dir).unwrap();
-        // 0o777 is world-writable — must be rejected.
         std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
         let socket_path = socket_dir.join("engine.sock").to_string_lossy().into_owned();
         let result = ensure_private_socket_dir(&socket_path);
-        assert!(result.is_err(), "must fail when directory is world-writable");
+        assert!(result.is_err(), "must fail when directory is world-writable (0777)");
     }
 
     #[test]

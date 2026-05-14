@@ -62,7 +62,11 @@ fn make_request(id: u64, method: &str, params: Option<serde_json::Value>) -> Vec
 // ── Server spawner ────────────────────────────────────────────────────────────
 
 async fn spawn_server(tmp: &tempfile::TempDir) -> (String, tokio::task::JoinHandle<()>) {
-    let socket_path = tmp.path().join("engine.sock").to_string_lossy().into_owned();
+    use std::os::unix::fs::DirBuilderExt;
+    // Socket must live in a 0700 directory; tempfile::tempdir() creates 0755 dirs.
+    let socket_dir = tmp.path().join("private");
+    std::fs::DirBuilder::new().mode(0o700).create(&socket_dir).unwrap();
+    let socket_path = socket_dir.join("engine.sock").to_string_lossy().into_owned();
     let sp = socket_path.clone();
     let handle = tokio::spawn(async move {
         let set_level: cove_replay_engine::SetLevelFn = std::sync::Arc::new(|_| Ok(()));
@@ -274,8 +278,13 @@ async fn notification_gets_no_response() {
 
 #[tokio::test]
 async fn regular_file_at_socket_path_not_deleted() {
+    use std::os::unix::fs::DirBuilderExt;
     let tmp = tempfile::tempdir().unwrap();
-    let socket_path = tmp.path().join("engine.sock").to_string_lossy().into_owned();
+    // Socket must be in a 0700 directory so ensure_private_socket_dir passes
+    // and the test correctly exercises cleanup_stale_socket on the regular file.
+    let socket_dir = tmp.path().join("private");
+    std::fs::DirBuilder::new().mode(0o700).create(&socket_dir).unwrap();
+    let socket_path = socket_dir.join("engine.sock").to_string_lossy().into_owned();
 
     // Create a regular file (not a socket) at the path the server would use.
     std::fs::write(&socket_path, b"sentinel").unwrap();
@@ -337,6 +346,53 @@ async fn shutdown_removes_own_socket() {
         !std::path::Path::new(&socket_path).exists(),
         "socket must be removed after clean shutdown"
     );
+}
+
+// ── 0755 parent is rejected; startup fails with clear error ──────────────────
+
+#[tokio::test]
+async fn startup_fails_for_0755_parent() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    // Explicitly set 0755 regardless of process umask so the test is deterministic.
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let socket_path = tmp.path().join("engine.sock").to_string_lossy().into_owned();
+
+    let set_level: cove_replay_engine::SetLevelFn = std::sync::Arc::new(|_| Ok(()));
+    // Wrap with a timeout: if ensure_private_socket_dir ever incorrectly accepts the
+    // 0755 dir, run() would block in the accept loop and the test would hang.
+    let result = tokio::time::timeout(
+        Duration::from_secs(3),
+        cove_replay_engine::transport::server::run(&socket_path, set_level),
+    )
+    .await
+    .expect("run() must not block for a rejected socket parent");
+
+    assert!(result.is_err(), "startup must fail when parent directory is 0755");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("0700") || msg.contains("mode"),
+        "error must mention 0700 or mode; got: {msg:?}"
+    );
+    assert!(
+        !std::path::Path::new(&socket_path).exists(),
+        "socket must not exist after rejected startup"
+    );
+}
+
+// ── Actual bind parent is always 0700 ────────────────────────────────────────
+
+#[tokio::test]
+async fn bind_parent_is_0700() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let (socket_path, _srv) = spawn_server(&tmp).await;
+    let mut stream = connect(&socket_path).await;
+    read_frame(&mut stream).await; // drain engine.ready
+
+    let parent = std::path::Path::new(&socket_path).parent().unwrap();
+    let mode = std::fs::metadata(parent).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700, "socket parent directory must have mode 0700");
 }
 
 // ── Stub method name appears in error message (all stubs) ────────────────────
