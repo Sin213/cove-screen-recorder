@@ -22,7 +22,9 @@
     "dist:win": "npm run build && electron-builder --win && npm run dist:sha",
     "dist:win:portable": "npm run build && electron-builder --win portable && npm run dist:sha",
     "dist:sha": "bash scripts/sha256.sh",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+    "validate:build": "tsc -p tsconfig.validation.json",
+    "validate": "npm run validate:build && node dist-validation/runner.js smoke",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.validation.json --noEmit"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
