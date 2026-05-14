@@ -6,7 +6,7 @@
   "id": "T-011",
   "order": 10,
   "phase": "p3b-implementation",
-  "status": "open",
+  "status": "inprogress",
   "title": "Scaffold native/helper replay engine package (cove-replay-engine)",
   "type": "task"
 }
