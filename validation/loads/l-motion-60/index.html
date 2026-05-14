@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L-MOTION-60 — Cove Validation Load</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// L-MOTION-60: Fullscreen 60fps motion source with binary frame counter
+//
+// Frame counter protocol (N-008 §5.1) — all coordinates are PHYSICAL PIXELS
+// (canvas backing-store pixels = MP4 frame pixels):
+//   - 24-bit unsigned integer, MSB-first (bit 23 at x=0)
+//   - Each bit encoded as one 8×8 physical-pixel block at row y=0
+//   - White (#ffffff) = 1, Black (#000000) = 0
+//   - Counter occupies physical pixels [0,0]–[191,7] (24 blocks × 8px wide)
+//   - Block boundaries align with H.264 DCT block size for compression robustness
+//
+// DPR handling:
+//   canvas backing store = Math.round(cssWidth * devicePixelRatio) physical pixels.
+//   CSS display size = window.innerWidth/innerHeight (fills viewport).
+//   All drawing uses physical-pixel coordinates (no ctx.scale()).
+//   The counter region [0,0,192,8] is therefore always in physical pixels,
+//   matching the MP4 frame coordinate space on any DPR / fractional scale.
+//
+// Counter value:
+//   frameIndex = Math.round((timestamp - startTime) * 60 / 1000)
+//   Time-based, NOT rAF-count based. On a 144Hz display, consecutive rAFs
+//   within the same 16.67ms slot produce the same frameIndex (intentional).
+//   The captured 60fps MP4 samples one rAF output per nominal frame slot.
+//
+// Validation rows served: VAL-EXP-010, VAL-REG-002
+// ---------------------------------------------------------------------------
+
+const BITS = 24;
+const BLOCK_W = 8;
+const BLOCK_H = 8;
+const COUNTER_STRIP_H = BLOCK_H;
+
+// Stripe scroll parameters
+const STRIPE_W = 80;        // px per stripe pair (dark + light)
+const SCROLL_PX_PER_FRAME = 4;  // px scroll per nominal 60fps frame
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", { alpha: false });
+
+let startTime = null;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = window.innerWidth;
+  const cssH = window.innerHeight;
+  // CSS display size: fills the viewport
+  canvas.style.width = cssW + "px";
+  canvas.style.height = cssH + "px";
+  // Backing store: physical pixels so counter region [0,0,192,8] matches MP4 frame coords
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+}
+
+window.addEventListener("resize", resize);
+resize();
+
+// Encode 24-bit counter into pixel blocks at top-left of canvas.
+// Called after the background is drawn so the counter sits on top.
+function encodeFrameCounter(n) {
+  const clamped = n & 0xFFFFFF; // clamp to 24 bits
+  for (let bit = 0; bit < BITS; bit++) {
+    const val = (clamped >> (BITS - 1 - bit)) & 1;
+    ctx.fillStyle = val ? "#ffffff" : "#000000";
+    ctx.fillRect(bit * BLOCK_W, 0, BLOCK_W, BLOCK_H);
+  }
+}
+
+function draw(timestamp) {
+  if (startTime === null) startTime = timestamp;
+
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // Time-based frame index — intentionally not rAF count
+  const frameIndex = Math.round((timestamp - startTime) * 60 / 1000);
+
+  // Horizontal stripe scroll — 4px per nominal frame
+  const scrollOffset = (frameIndex * SCROLL_PX_PER_FRAME) % STRIPE_W;
+
+  // Draw scrolling stripes (fills whole canvas)
+  for (let x = -STRIPE_W + ((W - scrollOffset) % STRIPE_W); x < W; x += STRIPE_W) {
+    // Dark half
+    ctx.fillStyle = "#1a1a2e";
+    ctx.fillRect(x, 0, STRIPE_W / 2, H);
+    // Light half
+    ctx.fillStyle = "#16213e";
+    ctx.fillRect(x + STRIPE_W / 2, 0, STRIPE_W / 2, H);
+  }
+
+  // Bright moving bar for obvious motion signal
+  const barX = ((frameIndex * SCROLL_PX_PER_FRAME * 2) % (W + 40)) - 20;
+  ctx.fillStyle = "#00d4ff";
+  ctx.fillRect(barX, 0, 20, H);
+
+  // Large frame number — human-readable for visual inspection
+  const labelY = Math.floor(H / 2);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(10, labelY - 48, 340, 60);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 40px monospace";
+  ctx.fillText("f=" + frameIndex, 18, labelY);
+
+  // Binary frame counter in top-left — must be drawn LAST so it's not clipped
+  encodeFrameCounter(frameIndex);
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L-STATIC — Cove Validation Load</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: monospace;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    user-select: none;
+  }
+  h1 { font-size: 2.5rem; margin-bottom: 1rem; color: #58a6ff; }
+  p  { font-size: 1.1rem; color: #8b949e; margin-bottom: 2rem; }
+  #blink {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: #3fb950;
+    transition: opacity 0.1s;
+  }
+  #clock { margin-top: 1.5rem; font-size: 1.4rem; color: #8b949e; }
+</style>
+</head>
+<body>
+<h1>L-STATIC</h1>
+<p>Static validation load — 1Hz blink indicator</p>
+<div id="blink"></div>
+<div id="clock">00:00</div>
+<script>
+"use strict";
+// L-STATIC: Nearly still frame — encoder must not produce corrupted output on idle input.
+// 1Hz blink gives the encoder a minimal motion event once per second.
+// Validation rows served: VAL-CAP-006 (static source capture stable)
+
+const blink = document.getElementById("blink");
+const clock = document.getElementById("clock");
+const startTime = Date.now();
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+function tick() {
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  clock.textContent = pad2(m) + ":" + pad2(s);
+
+  // 1Hz blink — visible but low-motion
+  blink.style.opacity = (elapsed % 2 === 0) ? "1" : "0.15";
+}
+
+tick();
+setInterval(tick, 500);
+</script>
+</body>
+</html>

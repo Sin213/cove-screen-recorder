@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L-CHANGE — Cove Validation Load</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+// L-CHANGE: 5s static → 5s motion → 5s static → loop (15s period).
+// Tests encoder handling of sudden content-complexity transitions.
+// Validation rows served: VAL-ENC-001 (encoder output valid through transitions)
+
+const PERIOD_MS = 15000; // total cycle
+const PHASE_MS  = 5000;  // each phase
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", { alpha: false });
+
+let startTime = null;
+const STRIPE_W = 80;
+const SCROLL_PX_PER_FRAME = 4;
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+function drawStatic(W, H, phaseLabel) {
+  ctx.fillStyle = "#0d1117";
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#58a6ff";
+  ctx.font = "bold 32px monospace";
+  ctx.fillText("L-CHANGE  [" + phaseLabel + "]", 30, 60);
+  ctx.fillStyle = "#8b949e";
+  ctx.font = "20px monospace";
+  ctx.fillText("Static phase — minimal encoder load", 30, 100);
+}
+
+function drawMotion(W, H, frameIndex) {
+  const scrollOffset = (frameIndex * SCROLL_PX_PER_FRAME) % STRIPE_W;
+  for (let x = -STRIPE_W + ((W - scrollOffset) % STRIPE_W); x < W; x += STRIPE_W) {
+    ctx.fillStyle = "#1a1a2e";
+    ctx.fillRect(x, 0, STRIPE_W / 2, H);
+    ctx.fillStyle = "#16213e";
+    ctx.fillRect(x + STRIPE_W / 2, 0, STRIPE_W / 2, H);
+  }
+  const barX = ((frameIndex * SCROLL_PX_PER_FRAME * 2) % (W + 40)) - 20;
+  ctx.fillStyle = "#f78166";
+  ctx.fillRect(barX, 0, 20, H);
+  ctx.fillStyle = "#f78166";
+  ctx.font = "bold 32px monospace";
+  ctx.fillText("L-CHANGE  [MOTION]", 30, 60);
+  ctx.fillStyle = "#e6edf3";
+  ctx.font = "20px monospace";
+  ctx.fillText("f=" + frameIndex, 30, 100);
+}
+
+function draw(timestamp) {
+  if (startTime === null) startTime = timestamp;
+  const W = canvas.width;
+  const H = canvas.height;
+  const elapsed = timestamp - startTime;
+  const phase = elapsed % PERIOD_MS;
+  const frameIndex = Math.round(elapsed * 60 / 1000);
+
+  if (phase < PHASE_MS) {
+    drawStatic(W, H, "STATIC-1");
+  } else if (phase < PHASE_MS * 2) {
+    drawMotion(W, H, frameIndex);
+  } else {
+    drawStatic(W, H, "STATIC-2");
+  }
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
