@@ -16,6 +16,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
+import { EngineSupervisor } from "./engine-supervisor";
 import type {
   AppInfo,
   CaptureSource,
@@ -27,6 +28,10 @@ import type {
 } from "./types";
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
+
+let supervisor: EngineSupervisor | null = null;
+let helperShutdownComplete = false;
+let helperShutdownPromise: Promise<void> | null = null;
 
 // Wayland boot setup: must run BEFORE app is ready. Tells Chromium's Ozone
 // layer to use Wayland natively and enables the PipeWire screencast capturer
@@ -864,7 +869,24 @@ function sweepStaleRecordings(): void {
   }
 }
 
+// Prevent a second instance from starting its own helper and stealing the
+// live helper socket from the primary instance.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on("second-instance", () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+});
+
 app.whenReady().then(() => {
+  supervisor = new EngineSupervisor();
+  void supervisor.start();
   Menu.setApplicationMenu(null);
   installLinuxDesktopFile();
   registerIpc();
@@ -923,7 +945,25 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   cancelAll();
   globalShortcut.unregisterAll();
+  if (helperShutdownComplete || !supervisor) return;
+  event.preventDefault();
+  // Guard against re-entrant quit: a second before-quit fires while the first
+  // shutdown is still in progress. Calling preventDefault() above keeps Electron
+  // from exiting; returning here lets the original race's .finally() call
+  // app.quit() once — and only once — when real cleanup is done.
+  if (helperShutdownPromise) return;
+  helperShutdownPromise = Promise.race([
+    supervisor.shutdown(),
+    new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
+  ])
+    .catch((err: unknown) => {
+      console.warn("[main] supervisor shutdown error:", err);
+    })
+    .finally(() => {
+      helperShutdownComplete = true;
+      app.quit();
+    });
 });

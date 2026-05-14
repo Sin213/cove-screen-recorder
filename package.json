@@ -16,9 +16,11 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run build:renderer && npm run build:electron",
-    "dist": "npm run build && electron-builder && npm run dist:sha",
-    "dist:linux": "npm run build && electron-builder --linux AppImage && npm run dist:sha",
-    "dist:linux:full": "npm run build && electron-builder --linux && npm run dist:sha",
+    "build:helper:linux": "cargo build --release -p cove-replay-engine && sha256sum target/release/cove-replay-engine > target/release/cove-replay-engine.sha256",
+    "build:helper:win": "cargo build --release -p cove-replay-engine && sha256sum target/release/cove-replay-engine.exe > target/release/cove-replay-engine.exe.sha256",
+    "dist": "npm run build && node scripts/prep-helper.js && electron-builder && npm run dist:sha",
+    "dist:linux": "npm run build && npm run build:helper:linux && electron-builder --linux AppImage && npm run dist:sha",
+    "dist:linux:full": "npm run build && npm run build:helper:linux && electron-builder --linux && npm run dist:sha",
     "dist:win": "npm run build && electron-builder --win && npm run dist:sha",
     "dist:win:portable": "npm run build && electron-builder --win portable && npm run dist:sha",
     "dist:sha": "bash scripts/sha256.sh",
@@ -69,7 +71,17 @@
       "icon": "cove_icon.png",
       "category": "AudioVideo",
       "maintainer": "Cove <79215527+Sin213@users.noreply.github.com>",
-      "artifactName": "Cove-Screen-Recorder-${version}-${arch}.${ext}"
+      "artifactName": "Cove-Screen-Recorder-${version}-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "target/release/cove-replay-engine",
+          "to": "helper/cove-replay-engine"
+        },
+        {
+          "from": "target/release/cove-replay-engine.sha256",
+          "to": "helper/cove-replay-engine.sha256"
+        }
+      ]
     },
     "deb": {
       "depends": [
