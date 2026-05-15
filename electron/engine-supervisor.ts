@@ -37,6 +37,7 @@ export class EngineSupervisor extends EventEmitter {
   private proc: child_process.ChildProcess | null = null;
   private state: SupervisorState = "idle";
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private failureTimestamps: number[] = [];
   private shutdownRequested = false;
   private shutdownPromise: Promise<void> | null = null;
@@ -82,7 +83,18 @@ export class EngineSupervisor extends EventEmitter {
     return this.shutdownPromise;
   }
 
+  async restart(): Promise<void> {
+    this.clearRestartTimer();
+    await this.shutdown();
+    this.shutdownRequested = false;
+    this.shutdownPromise = null;
+    await this.start();
+  }
+
   private async doShutdown(): Promise<void> {
+    // Cancel any pending auto-restart timer before taking lifecycle ownership.
+    this.clearRestartTimer();
+
     // Wait for any in-flight boot to settle before touching this.proc.
     if (this.runningBoot) {
       await this.runningBoot.catch(() => {});
@@ -532,8 +544,10 @@ export class EngineSupervisor extends EventEmitter {
       `[supervisor] restart attempt ${attempt + 1}/${MAX_FAILURES} in ${delay} ms`,
     );
     this.stopHeartbeat();
+    this.clearRestartTimer();
 
-    setTimeout(() => {
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
       if (this.shutdownRequested) return;
       this.bootCycle().catch((err: unknown) => {
         console.warn("[supervisor] restart failed:", err);
@@ -558,6 +572,13 @@ export class EngineSupervisor extends EventEmitter {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
     }
   }
 

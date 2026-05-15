@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
 import { EngineSupervisor } from "./engine-supervisor";
+import type { EngineRpc } from "./engine-rpc";
 import type {
   AppInfo,
   CaptureSource,
@@ -32,6 +33,74 @@ const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 let supervisor: EngineSupervisor | null = null;
 let helperShutdownComplete = false;
 let helperShutdownPromise: Promise<void> | null = null;
+
+// Last payload from supervisor "ready" — re-sent on did-finish-load so the
+// renderer receives engine.onReady even when the helper boots before the window.
+let lastReadyPayload: { helperVersion: string; protocolVersion: number } | null = null;
+
+// Structured result envelope for v2 IPC handlers.
+// Returned as a plain object so Electron's structured clone serializes all fields
+// deterministically — no reliance on Error property preservation across invoke.
+type RpcEnvelope<T = unknown> =
+  | { ok: true; result: T }
+  | { ok: false; code: string; message: string };
+
+function disconnectedEnv(): RpcEnvelope {
+  return { ok: false, code: "helper-disconnected", message: "helper-disconnected" };
+}
+
+async function rpcEnv<T>(fn: () => Promise<T>): Promise<RpcEnvelope<T>> {
+  try {
+    return { ok: true, result: await fn() };
+  } catch (err) {
+    const e = err as { rpcCode?: string | number; code?: string; message?: string };
+    // rpcCode is set by EngineRpc for RPC-layer errors (e.g. "not-implemented").
+    // code is set by rejectAllPending() for transport-layer errors ("helper-disconnected").
+    const code =
+      typeof e.rpcCode === "string" ? e.rpcCode :
+      typeof e.code === "string" ? e.code :
+      "rpc-error";
+    return { ok: false, code, message: String(e.message ?? "rpc error") };
+  }
+}
+
+// Attaches helper RPC notification → webContents.send forwarding.
+// Called on every supervisor "ready" so it re-wires after a crash/restart.
+function wireHelperNotifications(rpc: EngineRpc): void {
+  const send = (channel: string, params?: unknown) => {
+    mainWindow?.webContents.send(channel, params);
+  };
+  // capture notifications
+  rpc.onNotification("capture.sessionReady", (p) => send("cove/capture/sessionReady", p));
+  rpc.onNotification("capture.formatChanged", (p) => send("cove/capture/formatChanged", p));
+  rpc.onNotification("capture.streamPaused", (p) => send("cove/capture/streamPaused", p));
+  rpc.onNotification("capture.streamResumed", (p) => send("cove/capture/streamResumed", p));
+  rpc.onNotification("capture.sessionLost", (p) => send("cove/capture/sessionLost", p));
+  rpc.onNotification("capture.diagnostics", (p) => send("cove/capture/diagnostics", p));
+  // encoder notifications
+  rpc.onNotification("encoder.probeResult", (p) => send("cove/encoder/probeResult", p));
+  rpc.onNotification("encoder.selected", (p) => send("cove/encoder/selected", p));
+  rpc.onNotification("encoder.fallbackEngaged", (p) => send("cove/encoder/fallbackEngaged", p));
+  rpc.onNotification("encoder.runtimeError", (p) => send("cove/encoder/runtimeError", p));
+  rpc.onNotification("encoder.backPressure", (p) => send("cove/encoder/backPressure", p));
+  rpc.onNotification("encoder.diagnostics", (p) => send("cove/encoder/diagnostics", p));
+  // replay notifications
+  rpc.onNotification("replay.segmentDiagnostics", (p) => send("cove/replay/segmentDiagnostics", p));
+  rpc.onNotification("replay.recoveryAvailable", (p) => send("cove/replay/recoveryAvailable", p));
+  rpc.onNotification("replay.snapshotPinned", (p) => send("cove/replay/snapshotPinned", p));
+  rpc.onNotification("replay.snapshotReleased", (p) => send("cove/replay/snapshotReleased", p));
+  // export notifications
+  rpc.onNotification("export.queued", (p) => send("cove/export/queued", p));
+  rpc.onNotification("export.started", (p) => send("cove/export/started", p));
+  rpc.onNotification("export.progress", (p) => send("cove/export/progress", p));
+  rpc.onNotification("export.stalled", (p) => send("cove/export/stalled", p));
+  rpc.onNotification("export.completed", (p) => send("cove/export/completed", p));
+  rpc.onNotification("export.failed", (p) => send("cove/export/failed", p));
+  rpc.onNotification("export.cancelled", (p) => send("cove/export/cancelled", p));
+  rpc.onNotification("export.rejected", (p) => send("cove/export/rejected", p));
+  // engine log
+  rpc.onNotification("engine.logLine", (p) => send("cove/engine/logLine", p));
+}
 
 // Wayland boot setup: must run BEFORE app is ready. Tells Chromium's Ozone
 // layer to use Wayland natively and enables the PipeWire screencast capturer
@@ -157,6 +226,14 @@ function createWindow(): void {
   }
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
+
+  // Replay the last supervisor "ready" payload so the renderer receives
+  // engine.onReady even when the helper finished booting before the window loaded.
+  mainWindow.webContents.on("did-finish-load", () => {
+    if (lastReadyPayload) {
+      mainWindow?.webContents.send("cove/engine/ready", lastReadyPayload);
+    }
+  });
 
   if (saved?.maximized) mainWindow.maximize();
 
@@ -790,6 +867,182 @@ function registerIpc(): void {
     else mainWindow.maximize();
   });
   ipcMain.on("cove:window-close", () => mainWindow?.close());
+
+  // ── v2 helper API (N-007 §3.1) ────────────────────────────────────────────
+  // Channel convention: cove/<namespace>/<method>
+  // All handlers return RpcEnvelope plain objects — no Error throwing across
+  // invoke, so error codes survive Electron's structured clone serialization.
+
+  // engine.*
+  ipcMain.handle("cove/engine/version", async () => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    const env = await rpcEnv(() => rpc.engineVersion());
+    if (!env.ok) return env;
+    return { ok: true, result: { helperVersion: env.result.helper_version, protocolVersion: env.result.protocol_version } };
+  });
+
+  ipcMain.handle("cove/engine/status", async () => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    const env = await rpcEnv(() => rpc.engineHealth());
+    if (!env.ok) return env;
+    const r = env.result;
+    return { ok: true, result: {
+      state: r.state,
+      uptimeMs: r.uptime_ms,
+      activeSessions: r.active_sessions,
+      activeSnapshots: r.active_snapshots,
+      activeExports: r.active_exports,
+      lastErrorTs: r.last_error_ts,
+      diagnosticsDir: r.diagnostics_dir,
+      rollingBufferBytes: r.rolling_buffer_bytes,
+    }};
+  });
+
+  ipcMain.handle("cove/engine/restart", async () => {
+    if (!supervisor) return { ok: false, code: "helper-unavailable", message: "helper-unavailable" };
+    lastReadyPayload = null;
+    try {
+      await supervisor.restart();
+      return { ok: true, result: null };
+    } catch (err) {
+      const msg = (err instanceof Error ? err.message : String(err)) || "restart-failed";
+      return { ok: false, code: "restart-failed", message: msg };
+    }
+  });
+
+  ipcMain.handle("cove/engine/openDiagnosticsBundle", async () => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    const env = await rpcEnv(() => rpc.engineDiagnosticsBundlePath());
+    if (!env.ok) return env;
+    if (env.result.path) await shell.openPath(env.result.path);
+    return { ok: true, result: null };
+  });
+
+  // capture.*
+  ipcMain.handle("cove/capture/listSources", async () => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureListSources());
+  });
+
+  ipcMain.handle("cove/capture/requestSession", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureRequestSession(params));
+  });
+
+  ipcMain.handle("cove/capture/startStream", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureStartStream(params));
+  });
+
+  ipcMain.handle("cove/capture/pauseStream", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.capturePauseStream(params));
+  });
+
+  ipcMain.handle("cove/capture/resumeStream", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureResumeStream(params));
+  });
+
+  ipcMain.handle("cove/capture/stopSession", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureStopSession(params));
+  });
+
+  ipcMain.handle("cove/capture/setRegion", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureSetRegion(params));
+  });
+
+  ipcMain.handle("cove/capture/setFramerateHint", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureSetFramerateHint(params));
+  });
+
+  ipcMain.handle("cove/capture/setCursorMode", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.captureSetCursorMode(params));
+  });
+
+  // replay.*
+  ipcMain.handle("cove/replay/save", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replaySave(params));
+  });
+
+  ipcMain.handle("cove/replay/snapshotRelease", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replaySnapshotRelease(params));
+  });
+
+  ipcMain.handle("cove/replay/recoverableSessions", async () => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replayRecoverableSessions());
+  });
+
+  ipcMain.handle("cove/replay/discardRecoveredSession", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replayDiscardRecoveredSession(params));
+  });
+
+  ipcMain.handle("cove/replay/restoreRecoveredSession", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replayRestoreRecoveredSession(params));
+  });
+
+  ipcMain.handle("cove/replay/exportStart", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replayExportStart(params));
+  });
+
+  ipcMain.handle("cove/replay/exportCancel", async (_e, params: unknown) => {
+    const rpc = supervisor?.rpcClient;
+    if (!rpc?.connected) return disconnectedEnv();
+    return rpcEnv(() => rpc.replayExportCancel(params));
+  });
+
+  // settings.* — passthrough stubs; no v2 settings schema yet
+  ipcMain.handle("cove/settings/get", async () => ({ ok: true, result: null }));
+  ipcMain.handle("cove/settings/set", async () => ({ ok: true, result: null }));
+
+  // hotkeys.* — expose existing bindings; set delegates to main-process handler
+  ipcMain.handle("cove/hotkeys/get", async () => ({ ok: true, result: { ...activeHotkeys } }));
+  ipcMain.handle("cove/hotkeys/set", async (_e, bindings: Record<string, string>) => {
+    setHotkeyBindings(bindings);
+    return { ok: true, result: null };
+  });
+
+  // env.* — capability probe; filesystem paths are stripped from the response
+  ipcMain.handle("cove/env/probe", async () => {
+    const ffmpeg = detectFfmpeg();
+    return { ok: true, result: {
+      platform: process.platform,
+      sessionType: detectSessionType(),
+      ffmpeg: {
+        available: ffmpeg.available,
+        version: ffmpeg.version,
+        encoders: ffmpeg.encoders,
+      },
+    }};
+  });
 }
 
 // On Linux the AppImage isn't registered with the desktop environment, so
@@ -886,6 +1139,28 @@ app.on("second-instance", () => {
 
 app.whenReady().then(() => {
   supervisor = new EngineSupervisor();
+
+  supervisor.on("ready", ({ helper_version, protocol_version }) => {
+    lastReadyPayload = { helperVersion: helper_version, protocolVersion: protocol_version };
+    mainWindow?.webContents.send("cove/engine/ready", lastReadyPayload);
+    const rpc = supervisor?.rpcClient;
+    if (rpc) wireHelperNotifications(rpc);
+  });
+
+  supervisor.on("crashed", () => {
+    lastReadyPayload = null;
+    mainWindow?.webContents.send("cove/engine/crashed");
+  });
+
+  supervisor.on("stateChanged", (state: string) => {
+    mainWindow?.webContents.send("cove/engine/stateChanged", state);
+  });
+
+  supervisor.on("unavailable", () => {
+    lastReadyPayload = null;
+    mainWindow?.webContents.send("cove/engine/stateChanged", "unavailable");
+  });
+
   void supervisor.start();
   Menu.setApplicationMenu(null);
   installLinuxDesktopFile();
