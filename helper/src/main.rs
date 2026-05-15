@@ -15,6 +15,15 @@ struct Args {
     log_level: String,
     #[arg(long)]
     print_protocol_version: bool,
+    /// Run in simulation mode (no real capture/encoder/export).
+    #[arg(long, alias = "stub-mode")]
+    simulate: bool,
+    /// Encoder backend name reported by the simulator.
+    #[arg(long, default_value = "nvenc")]
+    simulate_encoder: String,
+    /// Inject a simulated failure: target=reason (repeatable), e.g. "capture.startStream=pipewire-state-error".
+    #[arg(long, action = clap::ArgAction::Append)]
+    simulate_fail: Vec<String>,
 }
 
 #[tokio::main]
@@ -41,7 +50,25 @@ async fn main() {
         "cove-replay-engine started"
     );
 
-    if let Err(e) = cove_replay_engine::transport::server::run(ipc_socket, set_level).await {
+    let run_result = if args.simulate {
+        use cove_replay_engine::{
+            sim::{parse_fail_specs, SimConfig, SimState},
+            transport::server::{run_with_config, RunConfig},
+        };
+        let fail_specs = match parse_fail_specs(&args.simulate_fail) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("fatal: {e}");
+                process::exit(1);
+            }
+        };
+        let config = SimConfig { encoder: args.simulate_encoder, fail_specs: std::sync::Mutex::new(fail_specs) };
+        let sim = SimState::new(config);
+        run_with_config(ipc_socket, set_level, RunConfig { sim: Some(sim) }).await
+    } else {
+        cove_replay_engine::transport::server::run(ipc_socket, set_level).await
+    };
+    if let Err(e) = run_result {
         eprintln!("fatal: {e}");
         process::exit(1);
     }

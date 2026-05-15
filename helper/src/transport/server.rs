@@ -17,8 +17,21 @@ use crate::{
     SetLevelFn,
 };
 
+pub struct RunConfig {
+    pub sim: Option<std::sync::Arc<crate::sim::SimState>>,
+}
+
 #[cfg(unix)]
 pub async fn run(socket_path: &str, set_level: SetLevelFn) -> Result<()> {
+    run_with_config(socket_path, set_level, RunConfig { sim: None }).await
+}
+
+#[cfg(unix)]
+pub async fn run_with_config(
+    socket_path: &str,
+    set_level: SetLevelFn,
+    config: RunConfig,
+) -> Result<()> {
     // Issue #2: parent directory must be private before anything touches the socket path.
     ensure_private_socket_dir(socket_path)?;
 
@@ -64,8 +77,9 @@ pub async fn run(socket_path: &str, set_level: SetLevelFn) -> Result<()> {
                         let state_c = Arc::clone(&state);
                         let connected_c = Arc::clone(&connected);
                         let shutdown_rx_c = shutdown_rx.clone();
+                        let sim_c = config.sim.clone();
                         tokio::spawn(async move {
-                            handle_connection(stream, state_c, shutdown_rx_c).await;
+                            handle_connection(stream, state_c, shutdown_rx_c, sim_c).await;
                             connected_c.store(false, Ordering::SeqCst);
                         });
                     }
@@ -269,6 +283,7 @@ async fn handle_connection(
     stream: tokio::net::UnixStream,
     state: SharedState,
     mut shutdown_rx: watch::Receiver<bool>,
+    sim: Option<std::sync::Arc<crate::sim::SimState>>,
 ) {
     let (mut reader, writer) = split(stream);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
@@ -311,7 +326,7 @@ async fn handle_connection(
                                 }
                                 let notifier_c = notifier.clone();
                                 let state_c = Arc::clone(&state);
-                                match dispatch(req, &state_c, &notifier_c).await {
+                                match dispatch(req, &state_c, &notifier_c, sim.as_ref()).await {
                                     Some(resp) => {
                                         if let Err(e) = notifier_c.send_response(resp).await {
                                             error!(error = %e, "notifier send error");

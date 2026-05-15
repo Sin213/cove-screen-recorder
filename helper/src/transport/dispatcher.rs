@@ -48,18 +48,28 @@ impl Notifier {
 
 /// Dispatch a request and return Some(response) to send, or None when the
 /// response has already been queued (engine.shutdown only).
-pub async fn dispatch(req: Request, state: &SharedState, notifier: &Notifier) -> Option<Response> {
+pub async fn dispatch(
+    req: Request,
+    state: &SharedState,
+    notifier: &Notifier,
+    sim: Option<&std::sync::Arc<crate::sim::SimState>>,
+) -> Option<Response> {
     let id = req.id.clone();
+    // Engine lifecycle methods work the same regardless of sim mode.
     match req.method.as_str() {
-        "engine.version" => Some(handle_engine_version(id)),
-        "engine.health" => Some(handle_engine_health(id, state)),
-        "engine.setLogLevel" => Some(handle_set_log_level(id, req.params, state)),
+        "engine.version" => return Some(handle_engine_version(id)),
+        "engine.health" => return Some(handle_engine_health(id, state)),
+        "engine.setLogLevel" => return Some(handle_set_log_level(id, req.params, state)),
         "engine.shutdown" => {
             handle_shutdown(id, notifier, state).await;
-            None
+            return None;
         }
-        method => Some(stub_or_unknown(id, method)),
+        _ => {}
     }
+    if let Some(sim) = sim {
+        return crate::sim::dispatch::dispatch_sim(req, state, notifier, sim).await;
+    }
+    Some(stub_or_unknown(id, &req.method))
 }
 
 fn handle_engine_version(id: Option<serde_json::Value>) -> Response {
