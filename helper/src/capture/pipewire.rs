@@ -917,6 +917,7 @@ impl CaptureSource for PipeWireSource {
             .notify("capture.sessionReady", serde_json::to_value(ready_event)?)
             .await;
 
+        let capture_format_for_enc = capture_format.clone();
         {
             let mut inner = self.inner.lock().await;
             inner.phase = PwPhase::Recording;
@@ -944,8 +945,20 @@ impl CaptureSource for PipeWireSource {
             .await;
         });
 
+        // T-017 skeleton: encoder probe + selection sits between the PipeWire
+        // FrameReceiver and frame consumption.  When all backends probe
+        // `not-implemented-yet` (current MVP state) the receiver is drained
+        // exactly as before, preserving every T-022 PipeWire guarantee.
+        let notifier_enc = self.notifier.clone();
+        let stream_id_enc = stream_id.clone();
         tokio::spawn(async move {
-            run_counting_sink(frame_rx).await;
+            crate::encoder::run_session(
+                frame_rx,
+                notifier_enc,
+                stream_id_enc,
+                capture_format_for_enc,
+            )
+            .await;
         });
 
         let notifier_evt = self.notifier.clone();
@@ -1901,12 +1914,6 @@ async fn run_diagnostics_loop(
             let _ = notifier.notify("capture.diagnostics", v).await;
         }
     }
-}
-
-// ── Counting sink ────────────────────────────────────────────────────────────
-
-async fn run_counting_sink(mut rx: crate::capture::FrameReceiver) {
-    while rx.recv().await.is_some() {}
 }
 
 // ── RPC dispatcher (called from transport::dispatcher) ───────────────────────
