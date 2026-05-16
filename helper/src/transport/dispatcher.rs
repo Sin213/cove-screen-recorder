@@ -1,50 +1,13 @@
-use anyhow::Result;
 use serde_json::json;
-use tokio::sync::mpsc;
 
 use crate::engine::SharedState;
 use crate::protocol::{
-    envelope::{Notification, Request, Response, RpcError},
-    events::EngineReadyEvent,
+    envelope::{Request, Response, RpcError},
     types::{EngineHealth, EngineState},
     version::{HELPER_VERSION, PROTOCOL_VERSION},
 };
 
-#[derive(Clone)]
-pub struct Notifier {
-    tx: mpsc::Sender<Vec<u8>>,
-}
-
-impl Notifier {
-    pub fn new() -> (Self, mpsc::Receiver<Vec<u8>>) {
-        let (tx, rx) = mpsc::channel(64);
-        (Notifier { tx }, rx)
-    }
-
-    pub async fn notify(&self, method: &str, params: serde_json::Value) -> Result<()> {
-        let n = Notification::new(method, Some(params));
-        let bytes = serde_json::to_vec(&n)?;
-        self.tx.send(bytes).await?;
-        Ok(())
-    }
-
-    pub async fn send_response(&self, response: Response) -> Result<()> {
-        let bytes = serde_json::to_vec(&response)?;
-        self.tx.send(bytes).await?;
-        Ok(())
-    }
-
-    /// Fires the `engine.ready` notification immediately after a client connects.
-    pub async fn send_engine_ready(&self) -> Result<()> {
-        let event = EngineReadyEvent {
-            helper_version: HELPER_VERSION.to_string(),
-            protocol_version: PROTOCOL_VERSION,
-            pid: std::process::id(),
-            capabilities: vec![],
-        };
-        self.notify("engine.ready", serde_json::to_value(event)?).await
-    }
-}
+pub use super::notifier::Notifier;
 
 /// Dispatch a request and return Some(response) to send, or None when the
 /// response has already been queued (engine.shutdown only).
@@ -53,6 +16,7 @@ pub async fn dispatch(
     state: &SharedState,
     notifier: &Notifier,
     sim: Option<&std::sync::Arc<crate::sim::SimState>>,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Option<Response> {
     let id = req.id.clone();
     // Engine lifecycle methods work the same regardless of sim mode.
@@ -68,6 +32,12 @@ pub async fn dispatch(
     }
     if let Some(sim) = sim {
         return crate::sim::dispatch::dispatch_sim(req, state, notifier, sim).await;
+    }
+    #[cfg(target_os = "linux")]
+    if req.method.starts_with("capture.") {
+        return Some(
+            crate::capture::pipewire::dispatch_capture(req, state, notifier, cancel_rx).await,
+        );
     }
     Some(stub_or_unknown(id, &req.method))
 }

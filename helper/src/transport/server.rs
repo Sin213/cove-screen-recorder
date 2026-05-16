@@ -8,6 +8,7 @@ use tokio::{io::split, net::UnixListener, sync::watch};
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    capture::CaptureSource,
     engine::{HelperState, SharedState},
     protocol::envelope::{parse_request, Response, RpcError},
     transport::{
@@ -17,13 +18,26 @@ use crate::{
     SetLevelFn,
 };
 
+/// Hard limit on frames staged in the pending queue while a dispatch is in-flight.
+/// Exceeding this is treated as protocol abuse; the connection is closed cleanly.
+const MAX_PENDING_FRAMES: usize = 16;
+/// Hard limit on total bytes staged in the pending queue while a dispatch is in-flight.
+const MAX_PENDING_BYTES: usize = 4 * 1024 * 1024; // 4 MiB
+
+#[derive(Default)]
 pub struct RunConfig {
     pub sim: Option<std::sync::Arc<crate::sim::SimState>>,
+    /// Override the pending-frame count limit. `None` = `MAX_PENDING_FRAMES`.
+    /// Intended for tests; leave `None` in production.
+    pub max_pending_frames: Option<usize>,
+    /// Override the pending-byte limit. `None` = `MAX_PENDING_BYTES`.
+    /// Intended for tests; leave `None` in production.
+    pub max_pending_bytes: Option<usize>,
 }
 
 #[cfg(unix)]
 pub async fn run(socket_path: &str, set_level: SetLevelFn) -> Result<()> {
-    run_with_config(socket_path, set_level, RunConfig { sim: None }).await
+    run_with_config(socket_path, set_level, RunConfig::default()).await
 }
 
 #[cfg(unix)]
@@ -58,6 +72,8 @@ pub async fn run_with_config(
         start_time: std::time::Instant::now(),
         set_level,
         shutdown_tx: Arc::clone(&shutdown_tx),
+        #[cfg(target_os = "linux")]
+        active_capture: tokio::sync::Mutex::new(None),
     });
 
     let connected = Arc::new(AtomicBool::new(false));
@@ -78,8 +94,13 @@ pub async fn run_with_config(
                         let connected_c = Arc::clone(&connected);
                         let shutdown_rx_c = shutdown_rx.clone();
                         let sim_c = config.sim.clone();
+                        let max_pf = config.max_pending_frames.unwrap_or(MAX_PENDING_FRAMES);
+                        let max_pb = config.max_pending_bytes.unwrap_or(MAX_PENDING_BYTES);
                         tokio::spawn(async move {
-                            handle_connection(stream, state_c, shutdown_rx_c, sim_c).await;
+                            handle_connection(
+                                stream, state_c, shutdown_rx_c, sim_c, max_pf, max_pb,
+                            )
+                            .await;
                             connected_c.store(false, Ordering::SeqCst);
                         });
                     }
@@ -284,8 +305,10 @@ async fn handle_connection(
     state: SharedState,
     mut shutdown_rx: watch::Receiver<bool>,
     sim: Option<std::sync::Arc<crate::sim::SimState>>,
+    max_pending_frames: usize,
+    max_pending_bytes: usize,
 ) {
-    let (mut reader, writer) = split(stream);
+    let (reader, writer) = split(stream);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
     let (notifier, mut notify_rx) = Notifier::new();
@@ -310,64 +333,211 @@ async fn handle_connection(
         return;
     }
 
-    loop {
-        tokio::select! {
-            frame_result = read_frame(&mut reader) => {
-                match frame_result {
-                    Ok(bytes) => {
-                        // Issue #3: distinguish notifications (no id) from requests.
-                        match parse_request(&bytes) {
-                            Ok(req) => {
-                                debug!(method = %req.method, "incoming message");
-                                if req.is_notification {
-                                    // JSON-RPC notifications never get a response.
-                                    debug!(method = %req.method, "notification — no response");
-                                    continue;
-                                }
-                                let notifier_c = notifier.clone();
-                                let state_c = Arc::clone(&state);
-                                match dispatch(req, &state_c, &notifier_c, sim.as_ref()).await {
-                                    Some(resp) => {
-                                        if let Err(e) = notifier_c.send_response(resp).await {
-                                            error!(error = %e, "notifier send error");
-                                            break;
-                                        }
-                                    }
-                                    // None = engine.shutdown: response already queued, break.
-                                    None => break,
-                                }
-                            }
-                            Err(e) => {
-                                let err_resp = Response::error(
-                                    None,
-                                    RpcError::invalid_request(format!("parse error: {e}")),
-                                );
-                                let _ = notifier.send_response(err_resp).await;
-                            }
-                        }
-                    }
-                    Err(FrameError::TooLarge(n)) => {
-                        warn!(bytes = n, "frame too large, closing connection");
-                        let err_resp = Response::error(
-                            None,
-                            RpcError::invalid_request(format!("frame too large: {n} bytes")),
-                        );
-                        let _ = notifier.send_response(err_resp).await;
-                        break;
-                    }
-                    Err(FrameError::Io(e)) => {
-                        if e.kind() != std::io::ErrorKind::UnexpectedEof
-                            && e.kind() != std::io::ErrorKind::ConnectionReset
-                        {
-                            error!(error = %e, "read error");
-                        }
-                        break;
+    // Cancel-safe reader task: owns the socket read half and delivers complete frames
+    // through an mpsc channel. tokio's mpsc Receiver::recv() is documented cancel-safe
+    // — dropping a pending recv() in select! never discards a buffered message. This
+    // eliminates the partial-frame corruption race: read_frame's multi-step read_exact
+    // calls are never cancelled mid-frame because they run only inside this dedicated
+    // task where they are never raced against another branch.
+    let (frame_tx, mut frame_rx) =
+        tokio::sync::mpsc::channel::<Result<Vec<u8>, FrameError>>(16);
+    let reader_task = tokio::spawn(async move {
+        let mut reader = reader;
+        loop {
+            match read_frame(&mut reader).await {
+                Ok(bytes) => {
+                    if frame_tx.send(Ok(bytes)).await.is_err() {
+                        break; // dispatcher dropped frame_rx
                     }
                 }
+                Err(e) => {
+                    let _ = frame_tx.send(Err(e)).await;
+                    break;
+                }
             }
-            _ = shutdown_rx.changed() => {
-                info!("shutdown signaled, closing connection");
-                break;
+        }
+    });
+
+    let (conn_cancel_tx, conn_cancel_rx) = watch::channel::<bool>(false);
+
+    // Frames received from the channel during an in-flight dispatch are staged here
+    // and drained by Phase 1 before the next channel recv, preserving arrival order.
+    // Both count and byte total are bounded; exceeding either limit closes the connection.
+    let mut pending_frames: std::collections::VecDeque<Vec<u8>> =
+        std::collections::VecDeque::new();
+    let mut pending_bytes: usize = 0;
+
+    'outer: loop {
+        // Phase 1: drain staged frames before receiving from the channel so that
+        // pipelined requests are processed in arrival order.
+        let bytes = if let Some(buffered) = pending_frames.pop_front() {
+            pending_bytes = pending_bytes.saturating_sub(buffered.len());
+            buffered
+        } else {
+            tokio::select! {
+                msg = frame_rx.recv() => {
+                    match msg {
+                        None => break 'outer, // reader task exited
+                        Some(Ok(b)) => b,
+                        Some(Err(FrameError::TooLarge(n))) => {
+                            warn!(bytes = n, "frame too large, closing connection");
+                            let err_resp = Response::error(
+                                None,
+                                RpcError::invalid_request(format!("frame too large: {n} bytes")),
+                            );
+                            let _ = notifier.send_response(err_resp).await;
+                            break 'outer;
+                        }
+                        Some(Err(FrameError::Io(e))) => {
+                            if e.kind() != std::io::ErrorKind::UnexpectedEof
+                                && e.kind() != std::io::ErrorKind::ConnectionReset
+                            {
+                                error!(error = %e, "read error");
+                            }
+                            break 'outer;
+                        }
+                    }
+                }
+                _ = shutdown_rx.changed() => {
+                    info!("shutdown signaled, closing connection");
+                    break 'outer;
+                }
+            }
+        };
+
+        let req = match parse_request(&bytes) {
+            Ok(req) => req,
+            Err(e) => {
+                let err_resp = Response::error(
+                    None,
+                    RpcError::invalid_request(format!("parse error: {e}")),
+                );
+                let _ = notifier.send_response(err_resp).await;
+                continue 'outer;
+            }
+        };
+
+        debug!(method = %req.method, "incoming message");
+        // Issue #3: distinguish notifications (no id) from requests.
+        if req.is_notification {
+            debug!(method = %req.method, "notification — no response");
+            continue 'outer;
+        }
+
+        // Phase 2: spawn dispatch as a task so disconnect/shutdown remains observable
+        // while a long portal negotiation (or any blocking dispatch) is in progress.
+        let state_c = Arc::clone(&state);
+        let notifier_c = notifier.clone();
+        let sim_c = sim.clone();
+        let cancel_rx_c = conn_cancel_rx.clone();
+        let mut dispatch_handle = tokio::spawn(async move {
+            dispatch(req, &state_c, &notifier_c, sim_c.as_ref(), cancel_rx_c).await
+        });
+
+        let resp_opt = loop {
+            tokio::select! {
+                result = &mut dispatch_handle => break result.ok().flatten(),
+                msg = frame_rx.recv() => {
+                    match msg {
+                        None => {
+                            // Reader task exited: treat as disconnect.
+                            let _ = conn_cancel_tx.send(true);
+                            tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                &mut dispatch_handle,
+                            )
+                            .await
+                            .ok();
+                            dispatch_handle.abort();
+                            break 'outer;
+                        }
+                        Some(Ok(bytes)) => {
+                            // Valid pipelined frame: enforce bounds before staging.
+                            if pending_frames.len() >= max_pending_frames
+                                || pending_bytes.saturating_add(bytes.len()) > max_pending_bytes
+                            {
+                                warn!(
+                                    pending_count = pending_frames.len(),
+                                    pending_bytes,
+                                    frame_len = bytes.len(),
+                                    "pending-frame limit exceeded, closing connection"
+                                );
+                                let _ = conn_cancel_tx.send(true);
+                                tokio::time::timeout(
+                                    std::time::Duration::from_secs(5),
+                                    &mut dispatch_handle,
+                                )
+                                .await
+                                .ok();
+                                dispatch_handle.abort();
+                                break 'outer;
+                            }
+                            pending_bytes += bytes.len();
+                            pending_frames.push_back(bytes);
+                        }
+                        Some(Err(e)) => {
+                            match &e {
+                                FrameError::Io(io_err) => {
+                                    if io_err.kind() != std::io::ErrorKind::UnexpectedEof
+                                        && io_err.kind() != std::io::ErrorKind::ConnectionReset
+                                    {
+                                        error!(error = %io_err, "read error during dispatch");
+                                    }
+                                }
+                                FrameError::TooLarge(n) => {
+                                    warn!(bytes = n, "frame too large during dispatch");
+                                }
+                            }
+                            let _ = conn_cancel_tx.send(true);
+                            tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                &mut dispatch_handle,
+                            )
+                            .await
+                            .ok();
+                            dispatch_handle.abort();
+                            break 'outer;
+                        }
+                    }
+                }
+                _ = shutdown_rx.changed() => {
+                    info!("shutdown signaled during dispatch, closing connection");
+                    let _ = conn_cancel_tx.send(true);
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        &mut dispatch_handle,
+                    )
+                    .await
+                    .ok();
+                    dispatch_handle.abort();
+                    break 'outer;
+                }
+            }
+        };
+
+        match resp_opt {
+            Some(resp) => {
+                if let Err(e) = notifier.send_response(resp).await {
+                    error!(error = %e, "notifier send error");
+                    break 'outer;
+                }
+            }
+            None => break 'outer, // engine.shutdown: response already queued
+        }
+    }
+
+    // Abort the reader task before portal teardown so no straggler reads overlap
+    // with active_capture cleanup.
+    reader_task.abort();
+
+    // Linux: best-effort stop any active portal session bound to this connection.
+    // Covers client disconnect, read/write error, and engine.shutdown paths.
+    #[cfg(target_os = "linux")]
+    {
+        let maybe_capture = state.active_capture.lock().await.take();
+        if let Some(capture) = maybe_capture {
+            if let Err(e) = capture.stop_session().await {
+                warn!("capture cleanup on disconnect: {e}");
             }
         }
     }
