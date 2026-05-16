@@ -76,7 +76,7 @@ mod simulate {
         let sp = socket_path.clone();
         let handle = tokio::spawn(async move {
             let set_level: cove_replay_engine::SetLevelFn = Arc::new(|_| Ok(()));
-            run_with_config(&sp, set_level, RunConfig { sim: Some(sim) }).await.ok();
+            run_with_config(&sp, set_level, RunConfig { sim: Some(sim), ..Default::default() }).await.ok();
         });
         for _ in 0..40 {
             if std::path::Path::new(&socket_path).exists() {

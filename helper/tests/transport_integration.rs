@@ -909,3 +909,92 @@ async fn all_stubs_include_method_name() {
         );
     }
 }
+
+// ── Duplicate startStream returns error but preserves active session ────────
+//
+// Uses sim mode. After requestSession + startStream succeed, a second
+// startStream must return an error without orphaning the active session.
+// A subsequent stopSession must still succeed.
+
+#[cfg(unix)]
+#[tokio::test]
+async fn duplicate_start_stream_preserves_active_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (socket_path, _srv) = spawn_sim_server(&tmp).await;
+    let mut stream = connect(&socket_path).await;
+    read_frame(&mut stream).await; // drain engine.ready
+
+    // requestSession
+    let params = serde_json::json!({
+        "mode": "monitor",
+        "cursor_mode": "embedded",
+        "persist": "transient"
+    });
+    let req = make_request(1, "capture.requestSession", Some(params));
+    write_frame(&mut stream, &req).await;
+    let val: serde_json::Value =
+        serde_json::from_slice(&read_frame(&mut stream).await).unwrap();
+    assert!(
+        val["result"].is_object(),
+        "requestSession must succeed in sim mode; got: {val}"
+    );
+
+    // First startStream — must succeed.
+    let req = make_request(2, "capture.startStream", None);
+    write_frame(&mut stream, &req).await;
+    let val: serde_json::Value =
+        serde_json::from_slice(&read_frame(&mut stream).await).unwrap();
+    assert!(
+        val["result"].is_object(),
+        "first startStream must succeed; got: {val}"
+    );
+
+    // Wait for sessionReady notification.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Drain any pending notifications (sessionReady, diagnostics, etc.)
+    loop {
+        match tokio::time::timeout(Duration::from_millis(100), read_frame(&mut stream)).await {
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
+
+    // Duplicate startStream — must fail but NOT orphan the session.
+    let req = make_request(3, "capture.startStream", None);
+    write_frame(&mut stream, &req).await;
+    let val: serde_json::Value =
+        serde_json::from_slice(&read_frame(&mut stream).await).unwrap();
+    assert!(
+        val["error"].is_object(),
+        "duplicate startStream must return error; got: {val}"
+    );
+
+    // stopSession — must still work (session was not orphaned).
+    let req = make_request(4, "capture.stopSession", None);
+    write_frame(&mut stream, &req).await;
+
+    // Drain frames until we find the stopSession response (id=4).
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut found_stop = false;
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), read_frame(&mut stream)).await {
+            Ok(bytes) => {
+                let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                if v["id"] == 4 {
+                    assert!(
+                        v["result"].is_object(),
+                        "stopSession must succeed after duplicate startStream; got: {v}"
+                    );
+                    found_stop = true;
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    assert!(
+        found_stop,
+        "stopSession response (id=4) must arrive after duplicate startStream"
+    );
+}

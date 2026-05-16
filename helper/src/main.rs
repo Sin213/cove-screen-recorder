@@ -64,7 +64,7 @@ async fn main() {
         };
         let config = SimConfig { encoder: args.simulate_encoder, fail_specs: std::sync::Mutex::new(fail_specs) };
         let sim = SimState::new(config);
-        run_with_config(ipc_socket, set_level, RunConfig { sim: Some(sim) }).await
+        run_with_config(ipc_socket, set_level, RunConfig { sim: Some(sim), ..Default::default() }).await
     } else {
         cove_replay_engine::transport::server::run(ipc_socket, set_level).await
     };
