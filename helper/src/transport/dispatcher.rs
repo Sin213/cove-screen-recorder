@@ -22,7 +22,7 @@ pub async fn dispatch(
     // Engine lifecycle methods work the same regardless of sim mode.
     match req.method.as_str() {
         "engine.version" => return Some(handle_engine_version(id)),
-        "engine.health" => return Some(handle_engine_health(id, state)),
+        "engine.health" => return Some(handle_engine_health(id, state).await),
         "engine.setLogLevel" => return Some(handle_set_log_level(id, req.params, state)),
         "engine.shutdown" => {
             handle_shutdown(id, notifier, state).await;
@@ -39,6 +39,9 @@ pub async fn dispatch(
             crate::capture::pipewire::dispatch_capture(req, state, notifier, cancel_rx).await,
         );
     }
+    if req.method.starts_with("replay.") {
+        return Some(crate::export::dispatch_replay(req, state, notifier).await);
+    }
     Some(stub_or_unknown(id, &req.method))
 }
 
@@ -52,13 +55,15 @@ fn handle_engine_version(id: Option<serde_json::Value>) -> Response {
     )
 }
 
-fn handle_engine_health(id: Option<serde_json::Value>, state: &SharedState) -> Response {
+async fn handle_engine_health(id: Option<serde_json::Value>, state: &SharedState) -> Response {
+    let active_snapshots = state.active_snapshots.lock().await.len() as u32;
+    let active_exports = state.active_exports.lock().await.len() as u32;
     let health = EngineHealth {
         state: EngineState::Ready,
         uptime_ms: state.start_time.elapsed().as_millis() as u64,
         active_sessions: 0,
-        active_snapshots: 0,
-        active_exports: 0,
+        active_snapshots,
+        active_exports,
         last_error_ts: None,
         diagnostics_dir: String::new(),
         rolling_buffer_bytes: 0,

@@ -8,7 +8,7 @@
   "id": "T-019",
   "order": 90,
   "phase": "p3b-implementation",
-  "status": "open",
+  "status": "inprogress",
   "title": "Implement replay snapshot + export/remux MVP (stream-copy)",
   "type": "task"
 }

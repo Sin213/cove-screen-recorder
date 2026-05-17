@@ -8,12 +8,13 @@
 use std::collections::VecDeque;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tracing::warn;
 
 use crate::encoder::fragment::{EncodedFragment, FragmentSink, FragmentSinkError};
@@ -54,6 +55,9 @@ struct CommittedSegment {
     duration_90k: i64,
     byte_size: u64,
     is_keyframe_first: bool,
+    /// True for the first segment committed after a format-change boundary.
+    /// Stream-copy export must reject snapshots that contain such segments.
+    discontinuity: bool,
     fragment_count: u32,
     pin_count: u32,
 }
@@ -123,6 +127,9 @@ pub struct ManifestEntry {
     pub duration_90k: i64,
     pub byte_size: u64,
     pub is_keyframe_first: bool,
+    /// False by default for legacy manifests written before this field existed.
+    #[serde(default)]
+    pub discontinuity: bool,
     pub fragment_count: u32,
 }
 
@@ -190,6 +197,7 @@ impl BufferInner {
                     duration_90k: seg.duration_90k,
                     byte_size: seg.byte_size,
                     is_keyframe_first: seg.is_keyframe_first,
+                    discontinuity: seg.discontinuity,
                     fragment_count: seg.fragment_count,
                 })
                 .collect(),
@@ -331,6 +339,10 @@ impl BufferInner {
             }
         })?;
 
+        // All segments after a format change are marked discontinuous until
+        // set_init_segment() stores a new init segment that matches their format.
+        let is_discontinuity = self.format_changed;
+
         let seg = CommittedSegment {
             index,
             path: result.path,
@@ -339,6 +351,7 @@ impl BufferInner {
             duration_90k: self.pending.total_duration_90k as i64,
             byte_size: result.byte_size,
             is_keyframe_first: self.pending.is_keyframe_first,
+            discontinuity: is_discontinuity,
             fragment_count: self.pending.fragments.len() as u32,
             pin_count: 0,
         };
@@ -348,11 +361,6 @@ impl BufferInner {
         self.last_rename_latency_us = result.rename_us;
         self.bytes_on_disk += seg.byte_size;
         self.segments_committed += 1;
-
-        if self.format_changed {
-            self.formatchange_segments += 1;
-            self.format_changed = false;
-        }
 
         self.committed.push_back(seg);
         self.pending = PendingSegment::new();
@@ -370,6 +378,13 @@ impl BufferInner {
 /// encoder session's output sink.
 pub struct SegmentBuffer {
     inner: Arc<Mutex<BufferInner>>,
+    /// Sends `true` when the buffer is closed so callers can wait for tail
+    /// segments to be committed (e.g. replay.save after capture.stopSession).
+    close_tx: Arc<watch::Sender<bool>>,
+    /// Set when the encoder begins teardown (before finalize). replay.save
+    /// uses this to distinguish "still recording" from "stopping" so it
+    /// only waits for the tail segment during the stop→finalize window.
+    closing: Arc<AtomicBool>,
 }
 
 impl SegmentBuffer {
@@ -407,7 +422,37 @@ impl SegmentBuffer {
                 last_diagnostics: Instant::now(),
                 format_changed: false,
             })),
+            close_tx: Arc::new(watch::channel(false).0),
+            closing: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Create a receiver that fires when the buffer is closed (finalized).
+    /// Useful for waiting on tail segments after capture stop.
+    pub fn subscribe_close(&self) -> watch::Receiver<bool> {
+        self.close_tx.subscribe()
+    }
+
+    /// Returns true once `mark_closing()` has been called (encoder is tearing down).
+    pub fn is_closing(&self) -> bool {
+        self.closing.load(Ordering::Acquire)
+    }
+
+    /// Signal that this buffer's session is entering teardown. Can be called
+    /// on any clone; all clones share the same Arc<AtomicBool>.
+    pub fn mark_closing(&self) {
+        self.closing.store(true, Ordering::Release);
+    }
+
+    /// Clone a shared handle to this buffer. Both handles share the same
+    /// underlying `Arc<Mutex<BufferInner>>`, so all operations observe and
+    /// modify the same state.
+    pub fn clone_handle(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            close_tx: Arc::clone(&self.close_tx),
+            closing: Arc::clone(&self.closing),
+        }
     }
 
     /// Pin segments covering the last `duration_90k` for a replay save.
@@ -435,7 +480,7 @@ impl SegmentBuffer {
                 duration_90k: seg.duration_90k,
                 byte_size: seg.byte_size,
                 is_keyframe_first: seg.is_keyframe_first,
-                discontinuity: false,
+                discontinuity: seg.discontinuity,
                 fragment_count: seg.fragment_count,
             });
         }
@@ -470,6 +515,8 @@ impl SegmentBuffer {
         let mut inner = self.inner.lock().await;
         let _ = inner.commit_pending().await;
         inner.closed = true;
+        drop(inner);
+        let _ = self.close_tx.send(true);
     }
 
     /// Get the session directory path.
@@ -498,7 +545,7 @@ impl SegmentBuffer {
                 duration_90k: seg.duration_90k,
                 byte_size: seg.byte_size,
                 is_keyframe_first: seg.is_keyframe_first,
-                discontinuity: false,
+                discontinuity: seg.discontinuity,
                 fragment_count: seg.fragment_count,
             })
             .collect()
@@ -508,9 +555,10 @@ impl SegmentBuffer {
 #[async_trait]
 impl FragmentSink for SegmentBuffer {
     async fn set_init_segment(&mut self, data: Vec<u8>) -> Result<(), FragmentSinkError> {
-        let inner = self.inner.lock().await;
-        let dir = inner.writer.dir().to_path_buf();
-        drop(inner);
+        let dir = {
+            let inner = self.inner.lock().await;
+            inner.writer.dir().to_path_buf()
+        };
 
         let partial = dir.join("init.mp4.partial");
         let final_path = dir.join("init.mp4");
@@ -529,7 +577,11 @@ impl FragmentSink for SegmentBuffer {
             Ok(())
         })
         .await
-        .map_err(|e| FragmentSinkError::Internal(e.to_string()))?
+        .map_err(|e| FragmentSinkError::Internal(e.to_string()))??;
+
+        // New init segment persisted — segments from here forward are compatible.
+        self.inner.lock().await.format_changed = false;
+        Ok(())
     }
 
     async fn notify_format_change(&mut self) -> Result<(), FragmentSinkError> {
@@ -537,15 +589,22 @@ impl FragmentSink for SegmentBuffer {
         if !inner.pending.is_empty() {
             inner.commit_pending().await?;
         }
+        inner.formatchange_segments += 1;
         inner.format_changed = true;
         inner.seen_first_keyframe = false;
         Ok(())
+    }
+
+    fn set_closing(&mut self) {
+        self.mark_closing();
     }
 
     async fn finalize(&mut self) -> Result<(), FragmentSinkError> {
         let mut inner = self.inner.lock().await;
         inner.commit_pending().await?;
         inner.closed = true;
+        drop(inner);
+        let _ = self.close_tx.send(true);
         Ok(())
     }
 

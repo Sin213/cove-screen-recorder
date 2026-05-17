@@ -98,10 +98,20 @@ impl std::fmt::Debug for ReleaseToken {
     }
 }
 
+/// Multiplexes video frames and in-band control markers on the same ordered
+/// channel so the encoder always sees format changes in causal order relative
+/// to the frames that follow them.
 #[cfg(unix)]
-pub type FrameSender = mpsc::Sender<FrameHandle>;
+#[derive(Debug)]
+pub enum FrameOrControl {
+    Frame(FrameHandle),
+    FormatChanged,
+}
+
 #[cfg(unix)]
-pub type FrameReceiver = mpsc::Receiver<FrameHandle>;
+pub type FrameSender = mpsc::Sender<FrameOrControl>;
+#[cfg(unix)]
+pub type FrameReceiver = mpsc::Receiver<FrameOrControl>;
 
 #[cfg(unix)]
 pub fn frame_channel(capacity: usize) -> (FrameSender, FrameReceiver) {

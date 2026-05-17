@@ -43,6 +43,10 @@ pub trait FragmentSink: Send + Sync + 'static {
     async fn finalize(&mut self) -> Result<(), FragmentSinkError> {
         Ok(())
     }
+
+    /// Signal that the sink is entering teardown. Called before finalize so
+    /// callers can distinguish "still recording" from "stop→finalize window".
+    fn set_closing(&mut self) {}
 }
 
 /// Terminator for the T-017 skeleton slice — counts fragments and bytes without

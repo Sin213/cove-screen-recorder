@@ -79,13 +79,33 @@ pub async fn run_with_config(
         );
     }
 
+    // T-019: reap .tmp export files left by a prior crash before accepting any
+    // new export requests.
+    let export_staging_dir = crate::export::resolve_export_staging_dir();
+    crate::export::reap_orphaned_exports(&export_staging_dir);
+
+    // Probe for ffmpeg at boot so export failures are surfaced early.
+    let ffmpeg_available = std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok();
+    if !ffmpeg_available {
+        warn!("ffmpeg not found on PATH; export requests will be rejected");
+    }
+
     let state: SharedState = Arc::new(HelperState {
         start_time: std::time::Instant::now(),
         set_level,
         shutdown_tx: Arc::clone(&shutdown_tx),
+        ffmpeg_available,
         #[cfg(target_os = "linux")]
         active_capture: tokio::sync::Mutex::new(None),
         recoverable_sessions: tokio::sync::Mutex::new(recovered),
+        active_segment_buffer: tokio::sync::Mutex::new(None),
+        active_snapshots: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        active_exports: tokio::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     let connected = Arc::new(AtomicBool::new(false));

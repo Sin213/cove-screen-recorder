@@ -530,10 +530,11 @@ pub struct PipeWireSource {
     inner: Arc<Mutex<PwInner>>,
     session_counter: AtomicU32,
     stream_counter: AtomicU32,
+    state: crate::engine::SharedState,
 }
 
 impl PipeWireSource {
-    pub fn new(notifier: Notifier) -> Self {
+    pub fn new(notifier: Notifier, state: crate::engine::SharedState) -> Self {
         PipeWireSource {
             notifier,
             restore_store: RestoreStore::new(),
@@ -554,6 +555,7 @@ impl PipeWireSource {
             })),
             session_counter: AtomicU32::new(0),
             stream_counter: AtomicU32::new(0),
+            state,
         }
     }
 
@@ -908,6 +910,11 @@ impl CaptureSource for PipeWireSource {
             "PW stream ready"
         );
 
+        // Evict any stale buffer from a previous session before advertising
+        // readiness, so replay.save cannot pin the wrong session's segments
+        // during the window before the encoder task installs the new buffer.
+        *self.state.active_segment_buffer.lock().await = None;
+
         let ready_event = SessionReadyEvent {
             session_id: session_id.clone(),
             stream_id: stream_id.clone(),
@@ -951,7 +958,7 @@ impl CaptureSource for PipeWireSource {
         let notifier_enc = self.notifier.clone();
         let stream_id_enc = stream_id.clone();
         let session_id_enc = session_id.clone();
-        let (format_change_tx, format_change_rx) = tokio::sync::mpsc::channel::<()>(4);
+        let state_enc = std::sync::Arc::clone(&self.state);
         tokio::spawn(async move {
             crate::encoder::run_session(
                 frame_rx,
@@ -959,7 +966,7 @@ impl CaptureSource for PipeWireSource {
                 stream_id_enc,
                 session_id_enc,
                 capture_format_for_enc,
-                format_change_rx,
+                state_enc,
             )
             .await;
         });
@@ -969,7 +976,7 @@ impl CaptureSource for PipeWireSource {
         let stream_id_evt = stream_id;
         let inner_evt = Arc::clone(&self.inner);
         tokio::spawn(async move {
-            pw_event_loop(event_rx, notifier_evt, session_id_evt, stream_id_evt, inner_evt, format_tx, format_change_tx).await;
+            pw_event_loop(event_rx, notifier_evt, session_id_evt, stream_id_evt, inner_evt, format_tx).await;
         });
 
         Ok(())
@@ -1129,6 +1136,11 @@ struct PwUserData {
     /// Initialised on each `param_changed`; transitions on observed buffer types
     /// (soft fallback) or stream-state errors (hard fallback through `pw_cmd_tx`).
     negotiation_phase: BufferNegotiationPhase,
+    /// Set when a mid-stream format change fires but the frame channel was full at the
+    /// time. The `process` callback retries the sentinel before each subsequent frame so
+    /// no post-change frame can be enqueued ahead of the marker. Both sends use
+    /// `try_send` — the PipeWire callback thread never blocks on the Tokio channel.
+    format_changed_pending: bool,
 }
 
 fn pw_thread_run(
@@ -1200,6 +1212,7 @@ fn pw_thread_run(
         // Issue #1: every fresh session starts in the DMA-BUF attempt phase. The
         // first `param_changed` will reset this based on `force_shm_on_negotiation`.
         negotiation_phase: BufferNegotiationPhase::DmaBufAttempted,
+        format_changed_pending: false,
     };
 
     let quit_on_err = quit_flag.clone();
@@ -1360,6 +1373,16 @@ fn pw_thread_run(
                             old,
                             new: neg,
                         });
+                        // Inject an in-band sentinel so the encoder sees the
+                        // format change before any frame that follows it on the
+                        // same channel. Use try_send so the PW thread never
+                        // blocks; if the channel is full, set the pending flag
+                        // so process() retries before the next frame.
+                        if ud.frame_tx.try_send(
+                            crate::capture::FrameOrControl::FormatChanged,
+                        ).is_err() {
+                            ud.format_changed_pending = true;
+                        }
                     }
                 }
             }
@@ -1368,6 +1391,18 @@ fn pw_thread_run(
             let raw_buf = unsafe { stream.dequeue_raw_buffer() };
             if raw_buf.is_null() {
                 return;
+            }
+            // Retry a pending format-change sentinel before processing any frame.
+            // If the retry fails (channel still full), drop this frame so no
+            // post-change frame can precede the sentinel in the encoder's queue.
+            if ud.format_changed_pending {
+                match ud.frame_tx.try_send(crate::capture::FrameOrControl::FormatChanged) {
+                    Ok(()) => ud.format_changed_pending = false,
+                    Err(_) => {
+                        unsafe { stream.queue_raw_buffer(raw_buf); }
+                        return;
+                    }
+                }
             }
             if !ud.format_valid {
                 unsafe { stream.queue_raw_buffer(raw_buf); }
@@ -1595,7 +1630,7 @@ fn pw_thread_run(
                 release,
             };
 
-            match ud.frame_tx.try_send(handle) {
+            match ud.frame_tx.try_send(crate::capture::FrameOrControl::Frame(handle)) {
                 Ok(()) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Full(dropped)) => {
                     // Dropping `dropped` fires its ReleaseToken, which decrements
@@ -1803,14 +1838,12 @@ async fn pw_event_loop(
     stream_id: String,
     inner: Arc<Mutex<PwInner>>,
     format_tx: tokio::sync::watch::Sender<NegotiatedFormat>,
-    format_change_tx: tokio::sync::mpsc::Sender<()>,
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
             PwEvent::FormatChanged { old, new } => {
                 debug!(session_id, "mid-stream format change");
                 let _ = format_tx.send(new.clone());
-                let _ = format_change_tx.send(()).await;
                 let ev = FormatChangedEvent {
                     stream_id: stream_id.clone(),
                     old_format: old.to_capture_format(),
@@ -1956,7 +1989,7 @@ pub async fn dispatch_capture(
                     RpcError::invalid_request("session already active"),
                 );
             }
-            let capture = Arc::new(PipeWireSource::new(notifier.clone()));
+            let capture = Arc::new(PipeWireSource::new(notifier.clone(), std::sync::Arc::clone(state)));
             match capture.request_session_cancellable(opts, cancel_rx.clone()).await {
                 Ok(()) => {
                     // Post-negotiation cancel check: don't install for a dead client.
@@ -2021,6 +2054,12 @@ pub async fn dispatch_capture(
         "capture.stopSession" => {
             match get_active_capture(state).await {
                 Some(c) => {
+                    // Mark the active buffer as closing before signalling PipeWire
+                    // so that any concurrent replay.save waits for the tail segment
+                    // during the full stop→finalize window.
+                    if let Some(buf_info) = state.active_segment_buffer.lock().await.as_ref() {
+                        buf_info.buffer.mark_closing();
+                    }
                     let result = c.stop_session().await;
                     *state.active_capture.lock().await = None;
                     match result {

@@ -5,7 +5,7 @@ edition = "2021"
 description = "Native helper replay engine for Cove Screen Recorder"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "sync", "signal", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "sync", "signal", "time", "fs", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
@@ -15,6 +15,7 @@ thiserror = "1"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 async-trait = "0.1"
+sha2 = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13", features = ["screencast"] }

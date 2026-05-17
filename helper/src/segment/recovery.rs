@@ -123,7 +123,7 @@ pub fn scan_recoverable_sessions(segments_root: &Path) -> Result<Vec<Recoverable
                     duration_90k: entry.map(|e| e.duration_90k).unwrap_or(0),
                     byte_size: meta.len(),
                     is_keyframe_first: entry.map(|e| e.is_keyframe_first).unwrap_or(true),
-                    discontinuity: false,
+                    discontinuity: entry.map(|e| e.discontinuity).unwrap_or(false),
                     fragment_count: entry.map(|e| e.fragment_count).unwrap_or(0),
                 });
             }
@@ -312,6 +312,7 @@ mod tests {
                 duration_90k: 90_000,
                 byte_size: 5,
                 is_keyframe_first: true,
+                discontinuity: false,
                 fragment_count: 1,
             }],
         };

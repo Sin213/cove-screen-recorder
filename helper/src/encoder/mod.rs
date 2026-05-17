@@ -98,8 +98,12 @@ pub async fn run_session(
     stream_id: String,
     session_id: String,
     format: CaptureFormat,
-    format_change_rx: tokio::sync::mpsc::Receiver<()>,
+    state: crate::engine::SharedState,
 ) {
+    // Clear any buffer left over from a previous session so a failed encoder
+    // probe cannot expose stale segments via replay.save.
+    *state.active_segment_buffer.lock().await = None;
+
     let mut backends = default_backends();
     let mut cache = NegativeProbeCache::new();
     let session = run_probes(&backends, &format, &mut cache).await;
@@ -129,7 +133,7 @@ pub async fn run_session(
 
             let selected_evt = EncoderSelectedEvent {
                 backend: selected_name.clone(),
-                codec: selected_codec,
+                codec: selected_codec.clone(),
                 parameters: serde_json::json!({
                     "stream_id": stream_id,
                     "width": format.width,
@@ -181,8 +185,26 @@ pub async fn run_session(
                 target_bitrate_bps: 5_000_000,
                 gop_seconds: 2.0,
             };
+
+            // Share a handle with HelperState so replay.save can pin segments
+            // even after the capture session has stopped.
+            let buffer_handle = sink.clone_handle();
+            let codec = match selected_codec.as_str() {
+                "hevc" => crate::protocol::types::VideoCodec::Hevc,
+                _ => crate::protocol::types::VideoCodec::H264,
+            };
+            *state.active_segment_buffer.lock().await = Some(crate::engine::SessionBufferInfo {
+                buffer: buffer_handle,
+                session_id: session_id.clone(),
+                codec,
+                width: format.width,
+                height: format.height,
+                fps_num: format.fps_num,
+                fps_den: format.fps_den,
+            });
+
             let _ = EncoderSession::new(backend, sink, notifier, cfg)
-                .run(rx, format_change_rx)
+                .run(rx)
                 .await;
         }
         None => {

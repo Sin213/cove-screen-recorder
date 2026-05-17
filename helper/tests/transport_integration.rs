@@ -871,16 +871,9 @@ async fn eof_after_request_server_recovers() {
 
 #[tokio::test]
 async fn all_stubs_include_method_name() {
-    // capture.* are real implementations on Linux — removed from stub list.
+    // capture.* and replay.* are real implementations — only engine stubs remain.
     let stubs = &[
         "engine.diagnosticsBundlePath",
-        "replay.save",
-        "replay.snapshot_release",
-        "replay.recoverable_sessions",
-        "replay.discard_recovered_session",
-        "replay.restore_recovered_session",
-        "replay.export_start",
-        "replay.export_cancel",
     ];
 
     let tmp = tempfile::tempdir().unwrap();

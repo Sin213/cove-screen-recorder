@@ -18,7 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use cove_replay_engine::capture::{
-    frame_channel, FramePayload, FrameSender, ReleaseToken,
+    frame_channel, FrameOrControl, FramePayload, FrameSender, ReleaseToken,
 };
 use cove_replay_engine::encoder::backend::{
     EncoderBackend, EncoderConfig, EncoderError, ProbeOutcome,
@@ -52,11 +52,6 @@ fn cfg() -> EncoderConfig {
     }
 }
 
-fn no_format_changes() -> tokio::sync::mpsc::Receiver<()> {
-    let (_tx, rx) = tokio::sync::mpsc::channel(1);
-    rx
-}
-
 fn make_frame(seq: u64, payload_bytes: usize) -> cove_replay_engine::capture::FrameHandle {
     cove_replay_engine::capture::FrameHandle {
         seq,
@@ -76,7 +71,7 @@ fn make_frame(seq: u64, payload_bytes: usize) -> cove_replay_engine::capture::Fr
 /// Push N frames into the FrameSender then drop it so the receiver closes.
 async fn feed_and_close(tx: FrameSender, frames: u64) {
     for seq in 0..frames {
-        tx.send(make_frame(seq, 32)).await.expect("send frame");
+        tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.expect("send frame");
     }
     drop(tx);
 }
@@ -242,7 +237,7 @@ async fn happy_path_runs_to_completion_and_tears_down() {
     let (tx, rx) = frame_channel(8);
 
     let feeder = tokio::spawn(feed_and_close(tx, 3));
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
 
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -273,12 +268,12 @@ async fn diagnostics_fires_when_period_elapses() {
 
     let feeder = tokio::spawn(async move {
         for seq in 0..3u64 {
-            tx.send(make_frame(seq, 32)).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
         drop(tx);
     });
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
     assert_eq!(exit, SessionExit::StreamEnded);
 
@@ -317,21 +312,21 @@ async fn back_pressure_fires_once_per_sustained_window() {
     let feeder = tokio::spawn(async move {
         // Push first burst: 3 BackPressure with > dwell spacing should trigger one event.
         for seq in 0..3u64 {
-            tx.send(make_frame(seq, 32)).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
         // One Accept closes the window.
-        tx.send(make_frame(3, 32)).await.unwrap();
+        tx.send(FrameOrControl::Frame(make_frame(3, 32))).await.unwrap();
         tokio::time::sleep(Duration::from_millis(5)).await;
         // Second burst: 2 more BackPressure with > dwell spacing should trigger a second event.
         for seq in 4..6u64 {
-            tx.send(make_frame(seq, 32)).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
         drop(tx);
     });
 
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
     assert_eq!(exit, SessionExit::StreamEnded);
 
@@ -369,11 +364,11 @@ async fn runtime_error_ends_session_emits_event_and_tears_down() {
         // Send 2 frames; the 2nd triggers Runtime.  Then send 3 more — those
         // must be drained without push to release PW buffers.
         for seq in 0..5u64 {
-            tx.send(make_frame(seq, 32)).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
         }
         drop(tx);
     });
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
     assert_eq!(exit, SessionExit::RuntimeError);
     assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown called once on runtime error");
@@ -400,7 +395,7 @@ async fn configure_failure_emits_runtime_error_and_returns_configure_failed() {
 
     let (tx, rx) = frame_channel(8);
     drop(tx); // configure fails before any frame is processed
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
 
     assert_eq!(exit, SessionExit::ConfigureFailed);
     assert_eq!(cfg_calls.load(Ordering::Relaxed), 1);
@@ -432,7 +427,7 @@ async fn fragments_flow_through_sink() {
 
     let (tx, rx) = frame_channel(8);
     let feeder = tokio::spawn(feed_and_close(tx, 2));
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
 
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -457,7 +452,7 @@ async fn release_token_fires_for_every_frame_consumed() {
     let feeder = tokio::spawn(async move {
         for seq in 0..4u64 {
             let counter = Arc::clone(&released_feeder);
-            tx.send(cove_replay_engine::capture::FrameHandle {
+            tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
                 seq,
                 pts_ns: 0,
                 payload: FramePayload::Shm {
@@ -471,13 +466,13 @@ async fn release_token_fires_for_every_frame_consumed() {
                 release: ReleaseToken::new(move || {
                     counter.fetch_add(1, Ordering::Relaxed);
                 }),
-            })
+            }))
             .await
             .unwrap();
         }
         drop(tx);
     });
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
     assert_eq!(exit, SessionExit::StreamEnded);
     assert_eq!(
@@ -522,7 +517,7 @@ async fn configure_failure_cleanup_completes_even_when_notifier_is_saturated() {
     let (tx, rx) = frame_channel(8);
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameHandle {
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
             seq,
             pts_ns: 0,
             payload: FramePayload::Shm {
@@ -536,7 +531,7 @@ async fn configure_failure_cleanup_completes_even_when_notifier_is_saturated() {
             release: ReleaseToken::new(move || {
                 counter.fetch_add(1, Ordering::Relaxed);
             }),
-        })
+        }))
         .await
         .unwrap();
     }
@@ -545,7 +540,7 @@ async fn configure_failure_cleanup_completes_even_when_notifier_is_saturated() {
     // still close the receiver, fire queued ReleaseTokens, run teardown, and
     // return promptly.  Before the fix the configure-failure emit awaited a
     // full notifier channel and stalled cleanup behind it.
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("cleanup must complete even with a saturated notifier");
     assert_eq!(exit, SessionExit::ConfigureFailed);
@@ -557,7 +552,7 @@ async fn configure_failure_cleanup_completes_even_when_notifier_is_saturated() {
         3,
         "queued ReleaseTokens must fire even when notifier is saturated",
     );
-    let send_err = tx.send(make_frame(99, 8)).await;
+    let send_err = tx.send(FrameOrControl::Frame(make_frame(99, 8))).await;
     assert!(send_err.is_err(), "sender must be closed after cleanup");
 }
 
@@ -578,7 +573,7 @@ async fn push_frame_runtime_cleanup_completes_even_when_notifier_is_saturated() 
     let (tx, rx) = frame_channel(8);
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameHandle {
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
             seq,
             pts_ns: 0,
             payload: FramePayload::Shm {
@@ -592,12 +587,12 @@ async fn push_frame_runtime_cleanup_completes_even_when_notifier_is_saturated() 
             release: ReleaseToken::new(move || {
                 counter.fetch_add(1, Ordering::Relaxed);
             }),
-        })
+        }))
         .await
         .unwrap();
     }
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("cleanup must complete even with a saturated notifier");
     assert_eq!(exit, SessionExit::RuntimeError);
@@ -607,7 +602,7 @@ async fn push_frame_runtime_cleanup_completes_even_when_notifier_is_saturated() 
         3,
         "queued ReleaseTokens must fire even when notifier is saturated (push_frame runtime path)",
     );
-    let send_err = tx.send(make_frame(99, 8)).await;
+    let send_err = tx.send(FrameOrControl::Frame(make_frame(99, 8))).await;
     assert!(send_err.is_err(), "sender must be closed after cleanup");
 }
 
@@ -631,7 +626,7 @@ async fn configure_failure_closes_receiver_and_drains_buffered_frames() {
     // thing, so these frames are sitting in the buffer when cleanup starts.
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameHandle {
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
             seq,
             pts_ns: 0,
             payload: FramePayload::Shm {
@@ -645,7 +640,7 @@ async fn configure_failure_closes_receiver_and_drains_buffered_frames() {
             release: ReleaseToken::new(move || {
                 counter.fetch_add(1, Ordering::Relaxed);
             }),
-        })
+        }))
         .await
         .unwrap();
     }
@@ -654,7 +649,7 @@ async fn configure_failure_closes_receiver_and_drains_buffered_frames() {
     // still owning the FrameSender during teardown.  Before the fix the
     // receiver remained open and queued tokens stayed pinned until producer
     // drop.
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("run must return promptly after configure failure");
     assert_eq!(exit, SessionExit::ConfigureFailed);
@@ -666,7 +661,7 @@ async fn configure_failure_closes_receiver_and_drains_buffered_frames() {
         3,
         "every already-buffered frame must release its token before teardown returns",
     );
-    let send_err = tx.send(make_frame(99, 8)).await;
+    let send_err = tx.send(FrameOrControl::Frame(make_frame(99, 8))).await;
     assert!(
         send_err.is_err(),
         "sender must be closed after configure-failure exit",
@@ -689,11 +684,11 @@ async fn runtime_error_returns_promptly_without_waiting_for_sender_drop() {
 
     let (tx, rx) = frame_channel(8);
     // Pre-fill the channel with one frame that will trip the Runtime error.
-    tx.send(make_frame(0, 32)).await.unwrap();
+    tx.send(FrameOrControl::Frame(make_frame(0, 32))).await.unwrap();
     // Sender stays alive — mimics the PipeWire capture thread holding the
     // sender past the encoder's runtime failure.  Before the fix this test
     // would hang here.
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session.run must return promptly after terminal error");
     assert_eq!(exit, SessionExit::RuntimeError);
@@ -701,7 +696,7 @@ async fn runtime_error_returns_promptly_without_waiting_for_sender_drop() {
     // Producer keeps the sender alive even after run returned — proves we
     // exited without waiting on its drop.  Trying to send now must fail
     // because run closed the receiver.
-    let err = tx.send(make_frame(1, 32)).await;
+    let err = tx.send(FrameOrControl::Frame(make_frame(1, 32))).await;
     assert!(err.is_err(), "sender must be closed after runtime-error exit");
 }
 
@@ -720,7 +715,7 @@ async fn runtime_error_drains_already_buffered_frames_before_returning() {
     let (tx, rx) = frame_channel(8);
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameHandle {
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
             seq,
             pts_ns: 0,
             payload: FramePayload::Shm {
@@ -734,12 +729,12 @@ async fn runtime_error_drains_already_buffered_frames_before_returning() {
             release: ReleaseToken::new(move || {
                 counter.fetch_add(1, Ordering::Relaxed);
             }),
-        })
+        }))
         .await
         .unwrap();
     }
     // Keep sender alive; do NOT drop tx before running.
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session.run must return promptly");
     assert_eq!(exit, SessionExit::RuntimeError);
@@ -769,7 +764,7 @@ async fn release_token_fires_after_runtime_error_for_remaining_frames() {
     let feeder = tokio::spawn(async move {
         for seq in 0..5u64 {
             let counter = Arc::clone(&released_feeder);
-            tx.send(cove_replay_engine::capture::FrameHandle {
+            tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
                 seq,
                 pts_ns: 0,
                 payload: FramePayload::Shm {
@@ -783,13 +778,13 @@ async fn release_token_fires_after_runtime_error_for_remaining_frames() {
                 release: ReleaseToken::new(move || {
                     counter.fetch_add(1, Ordering::Relaxed);
                 }),
-            })
+            }))
             .await
             .unwrap();
         }
         drop(tx);
     });
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     feeder.await.unwrap();
     assert_eq!(exit, SessionExit::RuntimeError);
     assert_eq!(
@@ -897,7 +892,7 @@ async fn clean_stream_end_flushes_tail_fragment_from_backend() {
     let (tx, rx) = frame_channel(8);
     drop(tx); // no frames; receiver closes cleanly
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session must return promptly on clean end");
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -980,7 +975,7 @@ async fn clean_stream_end_with_drain_runtime_error_emits_runtime_event() {
     let (tx, rx) = frame_channel(8);
     drop(tx);
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session must return promptly even when final drain fails");
     assert_eq!(exit, SessionExit::RuntimeError);
@@ -1018,7 +1013,7 @@ async fn final_drain_retries_sink_back_pressure_then_succeeds_at_eof() {
     let (tx, rx) = frame_channel(8);
     drop(tx);
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("final drain must finish within bounded retries");
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -1051,7 +1046,7 @@ async fn final_drain_unresolved_sink_back_pressure_becomes_runtime_error() {
     let (tx, rx) = frame_channel(8);
     drop(tx);
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("final drain must give up within bounded retries");
     assert_eq!(exit, SessionExit::RuntimeError);
@@ -1145,7 +1140,7 @@ async fn final_drain_retries_backend_back_pressure_then_succeeds_at_eof() {
     let (tx, rx) = frame_channel(8);
     drop(tx);
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("final drain must finish after backend BackPressure retries");
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -1184,7 +1179,7 @@ async fn mid_session_sink_back_pressure_holds_fragments_for_retry() {
 
     let (tx, rx) = frame_channel(8);
     let feeder = tokio::spawn(feed_and_close(tx, 3));
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session must complete promptly");
     feeder.await.unwrap();
@@ -1232,7 +1227,7 @@ async fn mid_session_pending_fragments_cap_emits_runtime_error() {
 
     let (tx, rx) = frame_channel(8);
     let feeder = tokio::spawn(feed_and_close(tx, 6));
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session must terminate when pending cap is exceeded");
     feeder.await.unwrap();
@@ -1270,7 +1265,7 @@ async fn final_drain_flushes_fragments_held_from_mid_session_sink_back_pressure(
 
     let (tx, rx) = frame_channel(8);
     let feeder = tokio::spawn(feed_and_close(tx, 2));
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("session must complete via final_drain flushing held fragments");
     feeder.await.unwrap();
@@ -1314,7 +1309,7 @@ async fn final_drain_succeeds_when_sink_accepts_on_last_allowed_iteration() {
     let (tx, rx) = frame_channel(8);
     drop(tx);
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("final drain must finish even when sink accepts on the last allowed iteration");
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -1411,7 +1406,7 @@ async fn final_drain_succeeds_when_backend_emits_on_last_allowed_iteration() {
     let (tx, rx) = frame_channel(8);
     drop(tx);
 
-    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
         .await
         .expect("final drain must finish when backend produces within retry budget");
     assert_eq!(exit, SessionExit::StreamEnded);
@@ -1455,13 +1450,13 @@ async fn advisory_telemetry_does_not_stall_encode_loop_with_saturated_notifier()
     let (tx, rx) = frame_channel(8);
     let feeder = tokio::spawn(async move {
         for seq in 0..5u64 {
-            tx.send(make_frame(seq, 32)).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
         drop(tx);
     });
 
-    let exit = tokio::time::timeout(Duration::from_secs(3), session.run(rx, no_format_changes()))
+    let exit = tokio::time::timeout(Duration::from_secs(3), session.run(rx))
         .await
         .expect("encode loop must not block on advisory notifications with a saturated notifier");
     feeder.await.unwrap();
@@ -1496,10 +1491,10 @@ async fn finalize_failure_surfaces_runtime_error_on_clean_eof() {
     );
 
     let (tx, rx) = frame_channel(8);
-    tx.send(make_frame(0, 32)).await.unwrap();
+    tx.send(FrameOrControl::Frame(make_frame(0, 32))).await.unwrap();
     drop(tx);
 
-    let exit = session.run(rx, no_format_changes()).await;
+    let exit = session.run(rx).await;
     assert_eq!(exit, SessionExit::RuntimeError, "finalize failure must surface as RuntimeError");
     assert_eq!(td_calls.load(Ordering::Relaxed), 1, "backend still torn down");
 }

@@ -24,7 +24,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::capture::FrameReceiver;
+use crate::capture::{FrameOrControl, FrameReceiver};
 use crate::protocol::events::{
     EncoderBackPressureEvent, EncoderDiagnosticsEvent, EncoderRuntimeErrorEvent,
 };
@@ -301,7 +301,6 @@ impl<S: FragmentSink> EncoderSession<S> {
     pub async fn run(
         mut self,
         rx: FrameReceiver,
-        format_change_rx: tokio::sync::mpsc::Receiver<()>,
     ) -> SessionExit {
         let exit = match self.backend.configure(self.config.clone()).await {
             Ok(()) => {
@@ -316,7 +315,7 @@ impl<S: FragmentSink> EncoderSession<S> {
                         };
                     }
                 }
-                self.run_loop(rx, format_change_rx).await
+                self.run_loop(rx).await
             }
             Err(err) => {
                 // Drain BEFORE emit so receiver close cannot be deferred
@@ -326,6 +325,7 @@ impl<S: FragmentSink> EncoderSession<S> {
                 SessionExit::ConfigureFailed
             }
         };
+        self.sink.set_closing();
         let exit = match self.sink.finalize().await {
             Ok(()) => exit,
             Err(e) if exit == SessionExit::StreamEnded => {
@@ -341,7 +341,6 @@ impl<S: FragmentSink> EncoderSession<S> {
     async fn run_loop(
         &mut self,
         mut rx: FrameReceiver,
-        mut format_change_rx: tokio::sync::mpsc::Receiver<()>,
     ) -> SessionExit {
         let backend_name = self.backend.name().to_string();
         self.bytes_window = WindowBytes::default();
@@ -353,12 +352,10 @@ impl<S: FragmentSink> EncoderSession<S> {
         diag_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         diag_ticker.tick().await;
 
-        let mut format_change_closed = false;
-
         loop {
             tokio::select! {
-                maybe_frame = rx.recv() => {
-                    let Some(frame) = maybe_frame else {
+                maybe_item = rx.recv() => {
+                    let Some(item) = maybe_item else {
                         // Receiver closed cleanly.  `drain_fragments` (the
                         // mid-session helper) collapses backend/sink back-pressure
                         // into "try again on the next push" — but at EOF there
@@ -374,82 +371,82 @@ impl<S: FragmentSink> EncoderSession<S> {
                         }
                         return SessionExit::StreamEnded;
                     };
-                    self.counters.frames_in = self.counters.frames_in.saturating_add(1);
-                    let push_started = Instant::now();
-                    let push_result = self.backend.push_frame(frame).await;
-                    let push_elapsed = push_started.elapsed();
-                    self.counters.encode_latency_total_ns =
-                        self.counters.encode_latency_total_ns.saturating_add(push_elapsed.as_nanos());
-                    self.counters.encode_latency_samples =
-                        self.counters.encode_latency_samples.saturating_add(1);
+                    match item {
+                        FrameOrControl::FormatChanged => {
+                            if let Err(e) = self.sink.notify_format_change().await {
+                                match e {
+                                    FragmentSinkError::Closed => {
+                                        self.drain_remaining(rx).await;
+                                        self.emit_runtime_error("fragment-sink-closed", "sink closed on format change");
+                                        return SessionExit::RuntimeError;
+                                    }
+                                    FragmentSinkError::Internal(msg) => {
+                                        self.drain_remaining(rx).await;
+                                        self.emit_runtime_error("format-change-commit-failed", &msg);
+                                        return SessionExit::RuntimeError;
+                                    }
+                                    FragmentSinkError::BackPressure => {}
+                                }
+                            }
+                        }
+                        FrameOrControl::Frame(frame) => {
+                            self.counters.frames_in = self.counters.frames_in.saturating_add(1);
+                            let push_started = Instant::now();
+                            let push_result = self.backend.push_frame(frame).await;
+                            let push_elapsed = push_started.elapsed();
+                            self.counters.encode_latency_total_ns =
+                                self.counters.encode_latency_total_ns.saturating_add(push_elapsed.as_nanos());
+                            self.counters.encode_latency_samples =
+                                self.counters.encode_latency_samples.saturating_add(1);
 
-                    match push_result {
-                        Ok(()) => {
-                            self.counters.frames_encoded =
-                                self.counters.frames_encoded.saturating_add(1);
-                            self.backpressure.on_progress();
-                            if let Some(reason) = self.drain_fragments().await {
-                                // Terminal cleanup: drain BEFORE emit so the
-                                // notifier never gates receiver close.
-                                self.drain_remaining(rx).await;
-                                self.emit_runtime_error(&reason.code, &reason.details);
-                                return SessionExit::RuntimeError;
+                            match push_result {
+                                Ok(()) => {
+                                    self.counters.frames_encoded =
+                                        self.counters.frames_encoded.saturating_add(1);
+                                    self.backpressure.on_progress();
+                                    if let Some(reason) = self.drain_fragments().await {
+                                        // Terminal cleanup: drain BEFORE emit so the
+                                        // notifier never gates receiver close.
+                                        self.drain_remaining(rx).await;
+                                        self.emit_runtime_error(&reason.code, &reason.details);
+                                        return SessionExit::RuntimeError;
+                                    }
+                                }
+                                Err(EncoderError::BackPressure) => {
+                                    self.counters.frames_dropped =
+                                        self.counters.frames_dropped.saturating_add(1);
+                                    let now = Instant::now();
+                                    self.backpressure.on_drop(now);
+                                    if let Some((sustained_ms, dropped)) =
+                                        self.backpressure.take_report(now, self.backpressure_dwell)
+                                    {
+                                        self.emit_back_pressure(&backend_name, sustained_ms, dropped);
+                                    }
+                                }
+                                Err(EncoderError::Runtime(reason)) => {
+                                    self.counters.hwenc_runtime_errors =
+                                        self.counters.hwenc_runtime_errors.saturating_add(1);
+                                    // Drain BEFORE emit (terminal cleanup ordering).
+                                    self.drain_remaining(rx).await;
+                                    self.emit_runtime_error("push-frame-runtime", &reason);
+                                    return SessionExit::RuntimeError;
+                                }
+                                Err(EncoderError::NotImplementedYet(what)) => {
+                                    // Defensive: probe should have prevented selection of an
+                                    // unimplemented backend.  Treat as terminal.
+                                    self.drain_remaining(rx).await;
+                                    self.emit_runtime_error(
+                                        "backend-not-implemented",
+                                        &format!("push_frame: {what}"),
+                                    );
+                                    return SessionExit::RuntimeError;
+                                }
                             }
-                        }
-                        Err(EncoderError::BackPressure) => {
-                            self.counters.frames_dropped =
-                                self.counters.frames_dropped.saturating_add(1);
-                            let now = Instant::now();
-                            self.backpressure.on_drop(now);
-                            if let Some((sustained_ms, dropped)) =
-                                self.backpressure.take_report(now, self.backpressure_dwell)
-                            {
-                                self.emit_back_pressure(&backend_name, sustained_ms, dropped);
-                            }
-                        }
-                        Err(EncoderError::Runtime(reason)) => {
-                            self.counters.hwenc_runtime_errors =
-                                self.counters.hwenc_runtime_errors.saturating_add(1);
-                            // Drain BEFORE emit (terminal cleanup ordering).
-                            self.drain_remaining(rx).await;
-                            self.emit_runtime_error("push-frame-runtime", &reason);
-                            return SessionExit::RuntimeError;
-                        }
-                        Err(EncoderError::NotImplementedYet(what)) => {
-                            // Defensive: probe should have prevented selection of an
-                            // unimplemented backend.  Treat as terminal.
-                            self.drain_remaining(rx).await;
-                            self.emit_runtime_error(
-                                "backend-not-implemented",
-                                &format!("push_frame: {what}"),
-                            );
-                            return SessionExit::RuntimeError;
                         }
                     }
                 }
                 _ = diag_ticker.tick() => {
                     self.emit_diagnostics(&backend_name);
-                }
-                result = format_change_rx.recv(), if !format_change_closed => {
-                    if result.is_none() {
-                        format_change_closed = true;
-                        continue;
-                    }
-                    if let Err(e) = self.sink.notify_format_change().await {
-                        match e {
-                            FragmentSinkError::Closed => {
-                                self.drain_remaining(rx).await;
-                                self.emit_runtime_error("fragment-sink-closed", "sink closed on format change");
-                                return SessionExit::RuntimeError;
-                            }
-                            FragmentSinkError::Internal(msg) => {
-                                self.drain_remaining(rx).await;
-                                self.emit_runtime_error("format-change-commit-failed", &msg);
-                                return SessionExit::RuntimeError;
-                            }
-                            FragmentSinkError::BackPressure => {}
-                        }
-                    }
                 }
             }
         }
