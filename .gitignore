@@ -22,3 +22,6 @@ codex-reviews/
 CLAUDE.md
 WORKFLOW.md
 RELEASES.md
+
+# Local Claude Code session data
+.claude/
