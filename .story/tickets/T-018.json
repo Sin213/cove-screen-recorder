@@ -8,7 +8,7 @@
   "id": "T-018",
   "order": 80,
   "phase": "p3b-implementation",
-  "status": "open",
+  "status": "inprogress",
   "title": "Implement rolling fMP4 segment buffer MVP",
   "type": "task"
 }

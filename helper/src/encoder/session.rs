@@ -298,9 +298,26 @@ impl<S: FragmentSink> EncoderSession<S> {
     ///    `backend.teardown()` indefinitely (Codex review
     ///    2026-05-16_11-39-52 Issue #1).
     /// 3. **`teardown()`** the backend.
-    pub async fn run(mut self, rx: FrameReceiver) -> SessionExit {
+    pub async fn run(
+        mut self,
+        rx: FrameReceiver,
+        format_change_rx: tokio::sync::mpsc::Receiver<()>,
+    ) -> SessionExit {
         let exit = match self.backend.configure(self.config.clone()).await {
-            Ok(()) => self.run_loop(rx).await,
+            Ok(()) => {
+                if let Some(init) = self.backend.init_segment() {
+                    if let Err(e) = self.sink.set_init_segment(init).await {
+                        self.drain_remaining(rx).await;
+                        self.emit_runtime_error("init-segment-failed", &e.to_string());
+                        return {
+                            let _ = self.sink.finalize().await;
+                            let _ = self.backend.teardown().await;
+                            SessionExit::RuntimeError
+                        };
+                    }
+                }
+                self.run_loop(rx, format_change_rx).await
+            }
             Err(err) => {
                 // Drain BEFORE emit so receiver close cannot be deferred
                 // by a stalled notifier (terminal cleanup ordering rule).
@@ -309,11 +326,23 @@ impl<S: FragmentSink> EncoderSession<S> {
                 SessionExit::ConfigureFailed
             }
         };
+        let exit = match self.sink.finalize().await {
+            Ok(()) => exit,
+            Err(e) if exit == SessionExit::StreamEnded => {
+                self.emit_runtime_error("finalize-failed", &e.to_string());
+                SessionExit::RuntimeError
+            }
+            Err(_) => exit,
+        };
         let _ = self.backend.teardown().await;
         exit
     }
 
-    async fn run_loop(&mut self, mut rx: FrameReceiver) -> SessionExit {
+    async fn run_loop(
+        &mut self,
+        mut rx: FrameReceiver,
+        mut format_change_rx: tokio::sync::mpsc::Receiver<()>,
+    ) -> SessionExit {
         let backend_name = self.backend.name().to_string();
         self.bytes_window = WindowBytes::default();
         self.backpressure = BackPressureTracker::default();
@@ -323,6 +352,8 @@ impl<S: FragmentSink> EncoderSession<S> {
         // full period has elapsed so counters have something to report.
         diag_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         diag_ticker.tick().await;
+
+        let mut format_change_closed = false;
 
         loop {
             tokio::select! {
@@ -398,6 +429,27 @@ impl<S: FragmentSink> EncoderSession<S> {
                 }
                 _ = diag_ticker.tick() => {
                     self.emit_diagnostics(&backend_name);
+                }
+                result = format_change_rx.recv(), if !format_change_closed => {
+                    if result.is_none() {
+                        format_change_closed = true;
+                        continue;
+                    }
+                    if let Err(e) = self.sink.notify_format_change().await {
+                        match e {
+                            FragmentSinkError::Closed => {
+                                self.drain_remaining(rx).await;
+                                self.emit_runtime_error("fragment-sink-closed", "sink closed on format change");
+                                return SessionExit::RuntimeError;
+                            }
+                            FragmentSinkError::Internal(msg) => {
+                                self.drain_remaining(rx).await;
+                                self.emit_runtime_error("format-change-commit-failed", &msg);
+                                return SessionExit::RuntimeError;
+                            }
+                            FragmentSinkError::BackPressure => {}
+                        }
+                    }
                 }
             }
         }

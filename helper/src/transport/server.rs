@@ -68,12 +68,24 @@ pub async fn run_with_config(
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shutdown_tx = Arc::new(shutdown_tx);
 
+    // T-018: scan for recoverable sessions from prior crashes before accepting connections
+    let segments_root = crate::segment::recovery::resolve_segments_root();
+    let recovered = crate::segment::recovery::scan_recoverable_sessions(&segments_root)
+        .unwrap_or_default();
+    if !recovered.is_empty() {
+        info!(
+            count = recovered.len(),
+            "discovered recoverable sessions from prior crash"
+        );
+    }
+
     let state: SharedState = Arc::new(HelperState {
         start_time: std::time::Instant::now(),
         set_level,
         shutdown_tx: Arc::clone(&shutdown_tx),
         #[cfg(target_os = "linux")]
         active_capture: tokio::sync::Mutex::new(None),
+        recoverable_sessions: tokio::sync::Mutex::new(recovered),
     });
 
     let connected = Arc::new(AtomicBool::new(false));
@@ -331,6 +343,32 @@ async fn handle_connection(
         drop(notifier);
         writer_task.await.ok();
         return;
+    }
+
+    // T-018: emit replay.recoveryAvailable if prior crash sessions exist.
+    // Must arrive within 2 s of engine.ready per N-007 §6.
+    {
+        let recovered = state.recoverable_sessions.lock().await;
+        if !recovered.is_empty() {
+            let sessions: Vec<crate::protocol::types::RecoverableSession> = recovered
+                .iter()
+                .map(|r| {
+                    let duration_90k: i64 = r.segments.iter().map(|s| s.duration_90k).sum();
+                    crate::protocol::types::RecoverableSession {
+                        session_id: r.session_id.clone(),
+                        started_at: 0, // Cannot recover wall-clock time from segments
+                        duration_s: duration_90k as f64 / 90_000.0,
+                        bytes_on_disk: r.total_bytes,
+                        segments_count: r.segments.len() as u32,
+                        has_discontinuity: r.segments.iter().any(|s| s.discontinuity),
+                    }
+                })
+                .collect();
+            let evt = crate::protocol::events::RecoveryAvailableEvent { sessions };
+            if let Ok(v) = serde_json::to_value(&evt) {
+                let _ = notifier.notify("replay.recoveryAvailable", v).await;
+            }
+        }
     }
 
     // Cancel-safe reader task: owns the socket read half and delivers complete frames

@@ -18,6 +18,12 @@ impl Notifier {
         (Notifier { tx }, rx)
     }
 
+    /// Construct from an existing sender. Used in tests and subsystems that
+    /// share the transport channel.
+    pub fn from_sender(tx: mpsc::Sender<Vec<u8>>) -> Self {
+        Notifier { tx }
+    }
+
     pub async fn notify(&self, method: &str, params: serde_json::Value) -> Result<()> {
         let n = Notification::new(method, Some(params));
         let bytes = serde_json::to_vec(&n)?;

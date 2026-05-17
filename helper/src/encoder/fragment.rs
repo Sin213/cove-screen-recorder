@@ -31,6 +31,18 @@ pub enum FragmentSinkError {
 #[async_trait]
 pub trait FragmentSink: Send + Sync + 'static {
     async fn push(&mut self, fragment: EncodedFragment) -> Result<(), FragmentSinkError>;
+
+    async fn set_init_segment(&mut self, _data: Vec<u8>) -> Result<(), FragmentSinkError> {
+        Ok(())
+    }
+
+    async fn notify_format_change(&mut self) -> Result<(), FragmentSinkError> {
+        Ok(())
+    }
+
+    async fn finalize(&mut self) -> Result<(), FragmentSinkError> {
+        Ok(())
+    }
 }
 
 /// Terminator for the T-017 skeleton slice — counts fragments and bytes without

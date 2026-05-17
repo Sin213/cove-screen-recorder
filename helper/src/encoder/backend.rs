@@ -76,6 +76,14 @@ pub trait EncoderBackend: Send + Sync + 'static {
     #[cfg(unix)]
     async fn configure(&mut self, cfg: EncoderConfig) -> Result<(), EncoderError>;
 
+    /// Return the fMP4 init segment (ftyp + moov) after `configure()` succeeds.
+    /// Real backends produce this from the negotiated codec parameters; stubs
+    /// return `None`.
+    #[cfg(unix)]
+    fn init_segment(&self) -> Option<Vec<u8>> {
+        None
+    }
+
     /// Submit one captured frame for encoding.  Producers MUST hold the frame's
     /// `ReleaseToken` until `push_frame` returns so DMA-BUF imports stay valid.
     #[cfg(unix)]

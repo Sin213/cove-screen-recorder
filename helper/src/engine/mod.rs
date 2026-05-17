@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::watch;
 
+use crate::segment::recovery::RecoverableSessionInfo;
 use crate::SetLevelFn;
 
 pub struct HelperState {
@@ -11,6 +12,7 @@ pub struct HelperState {
     pub active_capture: tokio::sync::Mutex<
         Option<std::sync::Arc<crate::capture::pipewire::PipeWireSource>>,
     >,
+    pub recoverable_sessions: tokio::sync::Mutex<Vec<RecoverableSessionInfo>>,
 }
 
 pub type SharedState = Arc<HelperState>;

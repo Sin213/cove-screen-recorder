@@ -765,10 +765,13 @@ impl PipeWireSource {
         let (fd, node_id, _restore_token, close_tx) =
             self.run_portal_flow(&opts, cancel_rx).await?;
 
-        let session_id = format!(
-            "pw-session-{:04}",
-            self.session_counter.fetch_add(1, Ordering::SeqCst)
-        );
+        let seq = self.session_counter.fetch_add(1, Ordering::SeqCst);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let pid = std::process::id();
+        let session_id = format!("pw-session-{seq:04}-{pid}-{ts}");
 
         let mut inner = self.inner.lock().await;
         inner.session_id = Some(session_id.clone());
@@ -945,18 +948,18 @@ impl CaptureSource for PipeWireSource {
             .await;
         });
 
-        // T-017 skeleton: encoder probe + selection sits between the PipeWire
-        // FrameReceiver and frame consumption.  When all backends probe
-        // `not-implemented-yet` (current MVP state) the receiver is drained
-        // exactly as before, preserving every T-022 PipeWire guarantee.
         let notifier_enc = self.notifier.clone();
         let stream_id_enc = stream_id.clone();
+        let session_id_enc = session_id.clone();
+        let (format_change_tx, format_change_rx) = tokio::sync::mpsc::channel::<()>(4);
         tokio::spawn(async move {
             crate::encoder::run_session(
                 frame_rx,
                 notifier_enc,
                 stream_id_enc,
+                session_id_enc,
                 capture_format_for_enc,
+                format_change_rx,
             )
             .await;
         });
@@ -966,7 +969,7 @@ impl CaptureSource for PipeWireSource {
         let stream_id_evt = stream_id;
         let inner_evt = Arc::clone(&self.inner);
         tokio::spawn(async move {
-            pw_event_loop(event_rx, notifier_evt, session_id_evt, stream_id_evt, inner_evt, format_tx).await;
+            pw_event_loop(event_rx, notifier_evt, session_id_evt, stream_id_evt, inner_evt, format_tx, format_change_tx).await;
         });
 
         Ok(())
@@ -1800,12 +1803,14 @@ async fn pw_event_loop(
     stream_id: String,
     inner: Arc<Mutex<PwInner>>,
     format_tx: tokio::sync::watch::Sender<NegotiatedFormat>,
+    format_change_tx: tokio::sync::mpsc::Sender<()>,
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
             PwEvent::FormatChanged { old, new } => {
                 debug!(session_id, "mid-stream format change");
                 let _ = format_tx.send(new.clone());
+                let _ = format_change_tx.send(()).await;
                 let ev = FormatChangedEvent {
                     stream_id: stream_id.clone(),
                     old_format: old.to_capture_format(),

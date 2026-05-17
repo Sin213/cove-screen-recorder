@@ -59,8 +59,10 @@ pub use probe::{build_probe_event, run_probes, NegativeProbeCache, ProbeSession}
 #[cfg(unix)]
 pub use session::{EncoderSession, SessionCounters, SessionExit};
 
-use crate::protocol::events::{EncoderFallbackEvent, EncoderSelectedEvent};
+use crate::protocol::events::{EncoderFallbackEvent, EncoderSelectedEvent, SessionLostEvent};
 use crate::protocol::types::CaptureFormat;
+use crate::segment::buffer::{SegmentBuffer, SegmentBufferConfig};
+use crate::segment::recovery::resolve_segments_root;
 use crate::transport::notifier::Notifier;
 
 /// MVP probe order per T-017: NVENC → libx264.  VAAPI / QSV / AMF are out of
@@ -94,7 +96,9 @@ pub async fn run_session(
     mut rx: crate::capture::FrameReceiver,
     notifier: Notifier,
     stream_id: String,
+    session_id: String,
     format: CaptureFormat,
+    format_change_rx: tokio::sync::mpsc::Receiver<()>,
 ) {
     let mut backends = default_backends();
     let mut cache = NegativeProbeCache::new();
@@ -140,21 +144,46 @@ pub async fn run_session(
                 let _ = notifier.notify("encoder.selected", v).await;
             }
 
-            // Take ownership of the selected backend out of the probe vector and
-            // drive the encode loop via EncoderSession.  Default sink is a
-            // counting terminator — T-018 replaces it with the rolling segment
-            // buffer.  EncoderSession also re-emits encoder.diagnostics at 1 Hz,
-            // fires encoder.backPressure / encoder.runtimeError, and tears the
-            // backend down on exit.
+            // Take ownership of the selected backend and drive the encode loop
+            // via EncoderSession with a rolling segment buffer as the sink.
             let backend = backends.swap_remove(idx);
             drop(backends);
-            let sink = CountingFragmentSink::new();
+
+            let segments_root = resolve_segments_root();
+            let session_dir = segments_root.join(&session_id);
+            let sink = match SegmentBuffer::new(
+                session_id.clone(),
+                Some(stream_id.clone()),
+                &session_dir,
+                SegmentBufferConfig::default(),
+                notifier.clone(),
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to create segment buffer");
+                    let evt = SessionLostEvent {
+                        session_id: session_id.clone(),
+                        stream_id: Some(stream_id.clone()),
+                        reason: "segment-sink-state-dir-unwritable".into(),
+                        details: e.to_string(),
+                        diagnostics_path: String::new(),
+                    };
+                    if let Ok(v) = serde_json::to_value(&evt) {
+                        let _ = notifier.try_notify("capture.sessionLost", v);
+                    }
+                    while rx.recv().await.is_some() {}
+                    return;
+                }
+            };
+
             let cfg = EncoderConfig {
                 format: format.clone(),
                 target_bitrate_bps: 5_000_000,
                 gop_seconds: 2.0,
             };
-            let _ = EncoderSession::new(backend, sink, notifier, cfg).run(rx).await;
+            let _ = EncoderSession::new(backend, sink, notifier, cfg)
+                .run(rx, format_change_rx)
+                .await;
         }
         None => {
             // No backend available — preserve T-022 behaviour exactly.  No
