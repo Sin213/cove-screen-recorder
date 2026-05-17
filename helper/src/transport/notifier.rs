@@ -25,6 +25,22 @@ impl Notifier {
         Ok(())
     }
 
+    /// Non-blocking variant.  Used by terminal cleanup paths in the encoder
+    /// session — emission must NOT await transport progress, otherwise a
+    /// stalled writer can defer receiver close / drain / `teardown`.  Drops
+    /// the event silently if the bounded transport channel is full;
+    /// terminal events are advisory, the renderer can recover from a missing
+    /// `encoder.runtimeError` (the session ends regardless).
+    pub fn try_notify(&self, method: &str, params: serde_json::Value) -> Result<()> {
+        let n = Notification::new(method, Some(params));
+        let bytes = serde_json::to_vec(&n)?;
+        match self.tx.try_send(bytes) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => Ok(()),
+        }
+    }
+
     pub async fn send_response(&self, response: Response) -> Result<()> {
         let bytes = serde_json::to_vec(&response)?;
         self.tx.send(bytes).await?;

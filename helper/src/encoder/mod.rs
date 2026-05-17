@@ -1,6 +1,7 @@
-//! Encoder probe / selection MVP (T-017 skeleton slice).
+//! Encoder probe / selection + session lifecycle (T-017 in-progress).
 //!
-//! What this module ships in the T-017 skeleton slice:
+//! What this module already ships (probe/selection scaffolding slice, commit
+//! `56aba87`):
 //!
 //! - `EncoderBackend` trait surface (N-004 §4) consuming [`FrameHandle`]
 //!   without importing PipeWire types.
@@ -8,34 +9,55 @@
 //!   the counting sink with the rolling segment buffer).
 //! - Probe orchestrator with per-session negative cache (N-004 §6, N-008 §6.8).
 //! - NVENC + libx264 backend stubs that probe `not-implemented-yet`.
-//! - `run_session` entry point invoked by the PipeWire capture path at the
-//!   point where `capture.sessionReady` would otherwise just spawn a counting
-//!   sink — it now runs the probe sequence, emits `encoder.probeResult`, emits
-//!   `encoder.selected` exactly once if a backend was selected, and then
-//!   consumes frames from the `FrameReceiver`.  When no backend is available
-//!   (the current state with both stubs returning `not-implemented-yet`) it
-//!   falls back to draining the receiver — the same observable behaviour the
-//!   PipeWire path had before, so all T-022 guarantees stay intact.
+//! - `run_session` entry point invoked by the PipeWire capture path that
+//!   runs the probe sequence, emits `encoder.probeResult`, emits
+//!   `encoder.selected` exactly once if a backend was selected, and emits
+//!   `encoder.fallbackEngaged` when applicable.
 //!
-//! What T-017a adds:
+//! What this current slice adds (session lifecycle):
+//!
+//! - [`session::EncoderSession`] driver that runs the
+//!   `configure → push_frame → drain → sink.push → teardown` loop for one
+//!   selected backend over the lifetime of a capture stream.
+//! - 1 Hz `encoder.diagnostics` emission with frame / latency / bitrate
+//!   counters.
+//! - `encoder.backPressure` event wired to `EncoderError::BackPressure` from
+//!   `push_frame`, with a dwell filter so single-frame blips don't fire.
+//! - `encoder.runtimeError` on terminal backend faults; session ends, no
+//!   mid-session switch (N-008 §6.8), `teardown()` is called best-effort.
+//!
+//! Production behaviour is unchanged in this slice: both shipped stubs still
+//! probe `not-implemented-yet` so the "no backend selected" branch is taken
+//! and the receiver is drained exactly as the previous slice did, preserving
+//! every T-022 PipeWire guarantee.  The new `EncoderSession` machinery is
+//! exercised by tests with synthetic test-only backends; it becomes
+//! production-active in the final T-017 slice that flips a stub to a real
+//! implementation.
+//!
+//! What the final T-017 slice still needs to add:
 //!
 //! - Real NvEncodeAPI session creation + CUDA external-memory import (DMA-BUF
 //!   zero-copy path before SHM memcpy fallback).
 //! - Real `ffmpeg-next` / libx264 encode loop with Annex-B → fMP4 wrapping.
-//! - `encoder.diagnostics` 1 Hz loop with real frame counters.
-//! - `encoder.backPressure` wired to the real frame-channel choked condition.
-//! - `encoder.runtimeError` on terminal encoder faults + session teardown.
 
 pub mod backend;
 pub mod backends;
 pub mod fragment;
 pub mod probe;
+// `session` consumes `crate::capture::FrameReceiver` and exercises the
+// `EncoderBackend::push_frame` / `drain` / `configure` methods, all of which
+// are `#[cfg(unix)]`.  Matching that boundary keeps Windows helper builds
+// green; the real encoder pipeline only runs on unix targets today.
+#[cfg(unix)]
+pub mod session;
 
 pub use backend::{
     EncoderBackend, EncoderCapabilities, EncoderConfig, EncoderError, ProbeOutcome,
 };
 pub use fragment::{CountingFragmentSink, EncodedFragment, FragmentSink, FragmentSinkError};
 pub use probe::{build_probe_event, run_probes, NegativeProbeCache, ProbeSession};
+#[cfg(unix)]
+pub use session::{EncoderSession, SessionCounters, SessionExit};
 
 use crate::protocol::events::{EncoderFallbackEvent, EncoderSelectedEvent};
 use crate::protocol::types::CaptureFormat;
@@ -74,7 +96,7 @@ pub async fn run_session(
     stream_id: String,
     format: CaptureFormat,
 ) {
-    let backends = default_backends();
+    let mut backends = default_backends();
     let mut cache = NegativeProbeCache::new();
     let session = run_probes(&backends, &format, &mut cache).await;
 
@@ -118,10 +140,21 @@ pub async fn run_session(
                 let _ = notifier.notify("encoder.selected", v).await;
             }
 
-            // T-017a wires the real encoder loop here.  For now: drain frames so
-            // PipeWire buffers are released promptly and the task exits when
-            // capture.stopSession drops the FrameSender on the PW thread.
-            while rx.recv().await.is_some() {}
+            // Take ownership of the selected backend out of the probe vector and
+            // drive the encode loop via EncoderSession.  Default sink is a
+            // counting terminator — T-018 replaces it with the rolling segment
+            // buffer.  EncoderSession also re-emits encoder.diagnostics at 1 Hz,
+            // fires encoder.backPressure / encoder.runtimeError, and tears the
+            // backend down on exit.
+            let backend = backends.swap_remove(idx);
+            drop(backends);
+            let sink = CountingFragmentSink::new();
+            let cfg = EncoderConfig {
+                format: format.clone(),
+                target_bitrate_bps: 5_000_000,
+                gop_seconds: 2.0,
+            };
+            let _ = EncoderSession::new(backend, sink, notifier, cfg).run(rx).await;
         }
         None => {
             // No backend available — preserve T-022 behaviour exactly.  No
