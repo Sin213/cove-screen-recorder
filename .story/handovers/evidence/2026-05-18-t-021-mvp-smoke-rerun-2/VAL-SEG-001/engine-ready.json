@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "engine.ready",
+  "params": {
+    "capabilities": [],
+    "helper_version": "0.1.0",
+    "pid": 473687,
+    "protocol_version": 1
+  }
+}

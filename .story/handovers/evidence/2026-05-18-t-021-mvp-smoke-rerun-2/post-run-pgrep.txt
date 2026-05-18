@@ -1,0 +1,1 @@
+PID 471721 gone, socket cleaned up, no cove-replay-engine/ffmpeg/pactl remaining
