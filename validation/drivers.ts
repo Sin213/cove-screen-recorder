@@ -1056,6 +1056,855 @@ export async function driveValCap004(
   }
 }
 
+// Returns true only when every backend is the known T-017 "not-implemented-yet"
+// stub. Missing/malformed payloads and real all-backend failures both return
+// false so the row proceeds and its thresholds catch the problem.
+function isEncoderStubState(
+  backends:
+    | Array<{ backend: string; available: boolean; details?: unknown }>
+    | undefined,
+): boolean {
+  if (!Array.isArray(backends) || backends.length === 0) return false;
+  return backends.every((b) => {
+    if (b.available !== false) return false;
+    const det = b.details as Record<string, unknown> | undefined;
+    return det?.reason === "not-implemented-yet";
+  });
+}
+
+export async function driveValEnc001(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+
+  try {
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (probe.gpuInfo == null || !probe.gpuInfo.startsWith("nvidia:")) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "no NVENC available — no NVIDIA GPU detected (nvidia-smi absent or failed)",
+      });
+    }
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    // requestSession runs the full XDG Screencast portal negotiation including
+    // the user-facing picker UI; response arrives only after the user approves.
+    // Budget 60 s for human interaction. A timeout means portal is inaccessible
+    // (background/non-interactive session) — treat as prerequisite skip, not error.
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return makeReport(row, "error", {
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    // encoder.probeResult may already be buffered (emitted before sessionReady)
+    let probeNotif: RpcNotification | null = null;
+    try {
+      probeNotif = await rpc.waitNotification("encoder.probeResult", 10_000);
+      writeJsonEvidence(evidenceDir, "encoder-probe-result.json", probeNotif);
+    } catch {
+      // not received within window — will fail threshold
+    }
+
+    const probeParams = probeNotif?.params as
+      | Record<string, unknown>
+      | undefined;
+    const backends = probeParams?.backends as
+      | Array<{ backend: string; available: boolean; details?: unknown }>
+      | undefined;
+
+    // Guard: only skip when all backends carry the known T-017 stub reason.
+    // Missing/malformed payloads and real all-backend failures proceed so
+    // the row's thresholds surface the problem.
+    if (probeNotif !== null && isEncoderStubState(backends)) {
+        await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "encoder implementation not ready — all backends returned unavailable (T-017 in progress)",
+        });
+    }
+
+    let selectedNotif: RpcNotification | null = null;
+    try {
+      selectedNotif = await rpc.waitNotification("encoder.selected", 5_000);
+      writeJsonEvidence(evidenceDir, "encoder-selected.json", selectedNotif);
+    } catch {
+      // optional — absent does not fail the row
+    }
+
+    const stopResp = await rpc.call("capture.stopSession", undefined, 10_000);
+    writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+    const nvencEntry = backends?.find(
+      (b) => b.backend === "nvenc" || b.backend === "nvenc-h264",
+    );
+    const nvencAvailable = nvencEntry?.available === true;
+
+    thresholds.push({
+      name: "encoder.probeResult received",
+      observed: probeNotif ? "received" : "not received",
+      required: "notification received",
+      passed: probeNotif !== null,
+    });
+
+    thresholds.push({
+      name: "nvenc backend available in probeResult",
+      observed: nvencEntry
+        ? `${nvencEntry.backend} available=${String(nvencEntry.available)}`
+        : "nvenc not in backends",
+      required: "nvenc available=true",
+      passed: nvencAvailable,
+    });
+
+    if (selectedNotif) {
+      const selParams = selectedNotif.params as
+        | Record<string, unknown>
+        | undefined;
+      const backend = String(selParams?.backend ?? "");
+      thresholds.push({
+        name: "encoder.selected backend is nvenc",
+        observed: backend || "(empty)",
+        required: "nvenc",
+        passed: backend === "nvenc",
+      });
+    }
+
+    const allPassed = thresholds.every((t) => t.passed);
+    return makeReport(row, allPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "encoder-probe-result": evidenceDir + "/encoder-probe-result.json",
+        ...(selectedNotif
+          ? { "encoder-selected": evidenceDir + "/encoder-selected.json" }
+          : {}),
+      },
+      message: allPassed
+        ? "NVENC probe confirmed available via encoder.probeResult"
+        : "NVENC probe failed or notification not received",
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `driveValEnc001 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    if (rpc) rpc.close();
+    if (spawned && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load) await load.teardown().catch(() => {});
+  }
+}
+
+export async function driveValSeg001(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+
+  try {
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return makeReport(row, "error", {
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    // Encoder readiness guard: probeResult should already be buffered.
+    // If all backends are unavailable (stubs), the segment buffer was never
+    // created — skip rather than fail so the smoke suite is not gated on T-017.
+    {
+      let encProbeNotif: RpcNotification | null = null;
+      try {
+        encProbeNotif = await rpc.waitNotification("encoder.probeResult", 3_000);
+        writeJsonEvidence(evidenceDir, "encoder-probe-result.json", encProbeNotif);
+      } catch {
+        // not buffered — proceed
+      }
+      if (encProbeNotif !== null) {
+        const encBackends = (
+          encProbeNotif.params as Record<string, unknown> | undefined
+        )?.backends as
+          | Array<{ backend: string; available: boolean; details?: unknown }>
+          | undefined;
+        if (isEncoderStubState(encBackends)) {
+          await rpc
+            .call("capture.stopSession", undefined, 10_000)
+            .catch(() => {});
+          return makeReport(row, "skip", {
+            skipReason: "helper-not-available",
+            message:
+              "encoder implementation not ready — all backends unavailable, segment buffer not created (T-017 in progress)",
+          });
+        }
+      }
+    }
+
+    // Collect replay.segmentDiagnostics events for ≥65 s to cover the full
+    // 60-second rolling window (row title: "Rolling 60 s window")
+    const OBSERVE_WINDOW_MS = 65_000;
+    const diagnosticSamples: unknown[] = [];
+    const observeStart = Date.now();
+    const observeDeadline = observeStart + OBSERVE_WINDOW_MS;
+
+    while (Date.now() < observeDeadline) {
+      const remaining = observeDeadline - Date.now();
+      if (remaining <= 0) break;
+      try {
+        const notif = await rpc.waitNotification(
+          "replay.segmentDiagnostics",
+          Math.min(remaining, 2_000),
+        );
+        diagnosticSamples.push(notif.params);
+      } catch {
+        // gap in notifications — keep looping until the full window elapses
+      }
+    }
+    const observedMs = Date.now() - observeStart;
+
+    writeEvidence(
+      evidenceDir,
+      "segment-diagnostics.jsonl",
+      diagnosticSamples.map((s) => JSON.stringify(s)).join("\n") + "\n",
+    );
+
+    const stopResp = await rpc.call("capture.stopSession", undefined, 10_000);
+    writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+
+    thresholds.push({
+      name: "replay.segmentDiagnostics samples collected",
+      observed: diagnosticSamples.length,
+      required: ">= 1",
+      passed: diagnosticSamples.length >= 1,
+    });
+
+    type DiagSample = {
+      bytes_on_disk?: number;
+      buffer_bytes_pct_of_cap?: number;
+    };
+
+    let allWithinBudget = true;
+    let maxPct = 0;
+    let invalidMetricCount = 0;
+
+    for (const sample of diagnosticSamples) {
+      const s = sample as DiagSample;
+      if (
+        s.buffer_bytes_pct_of_cap == null ||
+        !Number.isFinite(s.buffer_bytes_pct_of_cap)
+      ) {
+        invalidMetricCount++;
+        continue;
+      }
+      const pct = s.buffer_bytes_pct_of_cap;
+      if (pct > maxPct) maxPct = pct;
+      if (pct > 100) allWithinBudget = false;
+    }
+
+    thresholds.push({
+      name: "full 65-second observation window elapsed",
+      observed: `${Math.round(observedMs / 1_000)} s`,
+      required: ">= 65 s",
+      passed: observedMs >= 65_000,
+    });
+
+    thresholds.push({
+      name: "buffer_bytes_pct_of_cap never exceeds 100%",
+      observed:
+        invalidMetricCount > 0
+          ? `${invalidMetricCount} samples missing/invalid metric`
+          : `${maxPct.toFixed(2)}%`,
+      required: "<= 100% (no invalid samples)",
+      passed:
+        invalidMetricCount === 0 &&
+        (diagnosticSamples.length === 0 || allWithinBudget),
+    });
+
+    const allPassed = thresholds.every((t) => t.passed);
+    return makeReport(row, allPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "segment-diagnostics": evidenceDir + "/segment-diagnostics.jsonl",
+      },
+      message: allPassed
+        ? `Segment buffer stayed within disk budget over ${diagnosticSamples.length} samples (max ${maxPct.toFixed(2)}%)`
+        : `Segment buffer exceeded disk budget (max ${maxPct.toFixed(2)}%)`,
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `driveValSeg001 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    if (rpc) rpc.close();
+    if (spawned && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load) {
+      await load.teardown().catch(() => {});
+    }
+  }
+}
+
+export async function driveValSeg003(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+  let snapshotId: string | null = null;
+
+  try {
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return makeReport(row, "error", {
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    // Encoder readiness guard: probeResult should already be buffered.
+    // If all backends are unavailable (stubs), replay.save returns "no active
+    // capture session" because the segment buffer is never created. Skip rather
+    // than fail so the smoke suite is not gated on T-017.
+    {
+      let encProbeNotif: RpcNotification | null = null;
+      try {
+        encProbeNotif = await rpc.waitNotification("encoder.probeResult", 3_000);
+        writeJsonEvidence(evidenceDir, "encoder-probe-result.json", encProbeNotif);
+      } catch {
+        // not buffered — proceed
+      }
+      if (encProbeNotif !== null) {
+        const encBackends = (
+          encProbeNotif.params as Record<string, unknown> | undefined
+        )?.backends as
+          | Array<{ backend: string; available: boolean; details?: unknown }>
+          | undefined;
+        if (isEncoderStubState(encBackends)) {
+          await rpc
+            .call("capture.stopSession", undefined, 10_000)
+            .catch(() => {});
+          return makeReport(row, "skip", {
+            skipReason: "helper-not-available",
+            message:
+              "encoder implementation not ready — all backends unavailable, segment buffer not created (T-017 in progress)",
+          });
+        }
+      }
+    }
+
+    // Warm the rolling segment buffer for ~20 s before measuring save latency
+    await new Promise((r) => setTimeout(r, 20_000));
+
+    // Drain any segmentDiagnostics that arrived during the warm-up so the
+    // post-save collection window only counts fresh notifications.
+    while (true) {
+      try {
+        await rpc.waitNotification("replay.segmentDiagnostics", 100);
+      } catch {
+        break;
+      }
+    }
+
+    // Measure replay.save latency using monotonic clock
+    const t0 = process.hrtime.bigint();
+    const saveResp = await rpc.call("replay.save", { duration_s: 30 }, 15_000);
+    const t1 = process.hrtime.bigint();
+    const latencyMs = Number(t1 - t0) / 1_000_000;
+
+    writeJsonEvidence(evidenceDir, "save-response.json", saveResp);
+    writeJsonEvidence(evidenceDir, "save-latency.json", {
+      latencyMs,
+      thresholdMs: THRESHOLDS.saveLatencyMaxMs,
+    });
+
+    // Drain any segmentDiagnostics buffered during the save call, then collect
+    // for up to 3 s more.  At least one sample proves capture was not paused.
+    const diagDuringSave: unknown[] = [];
+    const diagDeadline = Date.now() + 3_000;
+    while (Date.now() < diagDeadline) {
+      const rem = diagDeadline - Date.now();
+      if (rem <= 0) break;
+      try {
+        const s = await rpc.waitNotification(
+          "replay.segmentDiagnostics",
+          Math.min(rem, 1_500),
+        );
+        diagDuringSave.push(s.params);
+      } catch {
+        break;
+      }
+    }
+    writeEvidence(
+      evidenceDir,
+      "diagnostics-during-save.jsonl",
+      diagDuringSave.map((s) => JSON.stringify(s)).join("\n") + "\n",
+    );
+
+    let snapshotPinnedNotif: RpcNotification | null = null;
+    try {
+      snapshotPinnedNotif = await rpc.waitNotification(
+        "replay.snapshotPinned",
+        5_000,
+      );
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshotPinned-notification.json",
+        snapshotPinnedNotif,
+      );
+    } catch {
+      // notification absent — threshold will capture the miss
+    }
+
+    // Resolve snapshot_id from result or pinned notification
+    const saveResult = saveResp.result as Record<string, unknown> | undefined;
+    snapshotId =
+      typeof saveResult?.snapshot_id === "string"
+        ? saveResult.snapshot_id
+        : null;
+    if (!snapshotId) {
+      const pinnedParams = snapshotPinnedNotif?.params as
+        | Record<string, unknown>
+        | undefined;
+      if (pinnedParams?.snapshot_id) {
+        snapshotId = String(pinnedParams.snapshot_id);
+      }
+    }
+
+    // Release the snapshot so no pinned entries leak
+    if (snapshotId) {
+      const releaseResp = await rpc.call(
+        "replay.snapshot_release",
+        { snapshot_id: snapshotId },
+        5_000,
+      );
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshot-release-response.json",
+        releaseResp,
+      );
+      snapshotId = null;
+    }
+
+    // Verify active_snapshots drops to 0 after release
+    const healthResp = await rpc.call("engine.health", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "engine-health-post.json", healthResp);
+    const healthResult = healthResp.result as Record<string, unknown> | undefined;
+    const activeSnapshots = Number(healthResult?.active_snapshots ?? -1);
+
+    const stopResp = await rpc.call("capture.stopSession", undefined, 10_000);
+    writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+
+    thresholds.push({
+      name: "replay.save completed without error",
+      observed: saveResp.error ? JSON.stringify(saveResp.error) : "ok",
+      required: "no error",
+      passed: !saveResp.error,
+    });
+
+    thresholds.push({
+      name: "replay.save latency within gate",
+      observed: Math.round(latencyMs),
+      required: `<= ${THRESHOLDS.saveLatencyMaxMs} ms`,
+      passed: latencyMs <= THRESHOLDS.saveLatencyMaxMs,
+    });
+
+    thresholds.push({
+      name: "replay.snapshotPinned notification received",
+      observed: snapshotPinnedNotif ? "received" : "not received",
+      required: "notification received",
+      passed: snapshotPinnedNotif !== null,
+    });
+
+    thresholds.push({
+      name: "capture diagnostics received during/after save (capture not paused)",
+      observed: diagDuringSave.length,
+      required: ">= 1",
+      passed: diagDuringSave.length >= 1,
+    });
+
+    thresholds.push({
+      name: "active_snapshots is 0 after release",
+      observed: activeSnapshots,
+      required: "0",
+      passed: activeSnapshots === 0,
+    });
+
+    const allPassed = thresholds.every((t) => t.passed);
+    return makeReport(row, allPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "save-response": evidenceDir + "/save-response.json",
+        "save-latency": evidenceDir + "/save-latency.json",
+        "diagnostics-during-save":
+          evidenceDir + "/diagnostics-during-save.jsonl",
+        "engine-health-post": evidenceDir + "/engine-health-post.json",
+      },
+      message: allPassed
+        ? `replay.save completed in ${Math.round(latencyMs)} ms (gate: ${THRESHOLDS.saveLatencyMaxMs} ms)`
+        : "replay.save latency gate failed or snapshot not released cleanly",
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `driveValSeg003 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    // Release any still-pinned snapshot on error paths
+    if (snapshotId && rpc) {
+      await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 3_000)
+        .catch(() => {});
+    }
+    if (rpc) rpc.close();
+    if (spawned && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load) {
+      await load.teardown().catch(() => {});
+    }
+  }
+}
+
 export function driveNotImplemented(
   row: SmokeRow,
   reason: string,
@@ -1072,11 +1921,6 @@ const ELECTRON_MSG =
   "Requires Electron renderer observation — not available in standalone helper mode";
 
 export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {
-  "VAL-ENC-001":
-    "Requires active capture to trigger encoder.probeResult — capture APIs are helper stubs",
-  "VAL-SEG-001":
-    "Requires active capture producing segments — capture APIs are helper stubs",
-  "VAL-SEG-003": EXPORT_STUB_MSG,
   "VAL-EXP-001": EXPORT_STUB_MSG,
   "VAL-EXP-010":
     "Depends on VAL-EXP-001 output which cannot be produced — export APIs are helper stubs",

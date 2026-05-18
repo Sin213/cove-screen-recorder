@@ -33,6 +33,9 @@ import {
   driveValCap004,
   driveValProc002,
   driveValProc003,
+  driveValEnc001,
+  driveValSeg001,
+  driveValSeg003,
   driveNotImplemented,
   NOT_IMPLEMENTED_REASONS,
   DriverContext,
@@ -122,6 +125,9 @@ const SELF_SPAWNING_ROW_IDS = new Set([
   "VAL-CAP-004",
   "VAL-PROC-002",
   "VAL-PROC-003",
+  "VAL-ENC-001",
+  "VAL-SEG-001",
+  "VAL-SEG-003",
 ]);
 
 async function dispatchScriptedLocal(
@@ -143,6 +149,12 @@ async function dispatchScriptedLocal(
       return driveValProc003(row, ctx);
     case "VAL-PROC-007":
       return driveValProc007(row, ctx);
+    case "VAL-ENC-001":
+      return driveValEnc001(row, ctx);
+    case "VAL-SEG-001":
+      return driveValSeg001(row, ctx);
+    case "VAL-SEG-003":
+      return driveValSeg003(row, ctx);
     default: {
       const reason = NOT_IMPLEMENTED_REASONS[row.id];
       if (reason) {
