@@ -18,6 +18,7 @@ screenshots/
 # Local AI/audit scratch files
 .audit/
 codex-reviews/
+docs/
 
 # Personal agent / workflow config
 CLAUDE.md

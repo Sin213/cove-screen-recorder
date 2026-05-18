@@ -6,7 +6,7 @@ Manual operator procedure. No script.
 
 | Row ID       | Description |
 |--------------|-------------|
-| VAL-CAP-003  | Portal denial emits captureError and leaves helper in IDLE |
+| VAL-CAP-003  | Portal denial returns a JSON-RPC error on capture.requestSession; helper stays IDLE |
 
 ## Operator procedure
 
@@ -40,6 +40,12 @@ permission dialog and then **deny** the capture request.
 ## Expected outcome
 
 - The app detects the portal denial.
+- The `capture.requestSession` JSON-RPC call returns an **error response** (not a
+  notification). The error message will contain text from the portal failure (e.g.
+  `"portal response: ..."` or `"portal start: ..."`). There is no separate
+  `captureError` event and no `portal-denied` reason code.
+- The helper returns to **IDLE** — no active capture is installed, and the helper
+  does not hang in an intermediate state.
 - A user-visible error message is displayed explaining that screen capture permission was denied.
 - The app does not crash, hang, or silently fail.
-- The user can retry the capture request without restarting the app.
+- The user can retry the capture request (re-enter PICKING) without restarting the app.
