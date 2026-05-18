@@ -1,0 +1,17 @@
+=== VAL-PROC-007: pactl check — idle-only supplemental ===
+Date: 2026-05-18
+
+Helper PID: 76974
+Command: ps --ppid 76974 -o pid,ppid,comm,args
+
+Result:
+    PID    PPID COMMAND         COMMAND
+(no children — helper has zero child processes during idle state)
+
+Classification: skip-runner-stub (idle-only supplemental check)
+Full VAL-PROC-007 requires proving pactl absence "during any smoke row" with an
+active capture session. That condition requires T-010c row execution.
+
+This evidence confirms only: the helper does not preemptively spawn pactl
+before any capture session starts. The active-capture pactl invariant is
+deferred to T-010c.

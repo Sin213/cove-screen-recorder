@@ -1,0 +1,14 @@
+=== getDisplayMedia / MediaRecorder in v2 path check ===
+Date: 2026-05-18
+
+Command: grep -RIn 'getDisplayMedia\|MediaRecorder' src/v2 src/App.tsx src/recorder-client.ts
+
+Result:
+- src/v2/: NO matches (v2 start path does not call getDisplayMedia/MediaRecorder)
+- src/App.tsx: NO matches
+- src/recorder-client.ts: 28 matches (legacy v1.1.0 code — expected, must remain)
+
+Legacy file stats:
+  src/recorder-client.ts: 1122 lines, last modified 2026-05-05
+
+Interpretation: PASS — v2 does not use MediaRecorder; legacy code remains in tree.

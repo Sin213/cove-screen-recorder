@@ -1,0 +1,4 @@
+
+> cove-screen-recorder@1.1.0 typecheck
+> tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.validation.json --noEmit
+

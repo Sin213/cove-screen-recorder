@@ -1,0 +1,233 @@
+{
+  "schema": "cove-validation-report/v1",
+  "suite": "smoke",
+  "startedAt": "2026-05-18T00:42:36.126Z",
+  "completedAt": "2026-05-18T00:42:36.126Z",
+  "rows": [
+    {
+      "id": "VAL-PKG-001",
+      "title": "coveApi.env.probe() returns clean result within 5 s",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "packaging",
+      "linkedSourceCase": "N-007",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-CAP-001",
+      "title": "sessionReady event within 30 s of requestSession",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-CAP-003",
+      "title": "Portal denial emits captureError and leaves helper in IDLE",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-CAP-004",
+      "title": "1080p60 monitor capture 60 s L-MOTION-60 on NVENC — drop and cadence gates",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-CAP-006",
+      "title": "Minimised window captures 60 s without frame loss — Issue #3 proof",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-UI-005",
+      "title": "Region overlay renders correctly and clips output — Issue #1 proof",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "ui-fsm",
+      "linkedSourceCase": null,
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-ENC-001",
+      "title": "NVENC positive probe result cached and reported via encoder.probeResult",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "encoder",
+      "linkedSourceCase": "N-004",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-ENC-006",
+      "title": "encoder.selected visible in HUD and diagnostics after session start",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "encoder",
+      "linkedSourceCase": "N-004",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-SEG-001",
+      "title": "Rolling 60 s window stays within configured disk budget during capture",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "rolling-buffer",
+      "linkedSourceCase": "N-005",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-SEG-003",
+      "title": "replay.save completes within latency gate while capture continues",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "rolling-buffer",
+      "linkedSourceCase": "N-005",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-EXP-001",
+      "title": "Fast stream-copy export of 60 s window completes and emits export.completed",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "export",
+      "linkedSourceCase": "N-006",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-EXP-010",
+      "title": "No fake duplicated frames in VAL-EXP-001 output (ffprobe PTS walk)",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "export",
+      "linkedSourceCase": "N-006",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-EXP-012",
+      "title": "Export runs concurrently with RECORDING without capture frame loss",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "export",
+      "linkedSourceCase": "N-006",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-UI-003",
+      "title": "HUD timer continues updating ≥ 1 Hz during SAVING — Issue #4 proof",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "ui-fsm",
+      "linkedSourceCase": null,
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-UI-012",
+      "title": "Hotkey triggers replay.save and transitions FSM through SAVING→RECORDING",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "ui-fsm",
+      "linkedSourceCase": null,
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-PROC-001",
+      "title": "No leftover cove-replay-engine / ffmpeg / pactl processes after IDLE shutdown",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "process-cleanup",
+      "linkedSourceCase": "N-008",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-PROC-002",
+      "title": "No leftover processes after stopping a RECORDING session and quit",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "process-cleanup",
+      "linkedSourceCase": "N-008",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-PROC-003",
+      "title": "No leftover processes after app quit without explicit session stop",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "process-cleanup",
+      "linkedSourceCase": "N-008",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-PROC-007",
+      "title": "pactl never appears in process tree under helper PID during any smoke row",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "process-cleanup",
+      "linkedSourceCase": "N-008",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-REG-002",
+      "title": "Fake-60fps gate re-run on VAL-EXP-001 output confirms no duplicated PTS",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "regression",
+      "linkedSourceCase": "N-008",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    }
+  ],
+  "totalPass": 0,
+  "totalFail": 0,
+  "totalSkip": 20,
+  "totalError": 0,
+  "verdict": "skip"
+}

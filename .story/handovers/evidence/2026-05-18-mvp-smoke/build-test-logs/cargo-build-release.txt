@@ -1,0 +1,18 @@
+warning: unreachable expression
+   --> helper/src/export/mod.rs:102:5
+    |
+ 87 | /     match std::fs::hard_link(old, new) {
+ 88 | |         Ok(()) => {
+ 89 | |             let _ = std::fs::remove_file(old); // best-effort; new is already committed
+ 90 | |             return Ok(());
+...   |
+100 | |         Err(_) => return Err(std::io::Error::from_raw_os_error(libc::EOPNOTSUPP)),
+101 | |     }
+    | |_____- any code following this `match` expression is unreachable, as all arms diverge
+102 |       unreachable!()
+    |       ^^^^^^^^^^^^^^ unreachable expression
+    |
+    = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cove-replay-engine` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.05s
