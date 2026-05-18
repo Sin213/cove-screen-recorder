@@ -1,3 +1,7 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as crypto from "crypto";
 import { RowReport, RowStatus, ThresholdResult, SkipReason } from "./types";
 import { SmokeRow } from "./rows";
 import { RpcClient, RpcNotification } from "./rpc-client";
@@ -1905,6 +1909,554 @@ export async function driveValSeg003(
   }
 }
 
+function computeSha256(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+
+export async function driveValExp001(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+  let snapshotId: string | null = null;
+  let exportId: string | null = null;
+  let exportTmpDir: string | null = null;
+
+  try {
+    const baseline = pgrepCheck();
+    writeJsonEvidence(evidenceDir, "baseline_pgrep.json", baseline);
+
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (probe.gpuInfo == null || !probe.gpuInfo.startsWith("nvidia:")) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No NVIDIA GPU detected (nvidia-smi absent or failed) — NVENC required for stream-copy export",
+      });
+    }
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "load-launch.json", {
+      name: load.name,
+      pid: load.pid,
+      argv: load.argv,
+    });
+
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return makeReport(row, "error", {
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    // Encoder stub guard: if all backends report not-implemented-yet, no segments
+    // were ever written — skip rather than fail so smoke suite is not gated on T-017.
+    {
+      let encProbeNotif: RpcNotification | null = null;
+      try {
+        encProbeNotif = await rpc.waitNotification("encoder.probeResult", 3_000);
+        writeJsonEvidence(evidenceDir, "encoder-probe-result.json", encProbeNotif);
+      } catch {
+        // not buffered — proceed
+      }
+      if (encProbeNotif !== null) {
+        const encBackends = (
+          encProbeNotif.params as Record<string, unknown> | undefined
+        )?.backends as
+          | Array<{ backend: string; available: boolean; details?: unknown }>
+          | undefined;
+        if (isEncoderStubState(encBackends)) {
+          await rpc
+            .call("capture.stopSession", undefined, 10_000)
+            .catch(() => {});
+          return makeReport(row, "skip", {
+            skipReason: "helper-not-available",
+            message:
+              "encoder implementation not ready — all backends unavailable, segment buffer not created (T-017 in progress)",
+          });
+        }
+      }
+    }
+
+    // Warm segment buffer for 65 s so replay.save can produce a full 60-second window
+    await new Promise((r) => setTimeout(r, 65_000));
+
+    const saveResp = await rpc.call("replay.save", { duration_s: 60 }, 20_000);
+    writeJsonEvidence(evidenceDir, "save-response.json", saveResp);
+
+    if (saveResp.error) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return makeReport(row, "fail", {
+        message: `replay.save error: ${JSON.stringify(saveResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    let snapshotPinnedNotif: RpcNotification | null = null;
+    try {
+      snapshotPinnedNotif = await rpc.waitNotification(
+        "replay.snapshotPinned",
+        5_000,
+      );
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshotPinned-notification.json",
+        snapshotPinnedNotif,
+      );
+    } catch {
+      // absent — check result field below
+    }
+
+    const saveResult = saveResp.result as Record<string, unknown> | undefined;
+    snapshotId =
+      typeof saveResult?.snapshot_id === "string"
+        ? saveResult.snapshot_id
+        : null;
+    if (!snapshotId) {
+      const pinnedParams = snapshotPinnedNotif?.params as
+        | Record<string, unknown>
+        | undefined;
+      if (pinnedParams?.snapshot_id) {
+        snapshotId = String(pinnedParams.snapshot_id);
+      }
+    }
+
+    if (!snapshotId) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return makeReport(row, "fail", {
+        message:
+          "replay.save did not return a snapshot_id (checked result and snapshotPinned notification)",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    // Build unique temp dir for the output file; do NOT pre-create the .mp4 file
+    // itself — the helper uses renameat2(RENAME_NOREPLACE) and errors if dest exists.
+    const rng = crypto.randomBytes(8).toString("hex");
+    exportTmpDir = path.join(
+      os.tmpdir(),
+      `cove-val-exp001-${Date.now()}-${rng}`,
+    );
+    fs.mkdirSync(exportTmpDir, { recursive: true, mode: 0o700 });
+    const outputPath = path.join(exportTmpDir, "export.mp4");
+
+    const exportStartResp = await rpc.call(
+      "replay.export_start",
+      {
+        snapshot: { snapshot_id: snapshotId },
+        options: { output_path: outputPath },
+      },
+      15_000,
+    );
+    writeJsonEvidence(evidenceDir, "export-start-response.json", exportStartResp);
+
+    if (exportStartResp.error) {
+      return makeReport(row, "fail", {
+        message: `replay.export_start error: ${JSON.stringify(exportStartResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const exportStartResult = exportStartResp.result as
+      | Record<string, unknown>
+      | undefined;
+    exportId =
+      typeof exportStartResult?.export_id === "string"
+        ? exportStartResult.export_id
+        : null;
+    writeJsonEvidence(evidenceDir, "export-id.json", { export_id: exportId });
+
+    // Poll for terminal export events in short slots.
+    // Use Promise.allSettled (not Promise.race) so all three waiters fully settle
+    // before the next slot registers new ones. Promise.race would reject on the
+    // first timeout while the other two remain registered, creating stale waiters
+    // that could consume the terminal event before the next slot's waiters see it.
+    // The rpc-client buffers notifications that arrive while no waiter is registered
+    // so no event is lost between settled slots.
+    const EXPORT_BUDGET_MS = 180_000;
+    const POLL_SLOT_MS = 5_000;
+    type TerminalResult = { method: string; notif: RpcNotification };
+    let terminalResult: TerminalResult | null = null;
+    const exportDeadline = Date.now() + EXPORT_BUDGET_MS;
+
+    while (Date.now() < exportDeadline && terminalResult === null) {
+      const rem = exportDeadline - Date.now();
+      if (rem <= 0) break;
+      const slot = Math.min(POLL_SLOT_MS, rem);
+
+      const r1 = rpc
+        .waitNotification("export.completed", slot)
+        .then((n): TerminalResult => ({ method: "export.completed", notif: n }));
+      const r2 = rpc
+        .waitNotification("export.failed", slot)
+        .then((n): TerminalResult => ({ method: "export.failed", notif: n }));
+      const r3 = rpc
+        .waitNotification("export.cancelled", slot)
+        .then((n): TerminalResult => ({ method: "export.cancelled", notif: n }));
+
+      const settled = await Promise.allSettled([r1, r2, r3]);
+      for (const s of settled) {
+        if (s.status === "fulfilled") {
+          terminalResult = s.value;
+          break;
+        }
+      }
+    }
+
+    if (terminalResult === null) {
+      throw new Error(
+        `Export terminal event timeout after ${EXPORT_BUDGET_MS}ms`,
+      );
+    }
+
+    const terminalMethod = terminalResult!.method;
+    const terminalParams = terminalResult!.notif.params as
+      | Record<string, unknown>
+      | undefined;
+
+    writeJsonEvidence(evidenceDir, "export-terminal-event.json", {
+      method: terminalMethod,
+      params: terminalParams,
+    });
+
+    // Export has terminated; clear exportId so the finally block does not attempt cancel.
+    exportId = null;
+
+    // Release snapshot after terminal event (helper blocks release while export is active).
+    const releaseResp = await rpc
+      .call("replay.snapshot_release", { snapshot_id: snapshotId }, 5_000)
+      .catch((e: unknown) => ({
+        error: { message: String(e) },
+        result: undefined,
+      }));
+    writeJsonEvidence(
+      evidenceDir,
+      "snapshot-release-response.json",
+      releaseResp,
+    );
+    if (!releaseResp.error) {
+      snapshotId = null;
+    } else {
+      // Retry after brief delay: helper may still be settling active_exports
+      // after the terminal event. Retry while rpc is still open and the helper
+      // is still running, before shutdown.
+      await new Promise((r) => setTimeout(r, 500));
+      const retryRelease = await rpc
+        .call(
+          "replay.snapshot_release",
+          { snapshot_id: snapshotId },
+          5_000,
+        )
+        .catch((e: unknown) => ({
+          error: { message: String(e) },
+          result: undefined,
+        }));
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshot-release-retry.json",
+        retryRelease,
+      );
+      if (!retryRelease.error) {
+        snapshotId = null;
+      }
+    }
+
+    const helperSha256 =
+      typeof terminalParams?.sha256 === "string" ? terminalParams.sha256 : null;
+    const finalPath =
+      typeof terminalParams?.final_path === "string"
+        ? terminalParams.final_path
+        : outputPath;
+    const helperBytes =
+      typeof terminalParams?.bytes === "number" ? terminalParams.bytes : null;
+    const helperDurationS =
+      typeof terminalParams?.duration_s === "number"
+        ? terminalParams.duration_s
+        : null;
+
+    let fileExists = false;
+    let fileSizeBytes = 0;
+    try {
+      const stat = fs.statSync(finalPath);
+      fileExists = stat.isFile();
+      fileSizeBytes = stat.size;
+    } catch {
+      fileExists = false;
+    }
+
+    let runnerSha256: string | null = null;
+    if (fileExists) {
+      try {
+        runnerSha256 = await computeSha256(finalPath);
+      } catch (e) {
+        writeEvidence(evidenceDir, "sha256-error.txt", String(e) + "\n");
+      }
+    }
+
+    writeJsonEvidence(evidenceDir, "sha256-check.json", {
+      helperSha256,
+      runnerSha256,
+      match: helperSha256 !== null && helperSha256 === runnerSha256,
+      finalPath,
+      fileSizeBytes,
+    });
+
+    // Stop capture session then shutdown helper
+    const stopResp = await rpc
+      .call("capture.stopSession", undefined, 10_000)
+      .catch(() => null);
+    if (stopResp) writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+
+    const shutdownResp = await shutdownHelper(rpc);
+    writeJsonEvidence(evidenceDir, "shutdown-response.json", shutdownResp);
+    // Don't close rpc here — let the finally block close it after any final
+    // snapshot release attempt (if the retry above still failed).
+
+    await new Promise((r) =>
+      setTimeout(r, THRESHOLDS.processCleanupAfterShutdownS * 1_000),
+    );
+    const postCheck = pgrepCheck(baseline);
+    writeJsonEvidence(evidenceDir, "post_pgrep.json", postCheck);
+
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+
+    thresholds.push({
+      name: "terminal event is export.completed",
+      observed: terminalMethod,
+      required: "export.completed",
+      passed: terminalMethod === "export.completed",
+    });
+
+    thresholds.push({
+      name: "export file exists at final_path",
+      observed: fileExists ? `${fileSizeBytes} bytes` : "not found",
+      required: "file exists",
+      passed: fileExists,
+    });
+
+    const sha256Match =
+      helperSha256 !== null &&
+      runnerSha256 !== null &&
+      helperSha256 === runnerSha256;
+    thresholds.push({
+      name: "runner SHA256 matches helper SHA256",
+      observed: runnerSha256 ?? "(not computed)",
+      required: helperSha256 ?? "(not provided)",
+      passed: sha256Match,
+    });
+
+    // bytes field must be present — fail if absent to catch protocol regressions.
+    thresholds.push({
+      name: "export.completed includes bytes field",
+      observed: helperBytes !== null ? String(helperBytes) : "(absent)",
+      required: "non-null number",
+      passed: helperBytes !== null,
+    });
+    if (helperBytes !== null && fileExists) {
+      thresholds.push({
+        name: "file size matches bytes field",
+        observed: String(fileSizeBytes),
+        required: String(helperBytes),
+        passed: fileSizeBytes === helperBytes,
+      });
+    }
+
+    if (helperDurationS !== null) {
+      const toleranceMs = THRESHOLDS.durationToleranceMs["60s"];
+      const diffMs = Math.abs(helperDurationS * 1_000 - 60_000);
+      thresholds.push({
+        name: `export duration within ±${toleranceMs.toFixed(1)} ms of 60 s (informational)`,
+        observed: `${(helperDurationS * 1_000).toFixed(1)} ms`,
+        required: `60000 ± ${toleranceMs.toFixed(1)} ms`,
+        passed: diffMs <= toleranceMs,
+      });
+    }
+
+    const noEnginePost = postCheck.coveReplayEngine.length === 0;
+    thresholds.push({
+      name: "no cove-replay-engine after shutdown",
+      observed: String(postCheck.coveReplayEngine.length),
+      required: "0",
+      passed: noEnginePost,
+    });
+
+    const noFfmpegPost = postCheck.ffmpeg.length === 0;
+    thresholds.push({
+      name: "no ffmpeg after shutdown",
+      observed: String(postCheck.ffmpeg.length),
+      required: "0",
+      passed: noFfmpegPost,
+    });
+
+    // Duration is informational — only the first three thresholds gate the verdict.
+    const gatingThresholds = thresholds.filter(
+      (t) => !t.name.startsWith("export duration within"),
+    );
+    const allGatingPassed = gatingThresholds.every((t) => t.passed);
+
+    return makeReport(row, allGatingPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "save-response": evidenceDir + "/save-response.json",
+        "export-start-response": evidenceDir + "/export-start-response.json",
+        "export-terminal-event": evidenceDir + "/export-terminal-event.json",
+        "sha256-check": evidenceDir + "/sha256-check.json",
+      },
+      message: allGatingPassed
+        ? `Export completed: ${fileSizeBytes} bytes, SHA256 verified, 60 s window` +
+          (helperDurationS != null
+            ? ` (${helperDurationS.toFixed(2)} s actual)`
+            : "")
+        : "Export validation failed — see thresholds",
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `driveValExp001 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    // Cancel in-flight export before releasing snapshot (helper blocks release
+    // while export is active).
+    if (exportId && rpc) {
+      await rpc
+        .call("replay.export_cancel", { export_id: exportId }, 5_000)
+        .catch(() => {});
+    }
+    if (snapshotId && rpc) {
+      await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 3_000)
+        .catch(() => {});
+    }
+    if (rpc) rpc.close();
+    if (spawned && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load) await load.teardown().catch(() => {});
+    if (exportTmpDir) {
+      try {
+        fs.rmSync(exportTmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
+
 export function driveNotImplemented(
   row: SmokeRow,
   reason: string,
@@ -1915,18 +2467,15 @@ export function driveNotImplemented(
   });
 }
 
-const EXPORT_STUB_MSG =
-  "Requires replay/export APIs (replay.save/export_start) which are helper stubs";
 const ELECTRON_MSG =
   "Requires Electron renderer observation — not available in standalone helper mode";
 
 export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {
-  "VAL-EXP-001": EXPORT_STUB_MSG,
   "VAL-EXP-010":
-    "Depends on VAL-EXP-001 output which cannot be produced — export APIs are helper stubs",
+    "Requires ffprobe PTS analysis wrapper on VAL-EXP-001 output — not implemented",
   "VAL-EXP-012":
-    "Requires concurrent capture + export — both API sets are helper stubs",
+    "Concurrent capture+export validation driver not implemented",
   "VAL-UI-003": ELECTRON_MSG,
   "VAL-REG-002":
-    "Depends on VAL-EXP-001 output which cannot be produced — export APIs are helper stubs",
+    "Requires ffprobe regression check on VAL-EXP-001 output — not implemented",
 };
