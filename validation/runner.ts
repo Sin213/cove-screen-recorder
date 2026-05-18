@@ -30,6 +30,7 @@ import {
   driveValProc001,
   driveValProc007,
   driveValCap003,
+  driveValCap004,
   driveValProc002,
   driveValProc003,
   driveNotImplemented,
@@ -118,6 +119,7 @@ const SELF_SPAWNING_ROW_IDS = new Set([
   "VAL-PROC-001",
   "VAL-PROC-007",
   "VAL-CAP-003",
+  "VAL-CAP-004",
   "VAL-PROC-002",
   "VAL-PROC-003",
 ]);
@@ -131,6 +133,8 @@ async function dispatchScriptedLocal(
       return driveValPkg001(row, ctx);
     case "VAL-CAP-003":
       return driveValCap003(row, ctx);
+    case "VAL-CAP-004":
+      return driveValCap004(row, ctx);
     case "VAL-PROC-001":
       return driveValProc001(row, ctx);
     case "VAL-PROC-002":

@@ -16,6 +16,8 @@ import {
   writeEvidence,
 } from "./evidence";
 import { THRESHOLDS } from "./assertions";
+import { probeEnvironment, hasDisplayServer } from "./env-probe";
+import { launchMotion60, LoadScriptMissingError, LaunchedLoad } from "./loads";
 
 export interface DriverContext {
   rpc: RpcClient | null;
@@ -670,6 +672,390 @@ export async function driveValProc003(
   }
 }
 
+interface DiagSample {
+  t: number;
+  droppedSinceLast: number;
+  totalProduced: number;
+  observedFps: number;
+}
+
+function deriveThresholdKey(
+  format:
+    | { width: number; height: number; fps_num: number; fps_den: number }
+    | undefined,
+  encoderBackend: string,
+): string {
+  const height = format?.height ?? 1080;
+  let resPrefix: string;
+  if (height >= 2160) {
+    resPrefix = "4k60";
+  } else if (height >= 1440) {
+    resPrefix = "1440p60";
+  } else {
+    resPrefix = "1080p60";
+  }
+
+  const be = encoderBackend.toLowerCase();
+  let encSuffix: string;
+  if (be.includes("nvenc") || be.includes("nvidia")) {
+    encSuffix = "nvenc";
+  } else if (be.includes("vaapi")) {
+    encSuffix = "vaapi";
+  } else if (be.includes("qsv") || be.includes("quicksync") || be.includes("intel")) {
+    encSuffix = "qsv";
+  } else if (be === "nvenc") {
+    encSuffix = "nvenc";
+  } else {
+    encSuffix = "libx264";
+  }
+
+  return `${resPrefix}-${encSuffix}`;
+}
+
+export async function driveValCap004(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let load: LaunchedLoad | null = null;
+  let spawned: SpawnedHelper | null = null;
+  let rpc: RpcClient | null = null;
+
+  try {
+    // --- Stage 1: Environment probe ----------------------------------------
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No display server (DISPLAY / WAYLAND_DISPLAY absent) — cannot open portal capture",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "XDG_RUNTIME_DIR not set — xdg-desktop-portal unlikely to be accessible",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — portal monitor capture not available",
+      });
+    }
+
+    // --- Stage 2: L-MOTION-60 load ------------------------------------------
+    let loadErr: unknown = null;
+    try {
+      load = await launchMotion60();
+    } catch (err) {
+      loadErr = err;
+    }
+
+    if (loadErr !== null) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: `L-MOTION-60 load script missing: ${String(loadErr)}`,
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser found — cannot launch L-MOTION-60 load",
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "load-launch.json", {
+      name: load.name,
+      pid: load.pid,
+      argv: load.argv,
+    });
+
+    // Give the browser a moment to open before requesting capture
+    await new Promise((r) => setTimeout(r, 3_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    // --- Stage 3: Spawn helper and connect ----------------------------------
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    // --- Stage 4: Capture session ------------------------------------------
+    // requestSession runs the full XDG Screencast portal negotiation including
+    // the user-facing picker UI; the response arrives only after the user
+    // approves.  Budget 60 s for human interaction.  A timeout here means the
+    // portal D-Bus path is inaccessible (background/non-interactive session).
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+    if (reqResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", {}, 10_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+    if (startResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.startStream error: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    // sessionReady fires after portal approval + PipeWire stream ready
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      30_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    const srParams = sessionReadyNotif.params as
+      | Record<string, unknown>
+      | undefined;
+    const captureFormat = srParams?.format as
+      | { width: number; height: number; fps_num: number; fps_den: number }
+      | undefined;
+
+    // --- Stage 5: Drain encoder notifications buffered from startStream ----
+    let encoderBackend = ""; // populated from encoder.selected if emitted
+    const probeNotif = await rpc
+      .waitNotification("encoder.probeResult", 2_000)
+      .catch(() => null);
+    if (probeNotif) {
+      writeJsonEvidence(evidenceDir, "encoder-probe-result.json", probeNotif);
+    }
+    const selectedNotif = await rpc
+      .waitNotification("encoder.selected", 2_000)
+      .catch(() => null);
+    if (selectedNotif) {
+      writeJsonEvidence(evidenceDir, "encoder-selected.json", selectedNotif);
+      const selParams = selectedNotif.params as
+        | Record<string, unknown>
+        | undefined;
+      const backend = String(selParams?.backend ?? "");
+      if (backend) encoderBackend = backend;
+    }
+
+    // --- Stage 6: 60 s diagnostics observation window ----------------------
+    // VAL-CAP-004 is the NVENC row; always use the nvenc threshold key for drop
+    // rate (strictest gate) while asserting encoder.selected = nvenc explicitly.
+    const thresholdKey = deriveThresholdKey(captureFormat, "nvenc");
+    const maxDropRate =
+      (THRESHOLDS.captureDropRate as Record<string, number>)[thresholdKey] ??
+      0;
+    writeJsonEvidence(evidenceDir, "thresholds.json", {
+      key: thresholdKey,
+      maxDropRate,
+      cadenceMeanToleranceFrac: THRESHOLDS.cadenceMeanToleranceFrac,
+      captureFormat: captureFormat ?? null,
+      encoderObserved: encoderBackend || "(not received)",
+    });
+
+    const samples: DiagSample[] = [];
+    let sessionLostNotif: RpcNotification | null = null;
+    const OBSERVATION_MS = 60_000;
+    const observationEnd = Date.now() + OBSERVATION_MS;
+
+    // Drain any buffered sessionLost before starting the loop
+    const preLost = await rpc
+      .waitNotification("capture.sessionLost", 50)
+      .catch(() => null);
+    if (preLost) {
+      sessionLostNotif = preLost;
+      writeJsonEvidence(evidenceDir, "session-lost.json", preLost);
+    }
+
+    while (Date.now() < observationEnd && !sessionLostNotif) {
+      const remaining = observationEnd - Date.now();
+      if (remaining <= 0) break;
+
+      try {
+        const diag = await rpc.waitNotification(
+          "capture.diagnostics",
+          Math.min(1_200, remaining),
+        );
+        const diagParams = diag.params as Record<string, unknown> | undefined;
+        const bufs = diagParams?.buffers as Record<string, unknown> | undefined;
+        const cadence = diagParams?.cadence as
+          | Record<string, unknown>
+          | undefined;
+        samples.push({
+          t: Date.now(),
+          droppedSinceLast: Number(bufs?.dropped_since_last ?? 0),
+          totalProduced: Number(bufs?.total_produced ?? 0),
+          observedFps: Number(cadence?.observed_fps ?? 0),
+        });
+      } catch {
+        // no diagnostics in this window; fall through to sessionLost check
+      }
+
+      const lost = await rpc
+        .waitNotification("capture.sessionLost", 50)
+        .catch(() => null);
+      if (lost) {
+        sessionLostNotif = lost;
+        writeJsonEvidence(evidenceDir, "session-lost.json", lost);
+      }
+    }
+
+    writeJsonEvidence(evidenceDir, "capture-diagnostics.json", samples);
+
+    if (sessionLostNotif) {
+      return makeReport(row, "fail", {
+        message:
+          "capture.sessionLost during observation window — session dropped unexpectedly",
+        durationMs: Date.now() - start,
+        evidencePaths: {
+          "env-probe": evidenceDir + "/env-probe.json",
+          "capture-diagnostics": evidenceDir + "/capture-diagnostics.json",
+          "session-lost": evidenceDir + "/session-lost.json",
+        },
+      });
+    }
+
+    // --- Stage 7: Stop session and shutdown --------------------------------
+    try {
+      const stopResp = await rpc.call("capture.stopSession", {}, 10_000);
+      writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+    } catch (err) {
+      writeEvidence(evidenceDir, "stopSession-error.txt", String(err) + "\n");
+    }
+
+    const shutdownResp = await shutdownHelper(rpc);
+    writeJsonEvidence(evidenceDir, "shutdown-response.json", shutdownResp);
+    rpc.close();
+    rpc = null;
+
+    // --- Stage 8: Threshold evaluation -------------------------------------
+    const thresholds: ThresholdResult[] = [];
+
+    const totalDropped = samples.reduce((s, x) => s + x.droppedSinceLast, 0);
+    const lastSample = samples[samples.length - 1];
+    const totalProduced = lastSample?.totalProduced ?? 0;
+    const dropRate = totalProduced > 0 ? totalDropped / totalProduced : 0;
+
+    thresholds.push({
+      name: `drop rate <= ${maxDropRate} (${thresholdKey})`,
+      observed: String(dropRate.toFixed(6)),
+      required: `<= ${maxDropRate}`,
+      passed: dropRate <= maxDropRate,
+    });
+
+    if (samples.length >= 10) {
+      const nominalFps = captureFormat
+        ? captureFormat.fps_num / captureFormat.fps_den
+        : 60;
+      const meanFps =
+        samples.reduce((s, x) => s + x.observedFps, 0) / samples.length;
+      const tol = THRESHOLDS.cadenceMeanToleranceFrac;
+      thresholds.push({
+        name: `cadence mean within ±${(tol * 100).toFixed(1)}% of ${nominalFps.toFixed(2)} fps`,
+        observed: String(meanFps.toFixed(3)),
+        required: `${(nominalFps * (1 - tol)).toFixed(2)}..${(nominalFps * (1 + tol)).toFixed(2)}`,
+        passed: Math.abs(meanFps - nominalFps) / nominalFps <= tol,
+      });
+    } else {
+      thresholds.push({
+        name: "cadence (insufficient samples for mean check)",
+        observed: String(samples.length),
+        required: ">= 10 diagnostics samples",
+        passed: false,
+      });
+    }
+
+    thresholds.push({
+      name: "at least 1 diagnostics sample received",
+      observed: String(samples.length),
+      required: ">= 1",
+      passed: samples.length >= 1,
+    });
+
+    // Row VAL-CAP-004 is NVENC-specific; assert the backend is nvenc.
+    const nvencObserved = encoderBackend || "(not received)";
+    thresholds.push({
+      name: "encoder.selected backend is nvenc",
+      observed: nvencObserved,
+      required: "nvenc",
+      passed: encoderBackend === "nvenc",
+    });
+
+    const durationMs = Date.now() - start;
+    const allPassed = thresholds.every((t) => t.passed);
+
+    return makeReport(row, allPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "capture-diagnostics": evidenceDir + "/capture-diagnostics.json",
+        thresholds: evidenceDir + "/thresholds.json",
+      },
+      message: allPassed
+        ? `Monitor capture passed drop+cadence gates (${samples.length} samples, key=${thresholdKey})`
+        : `Capture quality gates failed — see thresholds (key=${thresholdKey}, samples=${samples.length})`,
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `VAL-CAP-004 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    if (rpc) rpc.close();
+    if (spawned && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load) {
+      await load.teardown().catch(() => {});
+    }
+  }
+}
+
 export function driveNotImplemented(
   row: SmokeRow,
   reason: string,
@@ -680,15 +1066,12 @@ export function driveNotImplemented(
   });
 }
 
-const CAPTURE_STUB_MSG =
-  "Requires capture session APIs (capture.requestSession/startStream) which are helper stubs";
 const EXPORT_STUB_MSG =
   "Requires replay/export APIs (replay.save/export_start) which are helper stubs";
 const ELECTRON_MSG =
   "Requires Electron renderer observation — not available in standalone helper mode";
 
 export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {
-  "VAL-CAP-004": CAPTURE_STUB_MSG,
   "VAL-ENC-001":
     "Requires active capture to trigger encoder.probeResult — capture APIs are helper stubs",
   "VAL-SEG-001":
