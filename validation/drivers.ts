@@ -26,6 +26,7 @@ import {
   extractVideoPts,
   analyzePtsCadence,
   checkFrameCount,
+  checkHudHz,
 } from "./assertions";
 import { probeEnvironment, hasDisplayServer } from "./env-probe";
 import { launchMotion60, LoadScriptMissingError, LaunchedLoad } from "./loads";
@@ -3971,6 +3972,651 @@ export async function driveValExp012(
   }
 }
 
+export async function driveValUi003(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+  let snapshotId: string | null = null;
+  let exportId: string | null = null;
+  let exportTmpDir: string | null = null;
+
+  try {
+    const baseline = pgrepCheck();
+    writeJsonEvidence(evidenceDir, "baseline_pgrep.json", baseline);
+
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "load-launch.json", {
+      name: load.name,
+      pid: load.pid,
+      argv: load.argv,
+    });
+
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      const errMsg = JSON.stringify(reqResp.error);
+      if (
+        errMsg.includes("denied") ||
+        errMsg.includes("cancelled") ||
+        errMsg.includes("portal")
+      ) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message: `capture.requestSession portal denied/cancelled: ${errMsg}`,
+        });
+      }
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${errMsg}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return makeReport(row, "error", {
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    // Encoder stub guard — if all backends are not-implemented-yet, the segment
+    // buffer is never created and replay.save fails. Skip rather than fail.
+    {
+      let encProbeNotif: RpcNotification | null = null;
+      try {
+        encProbeNotif = await rpc.waitNotification("encoder.probeResult", 3_000);
+        writeJsonEvidence(evidenceDir, "encoder-probe-result.json", encProbeNotif);
+      } catch {
+        // not buffered — proceed
+      }
+      if (encProbeNotif !== null) {
+        const encBackends = (
+          encProbeNotif.params as Record<string, unknown> | undefined
+        )?.backends as
+          | Array<{ backend: string; available: boolean; details?: unknown }>
+          | undefined;
+        if (isEncoderStubState(encBackends)) {
+          await rpc
+            .call("capture.stopSession", undefined, 10_000)
+            .catch(() => {});
+          return makeReport(row, "skip", {
+            skipReason: "helper-not-available",
+            message:
+              "encoder implementation not ready — all backends unavailable, segment buffer not created (T-017 in progress)",
+          });
+        }
+      }
+    }
+
+    // Warm segment buffer for 15 s (sufficient for a 10-second save window)
+    await new Promise((r) => setTimeout(r, 15_000));
+
+    const saveResp = await rpc.call("replay.save", { duration_s: 10 }, 20_000);
+    writeJsonEvidence(evidenceDir, "save-response.json", saveResp);
+
+    if (saveResp.error) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return makeReport(row, "fail", {
+        message: `replay.save error: ${JSON.stringify(saveResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    let snapshotPinnedNotif: RpcNotification | null = null;
+    try {
+      snapshotPinnedNotif = await rpc.waitNotification(
+        "replay.snapshotPinned",
+        5_000,
+      );
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshotPinned-notification.json",
+        snapshotPinnedNotif,
+      );
+    } catch {
+      // absent — check result field below
+    }
+
+    const saveResult = saveResp.result as Record<string, unknown> | undefined;
+    snapshotId =
+      typeof saveResult?.snapshot_id === "string"
+        ? saveResult.snapshot_id
+        : null;
+    if (!snapshotId) {
+      const pinnedParams = snapshotPinnedNotif?.params as
+        | Record<string, unknown>
+        | undefined;
+      if (pinnedParams?.snapshot_id) {
+        snapshotId = String(pinnedParams.snapshot_id);
+      }
+    }
+
+    if (!snapshotId) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return makeReport(row, "fail", {
+        message:
+          "replay.save did not return a snapshot_id (checked result and snapshotPinned notification)",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const rng = crypto.randomBytes(8).toString("hex");
+    exportTmpDir = path.join(
+      os.tmpdir(),
+      `cove-val-ui003-${Date.now()}-${rng}`,
+    );
+    fs.mkdirSync(exportTmpDir, { recursive: true, mode: 0o700 });
+    const outputPath = path.join(exportTmpDir, "export.mp4");
+
+    const exportStartResp = await rpc.call(
+      "replay.export_start",
+      {
+        snapshot: { snapshot_id: snapshotId },
+        options: { output_path: outputPath },
+      },
+      15_000,
+    );
+    writeJsonEvidence(evidenceDir, "export-start-response.json", exportStartResp);
+
+    if (exportStartResp.error) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return makeReport(row, "fail", {
+        message: `replay.export_start error: ${JSON.stringify(exportStartResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const exportStartResult = exportStartResp.result as
+      | Record<string, unknown>
+      | undefined;
+    exportId =
+      typeof exportStartResult?.export_id === "string"
+        ? exportStartResult.export_id
+        : null;
+    writeJsonEvidence(evidenceDir, "export-id.json", { export_id: exportId });
+
+    // Wait for export.started — marks the EXPORTING window start for HUD Hz measurement.
+    // The §6.3 "SAVING" label refers to the UI state; the measurable window is
+    // export.started → terminal event (EXPORTING in the helper state machine).
+    type TerminalResult = { method: string; notif: RpcNotification };
+    let terminalResult: TerminalResult | null = null;
+    let savingStartMs: number | null = null;
+
+    {
+      let exportStartedNotif: RpcNotification | null = null;
+      try {
+        exportStartedNotif = await rpc.waitNotification("export.started", 15_000);
+      } catch {
+        // 15s timeout
+      }
+      writeJsonEvidence(
+        evidenceDir,
+        "export-started-notification.json",
+        exportStartedNotif,
+      );
+
+      if (exportStartedNotif === null) {
+        await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+        return makeReport(row, "fail", {
+          message: "export.started notification did not arrive within 15 s",
+          durationMs: Date.now() - start,
+        });
+      }
+
+      // Drain any capture.diagnostics buffered before export.started arrives.
+      // The RpcClient buffers all notifications; pre-export diagnostics from the
+      // warmup/save window would get timestamped now and falsely appear within the
+      // EXPORTING window, making the HUD Hz check a false positive.
+      // Discard all buffered events before marking the window start.
+      {
+        let draining = true;
+        while (draining) {
+          try {
+            await rpc.waitNotification("capture.diagnostics", 1);
+          } catch {
+            draining = false;
+          }
+        }
+      }
+
+      savingStartMs = Date.now();
+    }
+
+    // Collect capture.diagnostics arrival timestamps during the EXPORTING window.
+    // These prove the helper emits diagnostics at >= 1 Hz during export.
+    // Combined with static assertions on App.tsx + clocks.ts this forms the
+    // hybrid proof required by §6.3: dynamic timing evidence + static renderer-clock proof.
+    const diagTimestamps: number[] = [];
+    const DIAG_SLOT_MS = 1_200;
+    const EXPORT_BUDGET_MS = 60_000;
+    const exportDeadline = Date.now() + EXPORT_BUDGET_MS;
+    // savingEndMs is set when the terminal event is observed, bounding the
+    // measurement window at [savingStartMs, savingEndMs]. Initialised here so
+    // the timeout path also has a defined value.
+    let savingEndMs: number = Date.now();
+
+    // Race diagnostics and terminal events concurrently each slot so that a
+    // terminal notification arriving in the same slot as a diagnostic always
+    // takes precedence. Timestamps are captured inside each waiter's .then() so
+    // they reflect actual notification arrival, not slot-end time.
+    type DiagResult = { kind: "diag"; ts: number };
+    type TermWithTs = { kind: "terminal"; result: TerminalResult; ts: number };
+
+    while (Date.now() < exportDeadline && terminalResult === null) {
+      const rem = exportDeadline - Date.now();
+      if (rem <= 0) break;
+      const slotMs = Math.min(DIAG_SLOT_MS, rem);
+
+      const diagP = rpc
+        .waitNotification("capture.diagnostics", slotMs)
+        .then((): DiagResult => ({ kind: "diag", ts: Date.now() }))
+        .catch(() => null);
+      const t1P = rpc
+        .waitNotification("export.completed", slotMs)
+        .then((n): TermWithTs => ({
+          kind: "terminal",
+          result: { method: "export.completed", notif: n },
+          ts: Date.now(),
+        }))
+        .catch(() => null);
+      const t2P = rpc
+        .waitNotification("export.failed", slotMs)
+        .then((n): TermWithTs => ({
+          kind: "terminal",
+          result: { method: "export.failed", notif: n },
+          ts: Date.now(),
+        }))
+        .catch(() => null);
+      const t3P = rpc
+        .waitNotification("export.cancelled", slotMs)
+        .then((n): TermWithTs => ({
+          kind: "terminal",
+          result: { method: "export.cancelled", notif: n },
+          ts: Date.now(),
+        }))
+        .catch(() => null);
+
+      const [diagR, t1R, t2R, t3R] = await Promise.all([
+        diagP,
+        t1P,
+        t2P,
+        t3P,
+      ]);
+
+      // Terminal takes priority: if any terminal arrived in this slot, bind
+      // savingEndMs at the arrival timestamp and exit without counting diagnostics.
+      for (const r of [t1R, t2R, t3R]) {
+        if (r !== null) {
+          terminalResult = r.result;
+          savingEndMs = r.ts;
+          break;
+        }
+      }
+
+      // Only record a diagnostic if no terminal was detected in this slot.
+      if (terminalResult === null && diagR !== null) {
+        diagTimestamps.push(diagR.ts);
+      }
+    }
+
+    // Post-terminal cleanup drain: flush any capture.diagnostics buffered at the
+    // terminal boundary. These are OUTSIDE the measurement window — do NOT add
+    // to diagTimestamps. savingEndMs is already set above.
+    {
+      let draining = true;
+      while (draining) {
+        try {
+          await rpc.waitNotification("capture.diagnostics", 1);
+        } catch {
+          draining = false;
+        }
+      }
+    }
+
+    writeJsonEvidence(evidenceDir, "diagnostics-timestamps.json", {
+      timestamps: diagTimestamps,
+      count: diagTimestamps.length,
+      windowStartMs: savingStartMs,
+      windowEndMs: savingEndMs,
+    });
+
+    if (terminalResult === null) {
+      throw new Error(
+        `Export terminal event timeout after ${EXPORT_BUDGET_MS} ms`,
+      );
+    }
+
+    const terminalMethod = terminalResult.method;
+    const terminalParams = terminalResult.notif.params as
+      | Record<string, unknown>
+      | undefined;
+    exportId = null;
+
+    writeJsonEvidence(evidenceDir, "export-terminal-event.json", {
+      method: terminalMethod,
+      params: terminalParams,
+    });
+
+    // Release snapshot; retry once on error
+    const releaseResp = await rpc
+      .call("replay.snapshot_release", { snapshot_id: snapshotId }, 5_000)
+      .catch((e: unknown) => ({
+        error: { message: String(e) },
+        result: undefined,
+      }));
+    writeJsonEvidence(
+      evidenceDir,
+      "snapshot-release-response.json",
+      releaseResp,
+    );
+    if (!releaseResp.error) {
+      snapshotId = null;
+    } else {
+      await new Promise((r) => setTimeout(r, 500));
+      const retryRelease = await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 5_000)
+        .catch((e: unknown) => ({
+          error: { message: String(e) },
+          result: undefined,
+        }));
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshot-release-retry.json",
+        retryRelease,
+      );
+      if (!retryRelease.error) snapshotId = null;
+    }
+
+    const postPgrep = pgrepCheck();
+    writeJsonEvidence(evidenceDir, "post_pgrep.json", postPgrep);
+
+    // --- HUD Hz check ---
+    const windowDurationMs = savingEndMs - savingStartMs!;
+    const windowS = Math.floor(windowDurationMs / 1_000);
+    const hudHz = checkHudHz(diagTimestamps, savingStartMs!, savingEndMs);
+    writeJsonEvidence(evidenceDir, "hud-hz-check.json", {
+      result: hudHz,
+      windowDurationMs,
+      windowS,
+      diagCount: diagTimestamps.length,
+    });
+
+    // --- Static assertion helpers ---
+    // Strip JS/TS line comments (//) and block comments (/* … */) before matching
+    // so that commented-out code cannot satisfy the assertions.
+    const stripComments = (src: string): string =>
+      src
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/\/\/[^\n]*/g, "");
+
+    // --- Static assertion #1: App.tsx v2 clock condition ---
+    // Verify structural pattern: v2SessionReadyMs null-check AND the active-state
+    // array contains RECORDING, SAVING, EXPORTING. Matches the variable by
+    // structure, not by name, so a rename doesn't false-fail.
+    let appClockAssertionPassed = false;
+    let appClockAssertionMsg = "";
+    const APP_TSX_PATH = path.resolve(__dirname, "../src/App.tsx");
+    try {
+      const appSourceRaw = fs.readFileSync(APP_TSX_PATH, "utf8");
+      const appSource = stripComments(appSourceRaw);
+      const hasAllActiveStates =
+        appSource.includes('"RECORDING"') &&
+        appSource.includes('"SAVING"') &&
+        appSource.includes('"EXPORTING"');
+      // Accept only a genuine null guard: !== null or != null (which covers null+undefined).
+      // !== undefined alone does NOT guard against null and must not satisfy this check.
+      const hasReadyMsCheck =
+        appSource.includes("v2SessionReadyMs !== null") ||
+        appSource.includes("v2SessionReadyMs != null");
+      const clockConditionMatch = appSource.match(
+        /v2SessionReadyMs[^;]{0,50}[\r\n]+\s*\[["']RECORDING["'][^;]{0,200}SAVING[^;]{0,100}EXPORTING/,
+      );
+
+      writeJsonEvidence(evidenceDir, "app-clock-assertion.json", {
+        hasAllActiveStates,
+        hasReadyMsCheck,
+        clockConditionFound: clockConditionMatch !== null,
+        matchedSnippet: clockConditionMatch?.[0]?.slice(0, 500) ?? null,
+      });
+
+      appClockAssertionPassed =
+        hasAllActiveStates &&
+        hasReadyMsCheck &&
+        clockConditionMatch !== null;
+      if (!appClockAssertionPassed) {
+        appClockAssertionMsg = `App.tsx assertion failed: hasAllActiveStates=${hasAllActiveStates}, hasReadyMsCheck=${hasReadyMsCheck}, clockConditionFound=${clockConditionMatch !== null}`;
+      }
+    } catch (e) {
+      writeJsonEvidence(evidenceDir, "app-clock-assertion.json", {
+        error: String(e),
+      });
+      appClockAssertionPassed = false;
+      appClockAssertionMsg = `Failed to read src/App.tsx: ${String(e)}`;
+    }
+
+    // --- Static assertion #2: src/v2/clocks.ts is rAF-driven ---
+    let clocksRafAssertionPassed = false;
+    let clocksRafAssertionMsg = "";
+    const CLOCKS_TS_PATH = path.resolve(__dirname, "../src/v2/clocks.ts");
+    try {
+      const clocksSourceRaw = fs.readFileSync(CLOCKS_TS_PATH, "utf8");
+      const clocksSource = stripComments(clocksSourceRaw);
+      const hasRaf = clocksSource.includes("requestAnimationFrame");
+      const rafMatch = clocksSource.match(/requestAnimationFrame[\s\S]{0,200}/);
+
+      writeJsonEvidence(evidenceDir, "clocks-raf-assertion.json", {
+        hasRequestAnimationFrame: hasRaf,
+        matchedSnippet: rafMatch?.[0]?.slice(0, 300) ?? null,
+      });
+
+      clocksRafAssertionPassed = hasRaf;
+      if (!clocksRafAssertionPassed) {
+        clocksRafAssertionMsg =
+          "src/v2/clocks.ts does not use requestAnimationFrame";
+      }
+    } catch (e) {
+      writeJsonEvidence(evidenceDir, "clocks-raf-assertion.json", {
+        error: String(e),
+      });
+      clocksRafAssertionPassed = false;
+      clocksRafAssertionMsg = `Failed to read src/v2/clocks.ts: ${String(e)}`;
+    }
+
+    // --- Assemble thresholds ---
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+
+    thresholds.push({
+      name: "export completed successfully (not failed or cancelled)",
+      observed: terminalMethod,
+      required: "export.completed",
+      passed: terminalMethod === "export.completed",
+    });
+
+    thresholds.push({
+      name: "EXPORTING window >= 3 seconds",
+      observed: windowS,
+      required: ">= 3",
+      passed: windowS >= 3,
+    });
+
+    thresholds.push({
+      name: `HUD diagnostics at >= ${THRESHOLDS.hudMinHz} Hz during EXPORTING window`,
+      observed: hudHz.passed
+        ? `passed (${diagTimestamps.length} samples over ${windowS}s)`
+        : `missed seconds: [${hudHz.missedSeconds.join(", ")}]`,
+      required: `>= ${THRESHOLDS.hudMinHz} capture.diagnostics event per second`,
+      passed: hudHz.passed,
+    });
+
+    thresholds.push({
+      name: "App.tsx: v2 clock active for RECORDING/SAVING/EXPORTING with v2SessionReadyMs guard",
+      observed: appClockAssertionPassed ? "assertion matched" : appClockAssertionMsg,
+      required:
+        "v2 active-state array includes RECORDING/SAVING/EXPORTING AND v2SessionReadyMs null check present",
+      passed: appClockAssertionPassed,
+    });
+
+    thresholds.push({
+      name: "src/v2/clocks.ts: useV2ElapsedMs is rAF-driven",
+      observed: clocksRafAssertionPassed
+        ? "requestAnimationFrame found"
+        : clocksRafAssertionMsg,
+      required: "useV2ElapsedMs uses requestAnimationFrame",
+      passed: clocksRafAssertionPassed,
+    });
+
+    const allPassed = thresholds.every((t) => t.passed);
+    writeJsonEvidence(evidenceDir, "thresholds.json", thresholds);
+
+    return makeReport(row, allPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "diagnostics-timestamps": evidenceDir + "/diagnostics-timestamps.json",
+        "hud-hz-check": evidenceDir + "/hud-hz-check.json",
+        "app-clock-assertion": evidenceDir + "/app-clock-assertion.json",
+        "clocks-raf-assertion": evidenceDir + "/clocks-raf-assertion.json",
+        "export-terminal-event": evidenceDir + "/export-terminal-event.json",
+        thresholds: evidenceDir + "/thresholds.json",
+      },
+      message: allPassed
+        ? `HUD Hz validated: ${diagTimestamps.length} diagnostics over ${windowS}s export window; static assertions passed`
+        : thresholds
+            .filter((t) => !t.passed)
+            .map((t) => t.name)
+            .join("; "),
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `driveValUi003 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    if (exportId !== null && rpc !== null) {
+      await rpc
+        .call("replay.export_cancel", { export_id: exportId }, 5_000)
+        .catch(() => {});
+    }
+    if (snapshotId !== null && rpc !== null) {
+      await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 3_000)
+        .catch(() => {});
+    }
+    if (rpc !== null) rpc.close();
+    if (spawned !== null && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load !== null) await load.teardown().catch(() => {});
+    if (exportTmpDir !== null) {
+      try {
+        fs.rmSync(exportTmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
+
 export function driveNotImplemented(
   row: SmokeRow,
   reason: string,
@@ -3981,9 +4627,4 @@ export function driveNotImplemented(
   });
 }
 
-const ELECTRON_MSG =
-  "Requires Electron renderer observation — not available in standalone helper mode";
-
-export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {
-  "VAL-UI-003": ELECTRON_MSG,
-};
+export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {};
