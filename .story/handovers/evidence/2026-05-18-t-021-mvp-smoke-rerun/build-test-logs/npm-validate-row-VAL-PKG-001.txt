@@ -1,0 +1,12 @@
+[runner] Helper socket not found — all scripted-local rows will skip.
+[runner] VAL-PKG-001: skip (helper-not-available)
+
+Suite: smoke  |  Verdict: SKIP  |  2026-05-18T21:49:26.954Z
+  pass=0  fail=0  skip=1  error=0
+
+ID              Status    Class           Reason / Message
+--------------------------------------------------------------------------------
+VAL-PKG-001     skip      scripted-local  helper-not-available
+
+[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779140966957.json
+[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-18T21-49-26-955Z/report.json
