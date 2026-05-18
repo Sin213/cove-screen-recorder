@@ -3,6 +3,7 @@ import { SourceModal } from "./components/SourceModal";
 import { HotkeysDialog } from "./components/HotkeysDialog";
 import { useStore } from "./store";
 import { initV2Engine, saveReplay as v2SaveReplay } from "./v2/engine";
+import { useV2ElapsedMs } from "./v2/clocks";
 import { Diagnostics } from "./v2/Diagnostics";
 import type { AppInfo, CaptureSource, CropRect, PresetId } from "./types";
 import {
@@ -86,6 +87,8 @@ export function App() {
   const setLogCollapsed = useStore((s) => s.setLogCollapsed);
 
   const v2State = useStore((s) => s.v2State);
+  const v2SessionReadyMs = useStore((s) => s.v2SessionReadyMs);
+  const v2ElapsedMs = useV2ElapsedMs(v2SessionReadyMs);
 
   // Initialize v2 engine subscriptions once on mount.
   useEffect(() => initV2Engine(), []);
@@ -467,8 +470,13 @@ export function App() {
   }, [status, stopFlow]);
 
   const presetMeta = effectivePreset(preset, customQuality);
-  const elapsedSeconds = Math.floor(elapsedMs / 1000);
+  const v2ClockActive =
+    v2SessionReadyMs !== null &&
+    ["RECORDING", "SAVING", "EXPORTING"].includes(v2State);
+  const selectedElapsedMs = v2ClockActive ? v2ElapsedMs : elapsedMs;
+  const elapsedSeconds = Math.floor(selectedElapsedMs / 1000);
   const isRecording = status === "recording";
+  const isHudActive = isRecording || v2ClockActive;
   const recordingState: "ready" | "recording" | "preparing" | "error" = isRecording
     ? "recording"
     : replaySaving || status === "preparing" || status === "finalizing"
@@ -511,17 +519,17 @@ export function App() {
             </span>
           </div>
 
-          {(isRecording || livePreview) && (
+          {(isHudActive || livePreview) && (
             <CapturePreview
               mode={mode}
               preset={preset}
-              recording={isRecording}
+              recording={isHudActive}
               elapsedSeconds={elapsedSeconds}
               liveStream={livePreview}
             />
           )}
 
-          <Stats preset={preset} mode={mode} elapsedSeconds={elapsedSeconds} recording={isRecording} />
+          <Stats preset={preset} mode={mode} elapsedSeconds={elapsedSeconds} recording={isHudActive} />
 
           <div>
             <div className="section-label" style={{ marginBottom: 10 }}>Capture source</div>
@@ -756,10 +764,10 @@ export function App() {
           </div>
 
           {/* Action bar */}
-          <div className={`actionbar ${isRecording ? "recording" : ""}`}>
+          <div className={`actionbar ${isHudActive ? "recording" : ""}`}>
             <div className="ab-info">
               <div className="t">
-                {isRecording
+                {isHudActive
                   ? `Recording · ${formatTime(elapsedSeconds)}`
                   : replaySaving
                     ? "Saving replay… (encoding to mp4)"
