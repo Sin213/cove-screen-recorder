@@ -1,6 +1,6 @@
 export type RowClassification = "scripted-local" | "manual" | "future-ci";
 export type RowStatus = "pass" | "fail" | "skip" | "error";
-export type SkipReason = "helper-not-available" | "manual" | "future-ci" | "dependency-failed";
+export type SkipReason = "helper-not-available" | "manual" | "future-ci" | "dependency-failed" | "not-implemented";
 export type RowTier = "must-pass" | "should-pass" | "informational";
 export type SuiteKind = "smoke" | "rc";
 export type Verdict = "pass" | "fail" | "skip" | "error";
@@ -27,6 +27,8 @@ export interface EvidenceBundle {
   postPgrep: string;
   rendererEventsJsonl: string;
   dmesgTail: string;
+  /** Row-specific evidence not covered by the N-008 §7 bundle schema. */
+  extra: Record<string, string>;
 }
 
 /** Per-row result emitted by the runner. */

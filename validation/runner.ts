@@ -7,16 +7,33 @@
  *   node dist-validation/runner.js row <ID>      # Run a single row by ID
  *   node dist-validation/runner.js --help
  *
- * This slice: the helper is not yet implemented, so all scripted-local rows
- * skip with reason "helper-not-available". Manual rows skip with reason "manual".
- * Exit 0 when all rows are skipped or passed; exit 1 on any fail or error.
+ * Automated rows: VAL-PKG-001, VAL-PROC-001, VAL-PROC-007
+ * Not-implemented rows: scripted-local rows requiring capture/replay/export stubs
+ * Manual rows: operator-driven, skipped with reason "manual"
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import { probeSocket } from "./transport";
+import { resolveSocketPath } from "./transport";
 import { SMOKE_ROWS, SmokeRow, rowById } from "./rows";
-import { RowReport, RowStatus, SkipReason, SuiteReport, SuiteKind, Verdict } from "./types";
+import {
+  RowReport,
+  RowStatus,
+  SkipReason,
+  SuiteReport,
+  SuiteKind,
+  Verdict,
+} from "./types";
+import { RpcClient } from "./rpc-client";
+import {
+  driveValPkg001,
+  driveValProc001,
+  driveValProc007,
+  driveNotImplemented,
+  NOT_IMPLEMENTED_REASONS,
+  DriverContext,
+} from "./drivers";
+import { initRunTimestamp, getRunDir } from "./evidence";
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -34,9 +51,10 @@ function usage(): void {
       "  node dist-validation/runner.js row <ID>       Run a single row by ID",
       "  node dist-validation/runner.js --help         Show this message",
       "",
-      "This slice: all scripted-local rows skip with 'helper-not-available'",
-      "until the v2 helper IPC socket is present at",
-      "  $XDG_RUNTIME_DIR/cove-screen-recorder/engine.sock",
+      "Automated rows (helper must be running or runner will spawn one):",
+      "  VAL-PKG-001   engine.health + engine.version probe",
+      "  VAL-PROC-001  process cleanup after IDLE shutdown",
+      "  VAL-PROC-007  pactl absence in helper process tree",
       "",
       "Exit codes:",
       "  0  All rows passed or skipped",
@@ -75,7 +93,11 @@ function parseArgs(argv: string[]): CliMode | null {
 // Row execution
 // ---------------------------------------------------------------------------
 
-function makeSkipReport(row: SmokeRow, reason: SkipReason, message?: string): RowReport {
+function makeSkipReport(
+  row: SmokeRow,
+  reason: SkipReason,
+  message?: string,
+): RowReport {
   return {
     id: row.id,
     title: row.title,
@@ -89,13 +111,46 @@ function makeSkipReport(row: SmokeRow, reason: SkipReason, message?: string): Ro
   };
 }
 
-async function executeRow(row: SmokeRow, helperAvailable: boolean): Promise<RowReport> {
+async function dispatchScriptedLocal(
+  row: SmokeRow,
+  ctx: DriverContext,
+): Promise<RowReport> {
+  switch (row.id) {
+    case "VAL-PKG-001":
+      return driveValPkg001(row, ctx);
+    case "VAL-PROC-001":
+      return driveValProc001(row, ctx);
+    case "VAL-PROC-007":
+      return driveValProc007(row, ctx);
+    default: {
+      const reason = NOT_IMPLEMENTED_REASONS[row.id];
+      if (reason) {
+        return driveNotImplemented(row, reason);
+      }
+      return driveNotImplemented(row, "No driver implemented for this row");
+    }
+  }
+}
+
+async function executeRow(
+  row: SmokeRow,
+  helperAvailable: boolean,
+  ctx: DriverContext,
+): Promise<RowReport> {
   switch (row.classification) {
     case "manual":
-      return makeSkipReport(row, "manual", "Operator-driven; record outcome via --ingest flag (not yet implemented).");
+      return makeSkipReport(
+        row,
+        "manual",
+        "Operator-driven; record outcome via --ingest flag (not yet implemented).",
+      );
 
     case "future-ci":
-      return makeSkipReport(row, "future-ci", "Deferred; requires hardware not in the current workstation.");
+      return makeSkipReport(
+        row,
+        "future-ci",
+        "Deferred; requires hardware not in the current workstation.",
+      );
 
     case "scripted-local":
       if (!helperAvailable) {
@@ -105,12 +160,7 @@ async function executeRow(row: SmokeRow, helperAvailable: boolean): Promise<RowR
           "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows.",
         );
       }
-      // Placeholder: real execution is wired in T-010c.
-      return makeSkipReport(
-        row,
-        "helper-not-available",
-        "Helper socket detected but row execution not yet implemented (T-010c).",
-      );
+      return dispatchScriptedLocal(row, ctx);
   }
 }
 
@@ -129,33 +179,60 @@ function verdictFromCounts(
   return "skip";
 }
 
-async function runSuite(rows: SmokeRow[], kind: SuiteKind): Promise<SuiteReport> {
+async function runSuite(
+  rows: SmokeRow[],
+  kind: SuiteKind,
+): Promise<SuiteReport> {
   const startedAt = new Date().toISOString();
-  const { available: helperAvailable } = await probeSocket();
+  initRunTimestamp();
+  const socketPath = resolveSocketPath();
 
-  if (!helperAvailable) {
+  let rpc: RpcClient | null = null;
+  let helperAvailable = false;
+
+  try {
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    helperAvailable = true;
+    process.stderr.write(
+      `[runner] Connected to helper at ${socketPath}\n`,
+    );
+  } catch {
     process.stderr.write(
       "[runner] Helper socket not found — all scripted-local rows will skip.\n",
     );
   }
+
+  const ctx: DriverContext = {
+    rpc,
+    socketPath: resolveSocketPath(),
+  };
 
   const results: RowReport[] = [];
   let stoppedEarly = false;
   let stoppedAtRow: string | undefined;
 
   for (const row of rows) {
-    const report = await executeRow(row, helperAvailable);
+    const report = await executeRow(row, helperAvailable, ctx);
     results.push(report);
+
+    const label = `${report.id}: ${report.status}`;
+    const detail = report.skipReason
+      ? ` (${report.skipReason})`
+      : report.message
+        ? ` — ${report.message}`
+        : "";
+    process.stderr.write(`[runner] ${label}${detail}\n`);
 
     const isFail = report.status === "fail" || report.status === "error";
 
-    // Smoke: stop on first must-pass red (N-008 §22).
     if (kind === "smoke" && isFail && row.tier === "must-pass") {
       stoppedEarly = true;
       stoppedAtRow = row.id;
       break;
     }
   }
+
+  if (rpc) rpc.close();
 
   const completedAt = new Date().toISOString();
 
@@ -198,20 +275,29 @@ function printSummary(report: SuiteReport): void {
       `Suite: ${report.suite}  |  Verdict: ${report.verdict.toUpperCase()}  |  ${report.startedAt}`,
       `  pass=${report.totalPass}  fail=${report.totalFail}  skip=${report.totalSkip}  error=${report.totalError}`,
       "",
-      pad("ID", 16) + pad("Status", 10) + pad("Class", 16) + "Reason / Message",
+      pad("ID", 16) +
+        pad("Status", 10) +
+        pad("Class", 16) +
+        "Reason / Message",
       "-".repeat(80),
     ].join("\n") + "\n",
   );
 
   for (const row of report.rows) {
-    const reason = row.skipReason ?? "";
+    const detail = row.skipReason ?? row.message ?? "";
     process.stdout.write(
-      pad(row.id, 16) + pad(row.status, 10) + pad(row.classification, 16) + reason + "\n",
+      pad(row.id, 16) +
+        pad(row.status, 10) +
+        pad(row.classification, 16) +
+        detail +
+        "\n",
     );
   }
 
   if (report.stoppedEarly) {
-    process.stdout.write(`\nStopped early at ${report.stoppedAtRow ?? "?"} (first must-pass red).\n`);
+    process.stdout.write(
+      `\nStopped early at ${report.stoppedAtRow ?? "?"} (first must-pass red).\n`,
+    );
   }
   process.stdout.write("\n");
 }
@@ -219,6 +305,19 @@ function printSummary(report: SuiteReport): void {
 function writeReportFile(report: SuiteReport, outPath: string): void {
   fs.writeFileSync(outPath, JSON.stringify(report, null, 2), "utf8");
   process.stderr.write(`[runner] Report written to ${outPath}\n`);
+
+  try {
+    const evidenceReport = path.join(getRunDir(), "report.json");
+    fs.mkdirSync(path.dirname(evidenceReport), { recursive: true });
+    fs.writeFileSync(
+      evidenceReport,
+      JSON.stringify(report, null, 2),
+      "utf8",
+    );
+    process.stderr.write(`[runner] Evidence report: ${evidenceReport}\n`);
+  } catch {
+    // evidence dir write is best-effort
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +376,9 @@ async function main(): Promise<void> {
   );
   writeReportFile(report, outFile);
 
-  process.exit(report.verdict === "fail" || report.verdict === "error" ? 1 : 0);
+  process.exit(
+    report.verdict === "fail" || report.verdict === "error" ? 1 : 0,
+  );
 }
 
 main().catch((err: unknown) => {

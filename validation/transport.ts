@@ -9,7 +9,7 @@ export interface TransportProbe {
   error?: string;
 }
 
-function resolveSocketPath(): string {
+export function resolveSocketPath(): string {
   // N-007 §1: UDS at $XDG_RUNTIME_DIR/cove-screen-recorder/engine.sock on Linux/macOS.
   const xdgRuntime = process.env["XDG_RUNTIME_DIR"];
   const runtimeDir = xdgRuntime ?? path.join(os.tmpdir(), `cove-${process.getuid?.() ?? "user"}`);

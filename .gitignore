@@ -4,6 +4,7 @@ dist/
 dist-electron/
 dist-validation/
 validation-report-*.json
+validation-artifacts/
 release/
 vendor/
 *.log
