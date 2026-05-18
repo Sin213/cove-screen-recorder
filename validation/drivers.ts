@@ -3276,6 +3276,701 @@ export async function driveValReg002(
   }
 }
 
+// ---------------------------------------------------------------------------
+// VAL-EXP-012: Export runs concurrently with RECORDING without capture frame loss
+// ---------------------------------------------------------------------------
+
+export async function driveValExp012(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+  let snapshotId: string | null = null;
+  let exportId: string | null = null;
+  let exportTmpDir: string | null = null;
+  const BASELINE_MIN_SAMPLES = 5;
+  const BASELINE_WINDOW_MS = 10_000;
+
+  try {
+    // --- Stage 1: Environment probes ----------------------------------------
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (probe.gpuInfo == null || !probe.gpuInfo.startsWith("nvidia:")) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No NVIDIA GPU detected (nvidia-smi absent or failed) — NVENC required for concurrent export test",
+      });
+    }
+
+    if (!hasDisplayServer(probe)) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      });
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      });
+    }
+
+    if (!probe.portalRunning) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    // --- Stage 2: Launch L-MOTION-60 load -----------------------------------
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return makeReport(row, "error", {
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        });
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return makeReport(row, "skip", {
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return makeReport(row, "fail", {
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "load-launch.json", {
+      name: load.name,
+      pid: load.pid,
+      argv: load.argv,
+    });
+
+    // --- Stage 3: Spawn runner-owned helper + connect RPC -------------------
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    // --- Stage 4: Start capture session ------------------------------------
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        });
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      return makeReport(row, "fail", {
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return makeReport(row, "error", {
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      30_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    // Drain encoder notifications + encoder stub guard
+    let encProbeNotif: RpcNotification | null = null;
+    try {
+      encProbeNotif = await rpc.waitNotification("encoder.probeResult", 3_000);
+      writeJsonEvidence(
+        evidenceDir,
+        "encoder-probe-result.json",
+        encProbeNotif,
+      );
+    } catch {
+      // not buffered — proceed
+    }
+    if (encProbeNotif !== null) {
+      const encBackends = (
+        encProbeNotif.params as Record<string, unknown> | undefined
+      )?.backends as
+        | Array<{ backend: string; available: boolean; details?: unknown }>
+        | undefined;
+      if (isEncoderStubState(encBackends)) {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "encoder implementation not ready — all backends unavailable, segment buffer not created (T-017 in progress)",
+        });
+      }
+    }
+
+    let encoderBackend = "";
+    const selectedNotif = await rpc
+      .waitNotification("encoder.selected", 2_000)
+      .catch(() => null);
+    if (selectedNotif) {
+      writeJsonEvidence(evidenceDir, "encoder-selected.json", selectedNotif);
+      const selParams = selectedNotif.params as
+        | Record<string, unknown>
+        | undefined;
+      const backend = String(selParams?.backend ?? "");
+      if (backend) encoderBackend = backend;
+    }
+
+    // --- Stage 5: 65 s warm-up (populate rolling buffer) -------------------
+    await new Promise((r) => setTimeout(r, 65_000));
+
+    // --- Stage 6: Baseline diagnostics (10 s window before snapshot) --------
+    const baselineSamples: DiagSample[] = [];
+    const baselineDeadline = Date.now() + BASELINE_WINDOW_MS;
+
+    while (Date.now() < baselineDeadline) {
+      const rem = baselineDeadline - Date.now();
+      if (rem <= 0) break;
+      try {
+        const diag = await rpc.waitNotification(
+          "capture.diagnostics",
+          Math.min(2_000, rem),
+        );
+        const diagParams = diag.params as Record<string, unknown> | undefined;
+        const bufs = diagParams?.buffers as Record<string, unknown> | undefined;
+        const cadence = diagParams?.cadence as
+          | Record<string, unknown>
+          | undefined;
+        baselineSamples.push({
+          t: Date.now(),
+          droppedSinceLast: Number(bufs?.dropped_since_last ?? 0),
+          totalProduced: Number(bufs?.total_produced ?? 0),
+          observedFps: Number(cadence?.observed_fps ?? 0),
+        });
+      } catch {
+        // slot timed out — keep collecting until deadline
+      }
+    }
+    writeJsonEvidence(evidenceDir, "diagnostics-baseline.json", baselineSamples);
+
+    // --- Stage 7: Take snapshot while RECORDING is active ------------------
+    const saveResp = await rpc.call("replay.save", { duration_s: 60 }, 20_000);
+    writeJsonEvidence(evidenceDir, "save-response.json", saveResp);
+
+    if (saveResp.error) {
+      return makeReport(row, "fail", {
+        message: `replay.save error: ${JSON.stringify(saveResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    let snapshotPinnedNotif: RpcNotification | null = null;
+    try {
+      snapshotPinnedNotif = await rpc.waitNotification(
+        "replay.snapshotPinned",
+        5_000,
+      );
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshotPinned-notification.json",
+        snapshotPinnedNotif,
+      );
+    } catch {
+      // absent — check result field below
+    }
+
+    const saveResult = saveResp.result as Record<string, unknown> | undefined;
+    snapshotId =
+      typeof saveResult?.snapshot_id === "string"
+        ? saveResult.snapshot_id
+        : null;
+    if (!snapshotId) {
+      const pinnedParams = snapshotPinnedNotif?.params as
+        | Record<string, unknown>
+        | undefined;
+      if (pinnedParams?.snapshot_id) {
+        snapshotId = String(pinnedParams.snapshot_id);
+      }
+    }
+
+    if (!snapshotId) {
+      return makeReport(row, "fail", {
+        message:
+          "replay.save did not return a snapshot_id (checked result and snapshotPinned notification)",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    // --- Stage 8: Create export output path --------------------------------
+    const rng = crypto.randomBytes(8).toString("hex");
+    exportTmpDir = path.join(
+      os.tmpdir(),
+      `cove-val-exp012-${Date.now()}-${rng}`,
+    );
+    fs.mkdirSync(exportTmpDir, { recursive: true, mode: 0o700 });
+    const outputPath = path.join(exportTmpDir, "export.mp4");
+
+    // Drain any capture.diagnostics that accumulated since the baseline window
+    // ended (during save / snapshotPinned / tmpdir creation). These are
+    // pre-export samples; consuming them here ensures Stage 10 only sees
+    // diagnostics emitted while export was actually running.
+    {
+      let draining = true;
+      while (draining) {
+        try {
+          await rpc.waitNotification("capture.diagnostics", 1);
+        } catch {
+          draining = false;
+        }
+      }
+    }
+
+    // --- Stage 9: Start export while RECORDING continues -------------------
+    const exportStartResp = await rpc.call(
+      "replay.export_start",
+      {
+        snapshot: { snapshot_id: snapshotId },
+        options: { output_path: outputPath },
+      },
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "export-start-response.json",
+      exportStartResp,
+    );
+
+    if (exportStartResp.error) {
+      return makeReport(row, "fail", {
+        message: `replay.export_start error: ${JSON.stringify(exportStartResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const exportStartResult = exportStartResp.result as
+      | Record<string, unknown>
+      | undefined;
+    exportId =
+      typeof exportStartResult?.export_id === "string"
+        ? exportStartResult.export_id
+        : null;
+    writeJsonEvidence(evidenceDir, "export-id.json", { export_id: exportId });
+
+    // Wait for export.started as the concurrent-start anchor — proves export
+    // began while RECORDING was still active. Terminal detection is left to
+    // Stage 10 so no post-export diagnostics are buffered during this wait.
+    // Invariant: helper always emits export.started before any terminal event
+    // (helper/src/export/mod.rs:868), so a single started waiter is sufficient.
+    type TerminalResult = { method: string; notif: RpcNotification };
+    let terminalResult: TerminalResult | null = null;
+
+    {
+      let exportStartedNotif: RpcNotification | null = null;
+      try {
+        exportStartedNotif = await rpc.waitNotification(
+          "export.started",
+          15_000,
+        );
+      } catch {
+        // 15s timeout — export.started did not arrive
+      }
+      writeJsonEvidence(
+        evidenceDir,
+        "export-started-notification.json",
+        exportStartedNotif,
+      );
+
+      if (exportStartedNotif === null) {
+        return makeReport(row, "fail", {
+          message:
+            "export.started notification did not arrive within 15 s — export may not have started while RECORDING was active",
+          durationMs: Date.now() - start,
+        });
+      }
+    }
+
+    // --- Stage 10: During-export diagnostics + terminal event polling -------
+    const duringExportSamples: DiagSample[] = [];
+    const DIAG_SLOT_MS = 1_200;
+    const TERMINAL_CHECK_MS = 500;
+    const EXPORT_BUDGET_MS = 180_000;
+    const exportDeadline = Date.now() + EXPORT_BUDGET_MS;
+
+    while (Date.now() < exportDeadline && terminalResult === null) {
+      const rem = exportDeadline - Date.now();
+      if (rem <= 0) break;
+
+      try {
+        const diag = await rpc.waitNotification(
+          "capture.diagnostics",
+          Math.min(DIAG_SLOT_MS, rem),
+        );
+        const diagParams = diag.params as Record<string, unknown> | undefined;
+        const bufs = diagParams?.buffers as Record<string, unknown> | undefined;
+        const cadence = diagParams?.cadence as
+          | Record<string, unknown>
+          | undefined;
+        duringExportSamples.push({
+          t: Date.now(),
+          droppedSinceLast: Number(bufs?.dropped_since_last ?? 0),
+          totalProduced: Number(bufs?.total_produced ?? 0),
+          observedFps: Number(cadence?.observed_fps ?? 0),
+        });
+      } catch {
+        // slot timed out
+      }
+
+      if (terminalResult !== null) break;
+
+      const termRem = Math.min(TERMINAL_CHECK_MS, exportDeadline - Date.now());
+      if (termRem <= 0) break;
+
+      const t1 = rpc
+        .waitNotification("export.completed", termRem)
+        .then((n): TerminalResult => ({ method: "export.completed", notif: n }));
+      const t2 = rpc
+        .waitNotification("export.failed", termRem)
+        .then((n): TerminalResult => ({ method: "export.failed", notif: n }));
+      const t3 = rpc
+        .waitNotification("export.cancelled", termRem)
+        .then((n): TerminalResult => ({
+          method: "export.cancelled",
+          notif: n,
+        }));
+
+      const settled = await Promise.allSettled([t1, t2, t3]);
+      for (const s of settled) {
+        if (s.status === "fulfilled") {
+          terminalResult = s.value;
+          break;
+        }
+      }
+    }
+
+    // Post-terminal drain: collect any capture.diagnostics buffered after the
+    // last loop iteration. dropped_since_last is per-sample, so missing even
+    // one sample that carried drops would falsely pass the zero-drop gate.
+    {
+      let draining = true;
+      while (draining) {
+        try {
+          const diag = await rpc.waitNotification("capture.diagnostics", 1);
+          const diagParams = diag.params as Record<string, unknown> | undefined;
+          const bufs = diagParams?.buffers as
+            | Record<string, unknown>
+            | undefined;
+          const cadence = diagParams?.cadence as
+            | Record<string, unknown>
+            | undefined;
+          duringExportSamples.push({
+            t: Date.now(),
+            droppedSinceLast: Number(bufs?.dropped_since_last ?? 0),
+            totalProduced: Number(bufs?.total_produced ?? 0),
+            observedFps: Number(cadence?.observed_fps ?? 0),
+          });
+        } catch {
+          draining = false;
+        }
+      }
+    }
+
+    // Drain any buffered capture.sessionLost that arrived during the export
+    // window (before Stage 10, or between loop iterations). A session loss
+    // means RECORDING stopped mid-export — the row must fail.
+    let sessionLostDuringExport = false;
+    try {
+      await rpc.waitNotification("capture.sessionLost", 1);
+      sessionLostDuringExport = true;
+    } catch {
+      // none buffered — expected on a healthy run
+    }
+    writeJsonEvidence(evidenceDir, "session-lost-check.json", {
+      sessionLostDuringExport,
+    });
+
+    writeJsonEvidence(
+      evidenceDir,
+      "diagnostics-during-export.json",
+      duringExportSamples,
+    );
+
+    if (terminalResult === null) {
+      throw new Error(
+        `Export terminal event timeout after ${EXPORT_BUDGET_MS} ms — concurrent export budget exhausted`,
+      );
+    }
+
+    const terminalMethod = terminalResult.method;
+    const terminalParams = terminalResult.notif.params as
+      | Record<string, unknown>
+      | undefined;
+    exportId = null;
+
+    writeJsonEvidence(evidenceDir, "export-terminal-event.json", {
+      method: terminalMethod,
+      params: terminalParams,
+    });
+
+    // --- Stage 11: Release snapshot ----------------------------------------
+    const releaseResp = await rpc
+      .call("replay.snapshot_release", { snapshot_id: snapshotId }, 5_000)
+      .catch((e: unknown) => ({
+        error: { message: String(e) },
+        result: undefined,
+      }));
+    writeJsonEvidence(
+      evidenceDir,
+      "snapshot-release-response.json",
+      releaseResp,
+    );
+    if (!releaseResp.error) {
+      snapshotId = null;
+    } else {
+      await new Promise((r) => setTimeout(r, 500));
+      const retryRelease = await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 5_000)
+        .catch((e: unknown) => ({
+          error: { message: String(e) },
+          result: undefined,
+        }));
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshot-release-retry.json",
+        retryRelease,
+      );
+      if (!retryRelease.error) snapshotId = null;
+    }
+
+    // Check export file exists
+    const finalPath =
+      typeof terminalParams?.final_path === "string"
+        ? terminalParams.final_path
+        : outputPath;
+    let fileExists = false;
+    let fileSizeBytes = 0;
+    try {
+      const stat = fs.statSync(finalPath);
+      fileExists = stat.isFile();
+      fileSizeBytes = stat.size;
+    } catch {
+      fileExists = false;
+    }
+    writeJsonEvidence(evidenceDir, "export-file-check.json", {
+      finalPath,
+      fileExists,
+      fileSizeBytes,
+    });
+
+    // Stop session and shutdown before threshold evaluation
+    try {
+      const stopResp = await rpc.call("capture.stopSession", undefined, 10_000);
+      writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+    } catch (err) {
+      writeEvidence(evidenceDir, "stopSession-error.txt", String(err) + "\n");
+    }
+
+    const shutdownResp = await shutdownHelper(rpc);
+    writeJsonEvidence(evidenceDir, "shutdown-response.json", shutdownResp);
+    rpc.close();
+    rpc = null;
+
+    // --- Stage 12: Threshold evaluation ------------------------------------
+    const thresholds: ThresholdResult[] = [];
+
+    thresholds.push({
+      name: `baseline diagnostics samples >= ${BASELINE_MIN_SAMPLES}`,
+      observed: String(baselineSamples.length),
+      required: `>= ${BASELINE_MIN_SAMPLES}`,
+      passed: baselineSamples.length >= BASELINE_MIN_SAMPLES,
+    });
+
+    thresholds.push({
+      name: "during-export diagnostics samples >= 1",
+      observed: String(duringExportSamples.length),
+      required: ">= 1",
+      passed: duringExportSamples.length >= 1,
+    });
+
+    thresholds.push({
+      name: "export.completed (not failed/cancelled)",
+      observed: terminalMethod,
+      required: "export.completed",
+      passed: terminalMethod === "export.completed",
+    });
+
+    thresholds.push({
+      name: "export file exists on disk",
+      observed: fileExists ? `yes (${fileSizeBytes} bytes)` : "no",
+      required: "exists",
+      passed: fileExists,
+    });
+
+    thresholds.push({
+      name: "capture.sessionLost not received during export",
+      observed: sessionLostDuringExport ? "session-lost" : "ok",
+      required: "no session loss",
+      passed: !sessionLostDuringExport,
+    });
+
+    // VAL-EXP-012 is NVENC-specific; assert the encoder actually selected is nvenc.
+    const nvencSelected =
+      encoderBackend.toLowerCase().includes("nvenc") ||
+      encoderBackend.toLowerCase().includes("nvidia");
+    thresholds.push({
+      name: "encoder.selected backend is nvenc",
+      observed: encoderBackend || "(not received)",
+      required: "nvenc",
+      passed: nvencSelected,
+    });
+
+    // During-export capture drop rate — VAL-EXP-012 requires zero drops regardless of resolution.
+    // Do NOT use deriveThresholdKey here; that table allows 0.001 at 4k60-nvenc, which would
+    // let frames drop during concurrent export and falsify the no-frame-loss invariant.
+    const thresholdKey = "zero (VAL-EXP-012)";
+    const maxDropRate = 0;
+
+    const duringDropped = duringExportSamples.reduce(
+      (s, x) => s + x.droppedSinceLast,
+      0,
+    );
+    const baselineLastSample = baselineSamples[baselineSamples.length - 1];
+    const duringLastSample =
+      duringExportSamples[duringExportSamples.length - 1];
+    const afterBaselineTotalProduced = baselineLastSample?.totalProduced ?? 0;
+    const duringProducedCount =
+      duringLastSample !== undefined &&
+      duringLastSample.totalProduced > afterBaselineTotalProduced
+        ? duringLastSample.totalProduced - afterBaselineTotalProduced
+        : 0;
+    const duringDropRate =
+      duringProducedCount > 0
+        ? duringDropped / duringProducedCount
+        : duringDropped > 0
+          ? 1.0
+          : 0;
+
+    writeJsonEvidence(evidenceDir, "drop-comparison.json", {
+      baselineSampleCount: baselineSamples.length,
+      baselineTotalDropped: baselineSamples.reduce(
+        (s, x) => s + x.droppedSinceLast,
+        0,
+      ),
+      afterBaselineTotalProduced,
+      duringExportSampleCount: duringExportSamples.length,
+      duringDropped,
+      duringProducedCount,
+      duringDropRate,
+      thresholdKey,
+      maxDropRate,
+    });
+
+    thresholds.push({
+      name: `during-export capture drop rate <= ${maxDropRate} (${thresholdKey})`,
+      observed: String(duringDropRate.toFixed(6)),
+      required: `<= ${maxDropRate}`,
+      passed: duringDropRate <= maxDropRate,
+    });
+
+    writeJsonEvidence(evidenceDir, "thresholds.json", thresholds);
+
+    const durationMs = Date.now() - start;
+    const passed = thresholds.every((t) => t.passed);
+    const failedNames = thresholds
+      .filter((t) => !t.passed)
+      .map((t) => `${t.name}: got ${t.observed}`)
+      .join("; ");
+
+    return makeReport(row, passed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      message: passed
+        ? `Concurrent export OK: during-export drops=${duringDropped}, export=${terminalMethod}`
+        : failedNames,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "diagnostics-baseline": evidenceDir + "/diagnostics-baseline.json",
+        "diagnostics-during-export":
+          evidenceDir + "/diagnostics-during-export.json",
+        "drop-comparison": evidenceDir + "/drop-comparison.json",
+        "export-terminal-event": evidenceDir + "/export-terminal-event.json",
+        thresholds: evidenceDir + "/thresholds.json",
+      },
+    });
+  } catch (err) {
+    return makeReport(row, "error", {
+      message: `driveValExp012 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    if (exportId !== null && rpc !== null) {
+      await rpc
+        .call("replay.export_cancel", { export_id: exportId }, 5_000)
+        .catch(() => {});
+    }
+    if (snapshotId !== null && rpc !== null) {
+      await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 3_000)
+        .catch(() => {});
+    }
+    if (rpc !== null) rpc.close();
+    if (spawned !== null && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load !== null) await load.teardown().catch(() => {});
+    if (exportTmpDir !== null) {
+      try {
+        fs.rmSync(exportTmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
+
 export function driveNotImplemented(
   row: SmokeRow,
   reason: string,
@@ -3290,7 +3985,5 @@ const ELECTRON_MSG =
   "Requires Electron renderer observation — not available in standalone helper mode";
 
 export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {
-  "VAL-EXP-012":
-    "Concurrent capture+export validation driver not implemented",
   "VAL-UI-003": ELECTRON_MSG,
 };

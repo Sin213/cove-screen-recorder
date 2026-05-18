@@ -38,6 +38,7 @@ import {
   driveValSeg003,
   driveValExp001,
   driveValExp010,
+  driveValExp012,
   driveValReg002,
   driveNotImplemented,
   NOT_IMPLEMENTED_REASONS,
@@ -124,6 +125,7 @@ function makeSkipReport(
 const SELF_SPAWNING_ROW_IDS = new Set([
   "VAL-EXP-001",
   "VAL-EXP-010",
+  "VAL-EXP-012",
   "VAL-REG-002",
   "VAL-PROC-001",
   "VAL-PROC-007",
@@ -147,6 +149,8 @@ async function dispatchScriptedLocal(
       return driveValExp001(row, ctx);
     case "VAL-EXP-010":
       return driveValExp010(row, ctx);
+    case "VAL-EXP-012":
+      return driveValExp012(row, ctx);
     case "VAL-REG-002":
       return driveValReg002(row, ctx);
     case "VAL-CAP-003":
