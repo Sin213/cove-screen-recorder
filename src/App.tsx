@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SourceModal } from "./components/SourceModal";
 import { HotkeysDialog } from "./components/HotkeysDialog";
 import { useStore } from "./store";
+import { initV2Engine, saveReplay as v2SaveReplay } from "./v2/engine";
+import { Diagnostics } from "./v2/Diagnostics";
 import type { AppInfo, CaptureSource, CropRect, PresetId } from "./types";
 import {
   startCapture,
@@ -82,6 +84,11 @@ export function App() {
   const clearLogs = useStore((s) => s.clearLogs);
   const logCollapsed = useStore((s) => s.logCollapsed);
   const setLogCollapsed = useStore((s) => s.setLogCollapsed);
+
+  const v2State = useStore((s) => s.v2State);
+
+  // Initialize v2 engine subscriptions once on mount.
+  useEffect(() => initV2Engine(), []);
 
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
   const [pendingReplaySource, setPendingReplaySource] = useState<IntentMode | null>(null);
@@ -439,11 +446,16 @@ export function App() {
       } else if (action === "gif") {
         if (status === "idle") void beginCrop("gif");
       } else if (action === "replay") {
-        void saveReplay();
+        if (v2State === "RECORDING") {
+          void v2SaveReplay(replay.lengthSeconds);
+        } else if (v2State !== "SAVING" && v2State !== "EXPORTING") {
+          void saveReplay();
+        }
+        // Suppress while v2 is busy (SAVING/EXPORTING)
       }
     });
     return off;
-  }, [status, beginDefault, beginCrop, stopFlow, saveReplay]);
+  }, [status, beginDefault, beginCrop, stopFlow, saveReplay, v2State, replay.lengthSeconds]);
 
   useEffect(() => {
     if (status !== "recording") return;
@@ -717,8 +729,11 @@ export function App() {
                 <>
                   <button
                     className="btn btn-record btn-sm"
-                    onClick={() => void saveReplay()}
-                    disabled={replaySaving}
+                    onClick={() => {
+                      if (v2State === "RECORDING") void v2SaveReplay(replay.lengthSeconds);
+                      else if (v2State !== "SAVING" && v2State !== "EXPORTING") void saveReplay();
+                    }}
+                    disabled={replaySaving || v2State === "SAVING" || v2State === "EXPORTING"}
                     aria-busy={replaySaving}
                   >
                     {replaySaving
@@ -816,6 +831,8 @@ export function App() {
               </div>
             </div>
           )}
+
+          <Diagnostics />
         </div>
       </div>
 

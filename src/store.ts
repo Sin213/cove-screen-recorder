@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AppInfo, CaptureMode, LogEntry, PresetId, ReplayQuality } from "./types";
+import type { V2EngineInfo, V2RecoverableSession, V2State } from "./v2/fsm";
 
 const KEY_MODE = "cove:mode";
 const KEY_PRESET = "cove:preset";
@@ -174,6 +175,29 @@ interface State {
   customQuality: CustomQuality;
   replay: ReplaySettings;
 
+  // ── V2 FSM state ──────────────────────────────────────────────────────────
+  v2State: V2State;
+  v2EngineInfo: V2EngineInfo | null;
+  v2SessionId: string | null;
+  v2SessionReadyMs: number | null;
+  v2SnapshotId: string | null;
+  v2SnapshotHeld: boolean;
+  v2ExportId: string | null;
+  v2ExportProgress: number | null;
+  v2ExportOutputPath: string | null;
+  v2RecoverableSessions: V2RecoverableSession[] | null;
+
+  setV2State: (s: V2State) => void;
+  setV2EngineInfo: (info: V2EngineInfo | null) => void;
+  setV2SessionId: (id: string | null) => void;
+  setV2SessionReadyMs: (ms: number | null) => void;
+  setV2SnapshotId: (id: string | null) => void;
+  setV2SnapshotHeld: (held: boolean) => void;
+  setV2ExportId: (id: string | null) => void;
+  setV2ExportProgress: (pct: number | null) => void;
+  setV2ExportOutputPath: (p: string | null) => void;
+  setV2RecoverableSessions: (sessions: V2RecoverableSession[] | null) => void;
+
   setAppInfo: (info: AppInfo) => void;
   setMode: (m: CaptureMode) => void;
   setPreset: (p: PresetId) => void;
@@ -225,6 +249,17 @@ export const useStore = create<State>((set, get) => ({
 
   logs: [],
 
+  v2State: "BOOTING",
+  v2EngineInfo: null,
+  v2SessionId: null,
+  v2SessionReadyMs: null,
+  v2SnapshotId: null,
+  v2SnapshotHeld: false,
+  v2ExportId: null,
+  v2ExportProgress: null,
+  v2ExportOutputPath: null,
+  v2RecoverableSessions: null,
+
   setAppInfo: (info) => set({ appInfo: info }),
   setMode: (mode) => { writeString(KEY_MODE, mode); set({ mode }); },
   setPreset: (preset) => { writeString(KEY_PRESET, preset); set({ preset }); },
@@ -254,4 +289,15 @@ export const useStore = create<State>((set, get) => ({
       return { logs: next };
     }),
   clearLogs: () => set({ logs: [] }),
+
+  setV2State: (v2State) => set({ v2State }),
+  setV2EngineInfo: (v2EngineInfo) => set({ v2EngineInfo }),
+  setV2SessionId: (v2SessionId) => set({ v2SessionId }),
+  setV2SessionReadyMs: (v2SessionReadyMs) => set({ v2SessionReadyMs }),
+  setV2SnapshotId: (v2SnapshotId) => set({ v2SnapshotId }),
+  setV2SnapshotHeld: (v2SnapshotHeld) => set({ v2SnapshotHeld }),
+  setV2ExportId: (v2ExportId) => set({ v2ExportId }),
+  setV2ExportProgress: (v2ExportProgress) => set({ v2ExportProgress }),
+  setV2ExportOutputPath: (v2ExportOutputPath) => set({ v2ExportOutputPath }),
+  setV2RecoverableSessions: (v2RecoverableSessions) => set({ v2RecoverableSessions }),
 }));
