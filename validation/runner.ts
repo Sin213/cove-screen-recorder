@@ -29,6 +29,9 @@ import {
   driveValPkg001,
   driveValProc001,
   driveValProc007,
+  driveValCap003,
+  driveValProc002,
+  driveValProc003,
   driveNotImplemented,
   NOT_IMPLEMENTED_REASONS,
   DriverContext,
@@ -111,6 +114,14 @@ function makeSkipReport(
   };
 }
 
+const SELF_SPAWNING_ROW_IDS = new Set([
+  "VAL-PROC-001",
+  "VAL-PROC-007",
+  "VAL-CAP-003",
+  "VAL-PROC-002",
+  "VAL-PROC-003",
+]);
+
 async function dispatchScriptedLocal(
   row: SmokeRow,
   ctx: DriverContext,
@@ -118,8 +129,14 @@ async function dispatchScriptedLocal(
   switch (row.id) {
     case "VAL-PKG-001":
       return driveValPkg001(row, ctx);
+    case "VAL-CAP-003":
+      return driveValCap003(row, ctx);
     case "VAL-PROC-001":
       return driveValProc001(row, ctx);
+    case "VAL-PROC-002":
+      return driveValProc002(row, ctx);
+    case "VAL-PROC-003":
+      return driveValProc003(row, ctx);
     case "VAL-PROC-007":
       return driveValProc007(row, ctx);
     default: {
@@ -153,7 +170,7 @@ async function executeRow(
       );
 
     case "scripted-local":
-      if (!helperAvailable) {
+      if (!helperAvailable && !SELF_SPAWNING_ROW_IDS.has(row.id)) {
         return makeSkipReport(
           row,
           "helper-not-available",

@@ -39,7 +39,7 @@ function findHelperBinary(): string {
   );
 }
 
-export function spawnHelper(socketPath: string): Promise<SpawnedHelper> {
+export function spawnHelper(socketPath: string, extraArgs: string[] = []): Promise<SpawnedHelper> {
   const binary = findHelperBinary();
   const socketDir = path.dirname(socketPath);
   fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
@@ -48,7 +48,7 @@ export function spawnHelper(socketPath: string): Promise<SpawnedHelper> {
     fs.unlinkSync(socketPath);
   }
 
-  const child = spawn(binary, ["--ipc-socket", socketPath], {
+  const child = spawn(binary, ["--ipc-socket", socketPath, ...extraArgs], {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
   });
@@ -161,6 +161,12 @@ export function pgrepCheck(baseline?: PgrepResult): PgrepResult {
   }
 
   return result;
+}
+
+export function sigtermSpawned(spawned: SpawnedHelper): void {
+  if (!spawned.exited) {
+    process.kill(spawned.pid, "SIGTERM");
+  }
 }
 
 export function getDescendantProcessNames(rootPid: number): string[] {

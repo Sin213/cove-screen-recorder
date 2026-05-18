@@ -42,7 +42,7 @@ export const SMOKE_ROWS: SmokeRow[] = [
   {
     id: "VAL-CAP-003",
     title: "Portal denial emits captureError and leaves helper in IDLE",
-    classification: "manual",
+    classification: "scripted-local",
     tier: "must-pass",
     ownerOnFail: "capture",
     smokeOrder: 3,
