@@ -19,7 +19,14 @@ import {
   writeJsonEvidence,
   writeEvidence,
 } from "./evidence";
-import { THRESHOLDS } from "./assertions";
+import {
+  THRESHOLDS,
+  FfprobeError,
+  runFfprobe,
+  extractVideoPts,
+  analyzePtsCadence,
+  checkFrameCount,
+} from "./assertions";
 import { probeEnvironment, hasDisplayServer } from "./env-probe";
 import { launchMotion60, LoadScriptMissingError, LaunchedLoad } from "./loads";
 
@@ -2457,6 +2464,818 @@ export async function driveValExp001(
   }
 }
 
+// ---------------------------------------------------------------------------
+// produceStreamCopyMp4 — shared export orchestration for VAL-EXP-010 / VAL-REG-002
+//
+// Mirrors the driveValExp001 sequence verbatim but returns a typed result instead
+// of a RowReport, and defers exportTmpDir cleanup to the caller so ffprobe can
+// read the file after helper shutdown. The caller MUST call cleanup() on every
+// non-skip/non-error terminal path.
+// ---------------------------------------------------------------------------
+
+type ProduceResult =
+  | {
+      kind: "ok";
+      finalPath: string;
+      sha256: string | null;
+      bytes: number | null;
+      durationS: number | null;
+      cleanup: () => void;
+      evidencePaths: Record<string, string>;
+    }
+  | { kind: "skip"; skipReason: SkipReason; message: string }
+  | { kind: "fail"; message: string; durationMs: number }
+  | { kind: "error"; message: string; durationMs: number };
+
+async function produceStreamCopyMp4(
+  evidenceDir: string,
+): Promise<ProduceResult> {
+  const start = Date.now();
+  let spawned: SpawnedHelper | null = null;
+  let load: LaunchedLoad | null = null;
+  let rpc: RpcClient | null = null;
+  let snapshotId: string | null = null;
+  let exportId: string | null = null;
+  let exportTmpDir: string | null = null;
+  let callerOwnsCleanup = false;
+
+  const cleanup = () => {
+    if (exportTmpDir) {
+      try {
+        fs.rmSync(exportTmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  };
+
+  try {
+    const baseline = pgrepCheck();
+    writeJsonEvidence(evidenceDir, "baseline_pgrep.json", baseline);
+
+    const probe = probeEnvironment();
+    writeJsonEvidence(evidenceDir, "env-probe.json", probe);
+
+    if (probe.gpuInfo == null || !probe.gpuInfo.startsWith("nvidia:")) {
+      return {
+        kind: "skip",
+        skipReason: "helper-not-available",
+        message:
+          "No NVIDIA GPU detected (nvidia-smi absent or failed) — NVENC required for stream-copy export",
+      };
+    }
+
+    if (!hasDisplayServer(probe)) {
+      return {
+        kind: "skip",
+        skipReason: "helper-not-available",
+        message:
+          "No DISPLAY or WAYLAND_DISPLAY — cannot open portal for requestSession",
+      };
+    }
+
+    if (!probe.xdgRuntimeDir) {
+      return {
+        kind: "skip",
+        skipReason: "helper-not-available",
+        message: "XDG_RUNTIME_DIR not set — xdg-desktop-portal unreachable",
+      };
+    }
+
+    if (!probe.portalRunning) {
+      return {
+        kind: "skip",
+        skipReason: "helper-not-available",
+        message:
+          "xdg-desktop-portal not running — cannot negotiate screencast session",
+      };
+    }
+
+    try {
+      load = await launchMotion60();
+    } catch (loadErr) {
+      if (loadErr instanceof LoadScriptMissingError) {
+        return {
+          kind: "error",
+          message: String(loadErr),
+          durationMs: Date.now() - start,
+        };
+      }
+      throw loadErr;
+    }
+
+    if (load === null) {
+      return {
+        kind: "skip",
+        skipReason: "helper-not-available",
+        message:
+          "No Chromium-based browser available — cannot launch L-MOTION-60",
+      };
+    }
+
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    if (load.exited) {
+      return {
+        kind: "fail",
+        message:
+          "L-MOTION-60 load process exited during startup — Wayland/X11 launch likely failed",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    writeJsonEvidence(evidenceDir, "load-launch.json", {
+      name: load.name,
+      pid: load.pid,
+      argv: load.argv,
+    });
+
+    const socketPath = runnerOwnedSocketPath();
+    writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
+    spawned = await spawnHelper(socketPath);
+    rpc = await RpcClient.connect(socketPath, 5_000);
+    const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
+    writeJsonEvidence(evidenceDir, "engine-ready.json", readyNotif);
+
+    let reqResp;
+    try {
+      reqResp = await rpc.call(
+        "capture.requestSession",
+        { mode: "monitor", cursor_mode: "embedded", persist: "transient" },
+        60_000,
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("timeout")) {
+        return {
+          kind: "skip",
+          skipReason: "helper-not-available",
+          message:
+            "capture.requestSession timed out — portal D-Bus path inaccessible; run in an interactive user session",
+        };
+      }
+      throw err;
+    }
+    writeJsonEvidence(evidenceDir, "requestSession-response.json", reqResp);
+
+    if (reqResp.error) {
+      return {
+        kind: "fail",
+        message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    const startResp = await rpc.call("capture.startStream", undefined, 5_000);
+    writeJsonEvidence(evidenceDir, "startStream-response.json", startResp);
+
+    if (startResp.error) {
+      return {
+        kind: "error",
+        message: `capture.startStream failed: ${JSON.stringify(startResp.error)}`,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    const sessionReadyNotif = await rpc.waitNotification(
+      "capture.sessionReady",
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "sessionReady-notification.json",
+      sessionReadyNotif,
+    );
+
+    {
+      let encProbeNotif: RpcNotification | null = null;
+      try {
+        encProbeNotif = await rpc.waitNotification("encoder.probeResult", 3_000);
+        writeJsonEvidence(
+          evidenceDir,
+          "encoder-probe-result.json",
+          encProbeNotif,
+        );
+      } catch {
+        // not buffered — proceed
+      }
+      if (encProbeNotif !== null) {
+        const encBackends = (
+          encProbeNotif.params as Record<string, unknown> | undefined
+        )?.backends as
+          | Array<{ backend: string; available: boolean; details?: unknown }>
+          | undefined;
+        if (isEncoderStubState(encBackends)) {
+          await rpc
+            .call("capture.stopSession", undefined, 10_000)
+            .catch(() => {});
+          return {
+            kind: "skip",
+            skipReason: "helper-not-available",
+            message:
+              "encoder implementation not ready — all backends unavailable, segment buffer not created (T-017 in progress)",
+          };
+        }
+      }
+    }
+
+    await new Promise((r) => setTimeout(r, 65_000));
+
+    const saveResp = await rpc.call("replay.save", { duration_s: 60 }, 20_000);
+    writeJsonEvidence(evidenceDir, "save-response.json", saveResp);
+
+    if (saveResp.error) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return {
+        kind: "fail",
+        message: `replay.save error: ${JSON.stringify(saveResp.error)}`,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    let snapshotPinnedNotif: RpcNotification | null = null;
+    try {
+      snapshotPinnedNotif = await rpc.waitNotification(
+        "replay.snapshotPinned",
+        5_000,
+      );
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshotPinned-notification.json",
+        snapshotPinnedNotif,
+      );
+    } catch {
+      // absent — check result field below
+    }
+
+    const saveResult = saveResp.result as Record<string, unknown> | undefined;
+    snapshotId =
+      typeof saveResult?.snapshot_id === "string"
+        ? saveResult.snapshot_id
+        : null;
+    if (!snapshotId) {
+      const pinnedParams = snapshotPinnedNotif?.params as
+        | Record<string, unknown>
+        | undefined;
+      if (pinnedParams?.snapshot_id) {
+        snapshotId = String(pinnedParams.snapshot_id);
+      }
+    }
+
+    if (!snapshotId) {
+      await rpc.call("capture.stopSession", undefined, 10_000).catch(() => {});
+      return {
+        kind: "fail",
+        message:
+          "replay.save did not return a snapshot_id (checked result and snapshotPinned notification)",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    const rng = crypto.randomBytes(8).toString("hex");
+    exportTmpDir = path.join(
+      os.tmpdir(),
+      `cove-val-exp-pts-${Date.now()}-${rng}`,
+    );
+    fs.mkdirSync(exportTmpDir, { recursive: true, mode: 0o700 });
+    const outputPath = path.join(exportTmpDir, "export.mp4");
+
+    const exportStartResp = await rpc.call(
+      "replay.export_start",
+      {
+        snapshot: { snapshot_id: snapshotId },
+        options: { output_path: outputPath },
+      },
+      15_000,
+    );
+    writeJsonEvidence(
+      evidenceDir,
+      "export-start-response.json",
+      exportStartResp,
+    );
+
+    if (exportStartResp.error) {
+      return {
+        kind: "fail",
+        message: `replay.export_start error: ${JSON.stringify(exportStartResp.error)}`,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    const exportStartResult = exportStartResp.result as
+      | Record<string, unknown>
+      | undefined;
+    exportId =
+      typeof exportStartResult?.export_id === "string"
+        ? exportStartResult.export_id
+        : null;
+    writeJsonEvidence(evidenceDir, "export-id.json", { export_id: exportId });
+
+    const EXPORT_BUDGET_MS = 180_000;
+    const POLL_SLOT_MS = 5_000;
+    type TerminalResult = { method: string; notif: RpcNotification };
+    let terminalResult: TerminalResult | null = null;
+    const exportDeadline = Date.now() + EXPORT_BUDGET_MS;
+
+    while (Date.now() < exportDeadline && terminalResult === null) {
+      const rem = exportDeadline - Date.now();
+      if (rem <= 0) break;
+      const slot = Math.min(POLL_SLOT_MS, rem);
+
+      const r1 = rpc
+        .waitNotification("export.completed", slot)
+        .then((n): TerminalResult => ({ method: "export.completed", notif: n }));
+      const r2 = rpc
+        .waitNotification("export.failed", slot)
+        .then((n): TerminalResult => ({ method: "export.failed", notif: n }));
+      const r3 = rpc
+        .waitNotification("export.cancelled", slot)
+        .then((n): TerminalResult => ({
+          method: "export.cancelled",
+          notif: n,
+        }));
+
+      const settled = await Promise.allSettled([r1, r2, r3]);
+      for (const s of settled) {
+        if (s.status === "fulfilled") {
+          terminalResult = s.value;
+          break;
+        }
+      }
+    }
+
+    if (terminalResult === null) {
+      throw new Error(
+        `Export terminal event timeout after ${EXPORT_BUDGET_MS}ms`,
+      );
+    }
+
+    const terminalMethod = terminalResult.method;
+    const terminalParams = terminalResult.notif.params as
+      | Record<string, unknown>
+      | undefined;
+
+    writeJsonEvidence(evidenceDir, "export-terminal-event.json", {
+      method: terminalMethod,
+      params: terminalParams,
+    });
+
+    exportId = null;
+
+    const releaseResp = await rpc
+      .call("replay.snapshot_release", { snapshot_id: snapshotId }, 5_000)
+      .catch((e: unknown) => ({
+        error: { message: String(e) },
+        result: undefined,
+      }));
+    writeJsonEvidence(
+      evidenceDir,
+      "snapshot-release-response.json",
+      releaseResp,
+    );
+    if (!releaseResp.error) {
+      snapshotId = null;
+    } else {
+      await new Promise((r) => setTimeout(r, 500));
+      const retryRelease = await rpc
+        .call(
+          "replay.snapshot_release",
+          { snapshot_id: snapshotId },
+          5_000,
+        )
+        .catch((e: unknown) => ({
+          error: { message: String(e) },
+          result: undefined,
+        }));
+      writeJsonEvidence(
+        evidenceDir,
+        "snapshot-release-retry.json",
+        retryRelease,
+      );
+      if (!retryRelease.error) {
+        snapshotId = null;
+      }
+    }
+
+    const helperSha256 =
+      typeof terminalParams?.sha256 === "string" ? terminalParams.sha256 : null;
+    const finalPath =
+      typeof terminalParams?.final_path === "string"
+        ? terminalParams.final_path
+        : outputPath;
+    const helperBytes =
+      typeof terminalParams?.bytes === "number" ? terminalParams.bytes : null;
+    const helperDurationS =
+      typeof terminalParams?.duration_s === "number"
+        ? terminalParams.duration_s
+        : null;
+
+    let fileExists = false;
+    let fileSizeBytes = 0;
+    try {
+      const stat = fs.statSync(finalPath);
+      fileExists = stat.isFile();
+      fileSizeBytes = stat.size;
+    } catch {
+      fileExists = false;
+    }
+
+    let runnerSha256: string | null = null;
+    if (fileExists) {
+      try {
+        runnerSha256 = await computeSha256(finalPath);
+      } catch {
+        // non-fatal
+      }
+    }
+
+    writeJsonEvidence(evidenceDir, "sha256-check.json", {
+      helperSha256,
+      runnerSha256,
+      match: helperSha256 !== null && helperSha256 === runnerSha256,
+      finalPath,
+      fileSizeBytes,
+    });
+
+    const stopResp = await rpc
+      .call("capture.stopSession", undefined, 10_000)
+      .catch(() => null);
+    if (stopResp)
+      writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+
+    const shutdownResp = await shutdownHelper(rpc);
+    writeJsonEvidence(evidenceDir, "shutdown-response.json", shutdownResp);
+
+    if (terminalMethod !== "export.completed" || !fileExists) {
+      return {
+        kind: "fail",
+        message:
+          terminalMethod !== "export.completed"
+            ? `Export terminated with ${terminalMethod} — cannot run ffprobe`
+            : `Export file not found at ${finalPath}`,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    callerOwnsCleanup = true;
+    return {
+      kind: "ok",
+      finalPath,
+      sha256: runnerSha256,
+      bytes: helperBytes !== null ? helperBytes : fileSizeBytes,
+      durationS: helperDurationS,
+      cleanup,
+      evidencePaths: {
+        "env-probe": evidenceDir + "/env-probe.json",
+        "save-response": evidenceDir + "/save-response.json",
+        "export-start-response": evidenceDir + "/export-start-response.json",
+        "export-terminal-event": evidenceDir + "/export-terminal-event.json",
+        "sha256-check": evidenceDir + "/sha256-check.json",
+      },
+    };
+  } catch (err) {
+    return {
+      kind: "error",
+      message: `produceStreamCopyMp4 error: ${String(err)}`,
+      durationMs: Date.now() - start,
+    };
+  } finally {
+    if (exportId && rpc) {
+      await rpc
+        .call("replay.export_cancel", { export_id: exportId }, 5_000)
+        .catch(() => {});
+    }
+    if (snapshotId && rpc) {
+      await rpc
+        .call("replay.snapshot_release", { snapshot_id: snapshotId }, 3_000)
+        .catch(() => {});
+    }
+    if (rpc) rpc.close();
+    if (spawned && !spawned.exited) {
+      spawned.cleanup();
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (load) await load.teardown().catch(() => {});
+    if (!callerOwnsCleanup && exportTmpDir) {
+      try {
+        fs.rmSync(exportTmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VAL-EXP-010: No duplicated frames — ffprobe PTS walk on VAL-EXP-001 output
+// ---------------------------------------------------------------------------
+
+export async function driveValExp010(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+
+  const produced = await produceStreamCopyMp4(evidenceDir);
+
+  if (produced.kind === "skip") {
+    return makeReport(row, "skip", {
+      skipReason: produced.skipReason,
+      message: produced.message,
+    });
+  }
+  if (produced.kind === "fail") {
+    return makeReport(row, "fail", {
+      message: produced.message,
+      durationMs: produced.durationMs,
+    });
+  }
+  if (produced.kind === "error") {
+    return makeReport(row, "error", {
+      message: produced.message,
+      durationMs: produced.durationMs,
+    });
+  }
+
+  const { finalPath, cleanup, durationS, evidencePaths } = produced;
+
+  try {
+    let framesJson: unknown;
+    try {
+      const result = await runFfprobe(
+        [
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_frames",
+          "-of",
+          "json",
+          finalPath,
+        ],
+        30_000,
+      );
+      framesJson = result.parsed;
+      writeJsonEvidence(evidenceDir, "ffprobe-frames.json", framesJson);
+    } catch (err) {
+      if (err instanceof FfprobeError && err.code === "ffprobe-not-found") {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "ffprobe binary not found on PATH — install ffmpeg to enable PTS analysis",
+        });
+      }
+      return makeReport(row, "error", {
+        message: `ffprobe failed: ${err instanceof FfprobeError ? err.code : String(err)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const ptsSeconds = extractVideoPts(framesJson);
+    if (ptsSeconds.length === 0) {
+      return makeReport(row, "error", {
+        message:
+          "ffprobe returned no video PTS values — empty frames array or non-video stream",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "pts-summary.json", {
+      ptsSampleCount: ptsSeconds.length,
+      firstPts: ptsSeconds[0],
+      lastPts: ptsSeconds[ptsSeconds.length - 1],
+    });
+
+    const nominalFps = 60;
+    const cadence = analyzePtsCadence(ptsSeconds, nominalFps);
+    writeJsonEvidence(evidenceDir, "cadence-analysis.json", cadence);
+
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+
+    const fileDurationS =
+      durationS ??
+      ((ptsSeconds[ptsSeconds.length - 1] ?? 0) - (ptsSeconds[0] ?? 0));
+    const dupAllowance = Math.ceil(
+      (fileDurationS / 60) * THRESHOLDS.duplicatedPtsPerMinute,
+    );
+
+    thresholds.push({
+      name: `duplicated PTS ≤ ${dupAllowance} (≤ ${THRESHOLDS.duplicatedPtsPerMinute}/min)`,
+      observed: String(cadence.duplicatedPtsCount),
+      required: `≤ ${dupAllowance}`,
+      passed: cadence.duplicatedPtsCount <= dupAllowance,
+    });
+
+    const nominalIntervalS = cadence.nominalIntervalS;
+    const meanTolS = nominalIntervalS * THRESHOLDS.cadenceMeanToleranceFrac;
+    thresholds.push({
+      name: `cadence mean ±${(THRESHOLDS.cadenceMeanToleranceFrac * 100).toFixed(1)}% of nominal`,
+      observed: `${(cadence.meanIntervalS * 1000).toFixed(3)} ms`,
+      required: `${((nominalIntervalS - meanTolS) * 1000).toFixed(3)}–${((nominalIntervalS + meanTolS) * 1000).toFixed(3)} ms`,
+      passed: Math.abs(cadence.meanIntervalS - nominalIntervalS) <= meanTolS,
+    });
+
+    const p95TolS = nominalIntervalS * THRESHOLDS.cadenceP95ToleranceFrac;
+    thresholds.push({
+      name: `cadence p95 ±${(THRESHOLDS.cadenceP95ToleranceFrac * 100).toFixed(1)}% of nominal`,
+      observed: `${(cadence.p95IntervalS * 1000).toFixed(3)} ms`,
+      required: `${((nominalIntervalS - p95TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p95TolS) * 1000).toFixed(3)} ms`,
+      passed: Math.abs(cadence.p95IntervalS - nominalIntervalS) <= p95TolS,
+    });
+
+    const p99TolS = nominalIntervalS * THRESHOLDS.cadenceP99ToleranceFrac;
+    thresholds.push({
+      name: `cadence p99 ±${(THRESHOLDS.cadenceP99ToleranceFrac * 100).toFixed(1)}% of nominal`,
+      observed: `${(cadence.p99IntervalS * 1000).toFixed(3)} ms`,
+      required: `${((nominalIntervalS - p99TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p99TolS) * 1000).toFixed(3)} ms`,
+      passed: Math.abs(cadence.p99IntervalS - nominalIntervalS) <= p99TolS,
+    });
+
+    const fcResult = checkFrameCount(cadence.frameCount, fileDurationS, nominalFps);
+    thresholds.push({
+      name: "frame count within ±1 of round(duration × fps)",
+      observed: String(cadence.frameCount),
+      required: `${fcResult.expected} ± 1`,
+      passed: fcResult.passed,
+    });
+
+    const allPassed = thresholds.every((t) => t.passed);
+
+    if (!allPassed && cadence.duplicatedPtsCount > dupAllowance) {
+      writeEvidence(
+        evidenceDir,
+        "dup-pts-regression.txt",
+        `VAL-EXP-010 FAIL: ${cadence.duplicatedPtsCount} duplicated PTS in ` +
+          `${fileDurationS.toFixed(1)} s (allowance: ${dupAllowance}).\n` +
+          `Product regression detected. Do NOT patch validation code.\n` +
+          `Reopen the cove-replay-engine ticket tracking encoder/segment PTS invariant.\n`,
+      );
+    }
+
+    return makeReport(row, allPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        ...evidencePaths,
+        "ffprobe-frames": evidenceDir + "/ffprobe-frames.json",
+        "cadence-analysis": evidenceDir + "/cadence-analysis.json",
+      },
+      message: allPassed
+        ? `No dup PTS; cadence mean/p95/p99 within tolerance; ${cadence.frameCount} frames in ${fileDurationS.toFixed(1)} s`
+        : `PTS/cadence assertion failed — ${thresholds.filter((t) => !t.passed).map((t) => t.name).join("; ")}`,
+    });
+  } finally {
+    cleanup();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VAL-REG-002: Fake-60fps regression gate — only dup-PTS threshold gates verdict
+// ---------------------------------------------------------------------------
+
+export async function driveValReg002(
+  row: SmokeRow,
+  _ctx: DriverContext,
+): Promise<RowReport> {
+  const evidenceDir = createRowEvidenceDir(row.id);
+  const start = Date.now();
+
+  const produced = await produceStreamCopyMp4(evidenceDir);
+
+  if (produced.kind === "skip") {
+    return makeReport(row, "skip", {
+      skipReason: produced.skipReason,
+      message: produced.message,
+    });
+  }
+  if (produced.kind === "fail") {
+    return makeReport(row, "fail", {
+      message: produced.message,
+      durationMs: produced.durationMs,
+    });
+  }
+  if (produced.kind === "error") {
+    return makeReport(row, "error", {
+      message: produced.message,
+      durationMs: produced.durationMs,
+    });
+  }
+
+  const { finalPath, cleanup, durationS, evidencePaths } = produced;
+
+  try {
+    let framesJson: unknown;
+    try {
+      const result = await runFfprobe(
+        [
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_frames",
+          "-of",
+          "json",
+          finalPath,
+        ],
+        30_000,
+      );
+      framesJson = result.parsed;
+      writeJsonEvidence(evidenceDir, "ffprobe-frames.json", framesJson);
+    } catch (err) {
+      if (err instanceof FfprobeError && err.code === "ffprobe-not-found") {
+        return makeReport(row, "skip", {
+          skipReason: "helper-not-available",
+          message:
+            "ffprobe binary not found on PATH — install ffmpeg to enable PTS regression check",
+        });
+      }
+      return makeReport(row, "error", {
+        message: `ffprobe failed: ${err instanceof FfprobeError ? err.code : String(err)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    const ptsSeconds = extractVideoPts(framesJson);
+    if (ptsSeconds.length === 0) {
+      return makeReport(row, "error", {
+        message:
+          "ffprobe returned no video PTS values — empty frames array or non-video stream",
+        durationMs: Date.now() - start,
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "pts-summary.json", {
+      ptsSampleCount: ptsSeconds.length,
+      firstPts: ptsSeconds[0],
+      lastPts: ptsSeconds[ptsSeconds.length - 1],
+    });
+
+    const nominalFps = 60;
+    const cadence = analyzePtsCadence(ptsSeconds, nominalFps);
+    writeJsonEvidence(evidenceDir, "cadence-analysis.json", cadence);
+
+    const durationMs = Date.now() - start;
+    const thresholds: ThresholdResult[] = [];
+
+    const fileDurationS =
+      durationS ??
+      ((ptsSeconds[ptsSeconds.length - 1] ?? 0) - (ptsSeconds[0] ?? 0));
+    const dupAllowance = Math.ceil(
+      (fileDurationS / 60) * THRESHOLDS.duplicatedPtsPerMinute,
+    );
+
+    // Only this threshold gates the verdict for VAL-REG-002.
+    thresholds.push({
+      name: `duplicated PTS ≤ ${dupAllowance} (≤ ${THRESHOLDS.duplicatedPtsPerMinute}/min)`,
+      observed: String(cadence.duplicatedPtsCount),
+      required: `≤ ${dupAllowance}`,
+      passed: cadence.duplicatedPtsCount <= dupAllowance,
+    });
+
+    // Cadence stats are informational only — always marked passed so they never gate.
+    const nominalIntervalS = cadence.nominalIntervalS;
+    thresholds.push({
+      name: "cadence stats (informational)",
+      observed:
+        `mean=${(cadence.meanIntervalS * 1000).toFixed(3)} ms` +
+        ` p95=${(cadence.p95IntervalS * 1000).toFixed(3)} ms` +
+        ` p99=${(cadence.p99IntervalS * 1000).toFixed(3)} ms`,
+      required: `nominal=${(nominalIntervalS * 1000).toFixed(3)} ms`,
+      passed: true,
+    });
+
+    const dupPassed = thresholds[0]!.passed;
+
+    if (!dupPassed) {
+      writeEvidence(
+        evidenceDir,
+        "dup-pts-regression.txt",
+        `VAL-REG-002 FAIL: ${cadence.duplicatedPtsCount} duplicated PTS in ` +
+          `${fileDurationS.toFixed(1)} s (allowance: ${dupAllowance}).\n` +
+          `Fake-60fps regression confirmed. Do NOT patch validation code.\n` +
+          `Reopen the cove-replay-engine ticket tracking encoder/segment PTS invariant.\n`,
+      );
+    }
+
+    return makeReport(row, dupPassed ? "pass" : "fail", {
+      durationMs,
+      thresholds,
+      evidencePaths: {
+        ...evidencePaths,
+        "ffprobe-frames": evidenceDir + "/ffprobe-frames.json",
+        "cadence-analysis": evidenceDir + "/cadence-analysis.json",
+      },
+      message: dupPassed
+        ? `No fake-60fps duplication: ${cadence.duplicatedPtsCount} dup PTS in ${fileDurationS.toFixed(1)} s`
+        : `Fake-60fps regression: ${cadence.duplicatedPtsCount} dup PTS in ${fileDurationS.toFixed(1)} s — see dup-pts-regression.txt`,
+    });
+  } finally {
+    cleanup();
+  }
+}
+
 export function driveNotImplemented(
   row: SmokeRow,
   reason: string,
@@ -2471,11 +3290,7 @@ const ELECTRON_MSG =
   "Requires Electron renderer observation — not available in standalone helper mode";
 
 export const NOT_IMPLEMENTED_REASONS: Record<string, string> = {
-  "VAL-EXP-010":
-    "Requires ffprobe PTS analysis wrapper on VAL-EXP-001 output — not implemented",
   "VAL-EXP-012":
     "Concurrent capture+export validation driver not implemented",
   "VAL-UI-003": ELECTRON_MSG,
-  "VAL-REG-002":
-    "Requires ffprobe regression check on VAL-EXP-001 output — not implemented",
 };
