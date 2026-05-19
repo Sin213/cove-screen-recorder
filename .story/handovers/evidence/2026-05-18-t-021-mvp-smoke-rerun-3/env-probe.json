@@ -1,0 +1,17 @@
+{
+  "display": ":1",
+  "waylandDisplay": "wayland-0",
+  "xdgRuntimeDir": "/run/user/1000",
+  "dbusSessionBusAddress": "unix:path=/run/user/1000/bus",
+  "sessionType": "wayland",
+  "sessionClass": "user",
+  "sessionActive": true,
+  "portalDaemons": {
+    "xdg-desktop-portal": {"pid": 1920, "running": true},
+    "xdg-desktop-portal-kde": {"pid": 2475, "running": true},
+    "xdg-desktop-portal-gtk": {"pid": 2253, "running": true}
+  },
+  "gpuInfo": "nvidia: NVIDIA GeForce RTX 4080 SUPER, 595.71.05",
+  "helperPid": 489829,
+  "helperSocket": "/run/user/1000/cove-screen-recorder/engine.sock"
+}

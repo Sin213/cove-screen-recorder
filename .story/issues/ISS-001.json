@@ -1,0 +1,21 @@
+{
+  "components": [
+    "validation"
+  ],
+  "discoveredDate": "2026-05-18",
+  "id": "ISS-001",
+  "impact": "Two-part failure. Part 1 (harness): The cadence gate computes its target from `fps_num/fps_den = 0/1 = 0fps` (PipeWire variable-rate capture). Any non-zero observed fps fails this gate. Fix: handle fps_num=0 in validation/drivers.ts — either skip the cadence gate or use a separately configured target fps. Part 2 (workload mismatch, see ISS-003): Even if the harness target is fixed to 60fps, this run observed ~105fps from a 4K (3840×2160) capture, not 1080p60. Fixing ISS-001 alone is insufficient to unblock VAL-CAP-004 — ISS-003 must also be resolved. Blocks T-021 green verdict and T-010c gate.",
+  "location": [
+    "validation/drivers.ts"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-021",
+    "T-010a"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-CAP-004 cadence gate fails against fps_num=0 (variable-rate PipeWire capture)"
+}

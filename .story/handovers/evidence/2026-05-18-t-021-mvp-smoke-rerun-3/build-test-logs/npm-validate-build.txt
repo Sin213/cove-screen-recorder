@@ -1,0 +1,4 @@
+
+> cove-screen-recorder@1.1.0 validate:build
+> tsc -p tsconfig.validation.json
+

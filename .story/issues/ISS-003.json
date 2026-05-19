@@ -1,0 +1,23 @@
+{
+  "components": [
+    "capture",
+    "validation"
+  ],
+  "discoveredDate": "2026-05-18",
+  "id": "ISS-003",
+  "impact": "VAL-CAP-004 row expects \"1080p60 monitor capture\" but the xdg-desktop-portal delivered format XR24 3840×2160 fps_num=0 fps_den=1 (4K native resolution, variable framerate). Observed diagnostics fps was ~105fps. Even after ISS-001 (harness fps_num=0 fix) is resolved, a 60fps cadence gate would still fail since the actual capture runs at ~105fps 4K. Root cause TBD: either the portal always delivers native monitor resolution/rate and the row must be reconfigured to match the test hardware, or the product should negotiate a downscaled 1080p60 session from PipeWire. Investigate whether PipeWire supports format negotiation for a lower-resolution capture, or whether the row thresholds/title must be updated to match the actual hardware (RTX 4080 SUPER driving a 4K monitor). Blocks T-021 green verdict and T-010c gate.",
+  "location": [
+    "validation/drivers.ts",
+    "validation/rows.ts"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-021",
+    "T-010a"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-CAP-004 capture workload mismatch — portal delivered 4K/variable-fps instead of 1080p60"
+}
