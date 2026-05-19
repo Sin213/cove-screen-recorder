@@ -1,0 +1,20 @@
+Display Mode Evidence — Rerun 7
+
+Before switch:
+  Output: DP-4 (DisplayPort)
+  Active mode: 3840x2160@239.99 (mode 2)
+  Session: KDE Wayland
+
+Mode switch command:
+  kscreen-doctor output.DP-4.mode.11
+
+After switch (confirmed):
+  Active mode: 1920x1080@60.00* (mode 11)
+  Scale: 1.45
+  Output: DP-4 (single output)
+
+Environment:
+  XDG_CURRENT_DESKTOP=KDE
+  XDG_SESSION_TYPE=wayland
+  WAYLAND_DISPLAY=wayland-0
+  DISPLAY=:1
