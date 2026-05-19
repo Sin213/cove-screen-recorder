@@ -73,39 +73,27 @@ struct PendingFrame {
 
 // ── NVENC structures needed for configure / push_frame / drain ────────────────
 
-/// NV_ENC_BUFFER_FORMAT values.
-const NV_ENC_BUFFER_FORMAT_NV12: u32 = 0x00000010;
-
 /// NV_ENC_PIC_STRUCT
 const NV_ENC_PIC_STRUCT_FRAME: u32 = 1;
 
 /// NV_ENC_PIC_FLAGS
 const NV_ENC_PIC_FLAG_FORCEINTRA: u32 = 0x1;
 
-/// NV_ENC_CODEC_H264_GUID — from SDK headers (hard-coded bytes)
+/// NV_ENC_CODEC_H264_GUID — bytes confirmed via nvEncGetEncodeGUIDs at runtime
+/// (driver 595.71.05 / RTX 4080 SUPER).
 const NV_ENC_CODEC_H264_GUID: [u8; 16] = [
-    0x6b, 0xc8, 0x27, 0x44, 0x4d, 0x64, 0x4d, 0x18,
-    0x9d, 0x68, 0x09, 0xa5, 0x0a, 0x03, 0x21, 0x68,
+    0x62, 0x27, 0xc8, 0x6b, 0x63, 0x4e, 0xa4, 0x4c,
+    0xaa, 0x85, 0x1e, 0x50, 0xf3, 0x21, 0xf6, 0xbf,
 ];
 
-/// NV_ENC_PRESET_P4_GUID (latency-tolerant quality)
+/// NV_ENC_PRESET_P4_GUID (latency-tolerant quality) — bytes confirmed via
+/// nvEncGetEncodePresetGUIDs at runtime (driver 595.71.05 / RTX 4080 SUPER).
 const NV_ENC_PRESET_P4_GUID: [u8; 16] = [
-    0x90, 0x54, 0xd4, 0x1f, 0x2e, 0xd3, 0x42, 0x96,
-    0x9a, 0x4e, 0x14, 0x0d, 0x60, 0x28, 0x0e, 0xed,
+    0x26, 0xb8, 0xa7, 0x90, 0x06, 0xdf, 0x62, 0x48,
+    0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81,
 ];
 
 // The NVENC API types below are sized per SDK 12.1 NvEncodeAPI.h.
-
-/// GUID (16 bytes, matches Windows GUID layout used by NVENC).
-#[repr(C)]
-#[derive(Copy, Clone)]
-struct GUID {
-    data: [u8; 16],
-}
-
-impl GUID {
-    fn from_bytes(b: [u8; 16]) -> Self { Self { data: b } }
-}
 
 /// NV_ENC_INITIALIZE_PARAMS — core session config (SDK 12.1 layout).
 ///
@@ -206,10 +194,11 @@ struct NV_ENC_PIC_PARAMS {
     inputBuffer: *mut c_void,  // NV_ENC_INPUT_PTR
     outputBitstream: *mut c_void, // NV_ENC_OUTPUT_PTR
     completionEvent: *mut c_void,
+    bufferFmt: u32,       // NV_ENC_BUFFER_FORMAT — added in SDK 12.x
     pictureStruct: u32,
     pictureType: u32, // NV_ENC_PIC_TYPE — 0 = auto
-    codecPicParams: [u8; 256], // union, zeroed for auto
-    meHintCountsPerBlock: [u32; 2],
+    codecPicParams: [u8; 1024], // NV_ENC_CODEC_PIC_PARAMS union: uint32_t reserved[256] = 1024 bytes
+    meHintCountsPerBlock: [u8; 32], // NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE[2]: 16 bytes each
     meExternalHints: *mut c_void,
     reserved1: [u32; 6],
     reserved2: [*mut c_void; 2],
@@ -226,9 +215,7 @@ struct NV_ENC_PIC_PARAMS {
 #[repr(C)]
 struct NV_ENC_LOCK_BITSTREAM {
     version: u32,
-    doNotWait: u32,       // bit 0
-    ltrFrame: u32,        // bit 0 of next field in union — zeroed
-    reservedBitFields: u32,
+    flags: u32,           // doNotWait:1 | ltrFrame:1 | getRCStats:1 | reserved:29
     outputBitstream: *mut c_void,
     sliceOffsets: *mut u32,
     frameIdx: u32,
@@ -323,6 +310,13 @@ type FnNvEncUnlockInputBuffer = unsafe extern "C" fn(
     encoder: *mut c_void,
     buf: *mut c_void,
 ) -> NVENCSTATUS;
+
+// ── Compile-time layout guards (SDK 12.1 on x86-64 Linux) ────────────────────
+const _: () = assert!(std::mem::size_of::<NV_ENC_INITIALIZE_PARAMS>() == 1808);
+const _: () = assert!(std::mem::size_of::<NV_ENC_CREATE_INPUT_BUFFER>() == 776);
+const _: () = assert!(std::mem::size_of::<NV_ENC_CREATE_BITSTREAM_BUFFER>() == 776);
+const _: () = assert!(std::mem::size_of::<NV_ENC_PIC_PARAMS>() == 2832);
+const _: () = assert!(std::mem::size_of::<NV_ENC_LOCK_BITSTREAM>() == 1544);
 
 // ── NvencBackend ──────────────────────────────────────────────────────────────
 
@@ -599,6 +593,8 @@ impl EncoderBackend for NvencBackend {
         init_params.enablePTD = 1;
         init_params.maxEncodeWidth = enc_width;
         init_params.maxEncodeHeight = enc_height;
+        init_params.tuningInfo = NV_ENC_TUNING_INFO_LOW_LATENCY;
+        // bufferFormat is documented as DX12-only in SDK 12.1; leave as 0 for CUDA sessions.
 
         let init_status = unsafe { init_fn(encoder, &mut init_params) };
         if init_status != NV_ENC_SUCCESS {
@@ -768,6 +764,7 @@ impl EncoderBackend for NvencBackend {
         pic_params.inputPitch = locked_pitch;
         pic_params.inputBuffer = input_buf;
         pic_params.outputBitstream = output_buf;
+        pic_params.bufferFmt = NV_ENC_BUFFER_FORMAT_NV12;
         pic_params.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
         pic_params.inputTimeStamp = pts_90k;
         if is_keyframe {
@@ -775,8 +772,11 @@ impl EncoderBackend for NvencBackend {
         }
 
         let enc_status = unsafe { encode_pic(sess.encoder, &mut pic_params) };
-        // NV_ENC_ERR_NEED_MORE_INPUT (= 15) is valid for B-frame buffering.
-        if enc_status != NV_ENC_SUCCESS && enc_status != 15 {
+        if enc_status != NV_ENC_SUCCESS {
+            // NV_ENC_ERR_NEED_MORE_INPUT (17) must not occur in the LOW_LATENCY
+            // tuning profile since B-frames are disabled.  Any non-success
+            // status is fatal here because we have no flush path for delayed
+            // output.
             return Err(EncoderError::Runtime(format!("encode-picture-failed:{enc_status}")));
         }
 

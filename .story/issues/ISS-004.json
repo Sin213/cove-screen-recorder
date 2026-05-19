@@ -16,9 +16,9 @@
     "T-024",
     "T-025"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Three NV_ENC_PIC_PARAMS struct layout bugs fixed: (1) NV_ENC_CODEC_PIC_PARAMS union was 256 bytes instead of 1024; (2) NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE[2] was 8 bytes instead of 32; (3) bufferFmt:u32 field missing between completionEvent and pictureStruct. Also fixed NV_ENC_LOCK_BITSTREAM where C bit-fields (doNotWait, ltrFrame, getRCStats, reservedBitFields) were split into 3 separate u32s instead of one packed u32, shifting outputBitstream pointer by 8 bytes.",
+  "resolvedDate": "2026-05-19",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "NVENC encode-path FFI still red after probe fix — nvenc-init-failed:12 / SDK 12.1 struct audit needed"
 }

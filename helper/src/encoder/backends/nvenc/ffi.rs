@@ -27,6 +27,18 @@ pub type FnCuCtxDestroy = unsafe extern "C" fn(ctx: CUcontext) -> CUresult;
 
 // ── NvEncodeAPI ──────────────────────────────────────────────────────────────
 
+/// Windows GUID as a flat 16-byte array (matches the in-memory layout the NVENC
+/// runtime fills when returning codec/preset GUIDs).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GUID {
+    pub data: [u8; 16],
+}
+
+impl GUID {
+    pub fn from_bytes(b: [u8; 16]) -> Self { Self { data: b } }
+}
+
 /// NvEncodeAPI version for SDK 12.1.
 pub const NVENCAPI_VERSION: u32 = 12 | (1 << 24);
 
@@ -86,15 +98,44 @@ pub struct NV_ENCODE_API_FUNCTION_LIST {
     pub version: u32,
     pub reserved: u32,
     pub nvEncOpenEncodeSession: *mut c_void,
-    pub nvEncGetEncodeGUIDCount: *mut c_void,
+    pub nvEncGetEncodeGUIDCount: Option<
+        unsafe extern "C" fn(encoder: *mut c_void, count: *mut u32) -> NVENCSTATUS,
+    >,
     pub nvEncGetEncodeProfileGUIDCount: *mut c_void,
     pub nvEncGetEncodeProfileGUIDs: *mut c_void,
-    pub nvEncGetEncodeGUIDs: *mut c_void,
-    pub nvEncGetInputFormatCount: *mut c_void,
-    pub nvEncGetInputFormats: *mut c_void,
+    pub nvEncGetEncodeGUIDs: Option<
+        unsafe extern "C" fn(
+            encoder: *mut c_void,
+            guids: *mut GUID,
+            guid_array_size: u32,
+            guid_count: *mut u32,
+        ) -> NVENCSTATUS,
+    >,
+    pub nvEncGetInputFormatCount: Option<
+        unsafe extern "C" fn(encoder: *mut c_void, encodeGUID: GUID, count: *mut u32) -> NVENCSTATUS,
+    >,
+    pub nvEncGetInputFormats: Option<
+        unsafe extern "C" fn(
+            encoder: *mut c_void,
+            encodeGUID: GUID,
+            inputFmts: *mut u32,
+            inputFmtArraySize: u32,
+            inputFmtCount: *mut u32,
+        ) -> NVENCSTATUS,
+    >,
     pub nvEncGetEncodeCaps: *mut c_void,
-    pub nvEncGetEncodePresetCount: *mut c_void,
-    pub nvEncGetEncodePresetGUIDs: *mut c_void,
+    pub nvEncGetEncodePresetCount: Option<
+        unsafe extern "C" fn(encoder: *mut c_void, encodeGUID: GUID, count: *mut u32) -> NVENCSTATUS,
+    >,
+    pub nvEncGetEncodePresetGUIDs: Option<
+        unsafe extern "C" fn(
+            encoder: *mut c_void,
+            encodeGUID: GUID,
+            presetGUIDs: *mut GUID,
+            guidArraySize: u32,
+            guidCount: *mut u32,
+        ) -> NVENCSTATUS,
+    >,
     pub nvEncGetEncodePresetConfig: *mut c_void,
     pub nvEncInitializeEncoder: *mut c_void,
     pub nvEncCreateInputBuffer: *mut c_void,
@@ -129,7 +170,9 @@ pub struct NV_ENCODE_API_FUNCTION_LIST {
     pub nvEncCreateMVBuffer: *mut c_void,
     pub nvEncDestroyMVBuffer: *mut c_void,
     pub nvEncRunMotionEstimationOnly: *mut c_void,
-    pub nvEncGetLastErrorString: *mut c_void,
+    pub nvEncGetLastErrorString: Option<
+        unsafe extern "C" fn(encoder: *mut c_void) -> *const std::ffi::c_char,
+    >,
     pub nvEncSetIOCudaStreams: *mut c_void,
     pub nvEncGetEncodePresetConfigEx: *mut c_void,
     pub nvEncGetSequenceParamEx: *mut c_void,
@@ -177,3 +220,19 @@ pub const NV_ENC_LOCK_BITSTREAM_VER: u32 = nvencapi_struct_version(1);
 
 /// `NV_ENC_LOCK_INPUT_BUFFER_VER` — `NVENCAPI_STRUCT_VERSION(1)`.
 pub const NV_ENC_LOCK_INPUT_BUFFER_VER: u32 = nvencapi_struct_version(1);
+
+// ── Encode-path constants (SDK 12.1) ─────────────────────────────────────────
+
+/// `NV_ENC_TUNING_INFO_LOW_LATENCY` — SDK 12.1 enum value 2.
+/// Must be set on `NV_ENC_INITIALIZE_PARAMS::tuningInfo`; value 0
+/// (NV_ENC_TUNING_INFO_UNDEFINED) causes nvEncInitializeEncoder to return
+/// NV_ENC_ERR_UNSUPPORTED_PARAM (12).
+pub const NV_ENC_TUNING_INFO_LOW_LATENCY: u32 = 2;
+
+/// `NV_ENC_BUFFER_FORMAT_NV12` — 4:2:0 planar, semi-planar NV12 (0x10).
+pub const NV_ENC_BUFFER_FORMAT_NV12: u32 = 0x00000010;
+
+/// `NV_ENC_ERR_NEED_MORE_INPUT` — SDK 12.1 status 17.
+/// Returned by nvEncEncodePicture when the encoder is buffering B-frames;
+/// not an error, just means no output is ready yet.
+pub const NV_ENC_ERR_NEED_MORE_INPUT: NVENCSTATUS = 17;
