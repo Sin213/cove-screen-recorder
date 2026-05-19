@@ -11,6 +11,15 @@ export interface SmokeRow {
   linkedSourceCase: string | null;
   /** Wall-clock budget for the row (milliseconds). */
   budgetMs: number;
+  /**
+   * ISS-001: declared workload nominal fps used as the cadence target when the
+   * negotiated capture format reports a variable-rate framerate (fps_num=0).
+   * Optional and additive — drivers that do not consult this field are
+   * unaffected. Drivers MUST NOT silently pass when both the negotiated fps
+   * is zero and this field is absent; they must record `nominalSource="missing"`
+   * and fail the cadence gate.
+   */
+  nominalFps?: number;
 }
 
 /**
@@ -58,6 +67,11 @@ export const SMOKE_ROWS: SmokeRow[] = [
     smokeOrder: 4,
     linkedSourceCase: "N-003",
     budgetMs: 120_000,
+    // ISS-001: row's declared 1080p60 workload nominal fps. Used as the
+    // cadence target only when the portal negotiates a variable-rate format
+    // (fps_num=0). ISS-003 (4K/~105fps workload mismatch) remains the real
+    // failure signal in that case — see handover.
+    nominalFps: 60,
   },
   {
     id: "VAL-CAP-006",

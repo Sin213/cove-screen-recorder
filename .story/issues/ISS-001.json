@@ -13,9 +13,9 @@
     "T-021",
     "T-010a"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in validation/drivers.ts driveValCap004 and validation/rows.ts (additive SmokeRow.nominalFps). Cadence nominal now resolves via: (1) negotiated fps if fps_num>0 && fps_den>0 (nominalSource=\"negotiated\"); (2) row.nominalFps when negotiated is variable-rate fps_num=0 (nominalSource=\"row-config\"); (3) when neither is available the cadence gate records \"cadence (no nominal fps available)\" with passed=false (nominalSource=\"missing\") — never a silent skip or pass. thresholds.json additively records nominalFps + nominalSource. Observed mean fps and captureFormat remain written so ISS-003 (4K/~105fps workload mismatch) and ISS-002 (encoder.selected missing) remain visible. Tolerance constants (cadenceMeanToleranceFrac, cadenceP95ToleranceFrac, duplicatedPtsPerMinute) and duplicated-PTS detection unchanged. T-021 rerun 4 is still blocked by ISS-002 (encoder backend implementation under T-017a) and ISS-003 (workload mismatch decision). Verified: typecheck clean, validation:build clean, npm run build clean. No test runner is configured in the repo so no unit tests were added.",
+  "resolvedDate": "2026-05-18",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-CAP-004 cadence gate fails against fps_num=0 (variable-rate PipeWire capture)"
 }

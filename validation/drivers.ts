@@ -873,6 +873,32 @@ export async function driveValCap004(
       | { width: number; height: number; fps_num: number; fps_den: number }
       | undefined;
 
+    // ISS-001: resolve the cadence nominal target. PipeWire variable-rate
+    // capture reports fps_num=0; using fps_num/fps_den as nominal in that
+    // case produces a bogus 0fps target that no real capture can satisfy.
+    // Resolution order:
+    //   1. negotiated fps (fps_num>0 && fps_den>0) → source="negotiated"
+    //   2. row-declared workload nominal (row.nominalFps>0) → source="row-config"
+    //   3. neither available → source="missing"; cadence gate MUST fail honestly.
+    // The cadence gate never silently passes when nominal is missing; the
+    // tolerance constants are not loosened; the underlying ISS-003 workload
+    // mismatch remains visible because captureFormat and observed cadence
+    // are both still recorded in evidence.
+    type CadenceNominalSource = "negotiated" | "row-config" | "missing";
+    let nominalFps: number | null = null;
+    let nominalSource: CadenceNominalSource = "missing";
+    if (
+      captureFormat &&
+      captureFormat.fps_num > 0 &&
+      captureFormat.fps_den > 0
+    ) {
+      nominalFps = captureFormat.fps_num / captureFormat.fps_den;
+      nominalSource = "negotiated";
+    } else if (typeof row.nominalFps === "number" && row.nominalFps > 0) {
+      nominalFps = row.nominalFps;
+      nominalSource = "row-config";
+    }
+
     // --- Stage 5: Drain encoder notifications buffered from startStream ----
     let encoderBackend = ""; // populated from encoder.selected if emitted
     const probeNotif = await rpc
@@ -906,6 +932,14 @@ export async function driveValCap004(
       cadenceMeanToleranceFrac: THRESHOLDS.cadenceMeanToleranceFrac,
       captureFormat: captureFormat ?? null,
       encoderObserved: encoderBackend || "(not received)",
+      // ISS-001: surface the cadence nominal source so the evidence bundle
+      // makes the variable-rate (fps_num=0) case readable without re-reading
+      // captureFormat. nominalFps is null when neither the negotiated format
+      // nor the row config provides a target; in that case the cadence gate
+      // is recorded as a failure with name="cadence (no nominal fps
+      // available)" — never a silent skip or pass.
+      nominalFps,
+      nominalSource,
     });
 
     const samples: DiagSample[] = [];
@@ -998,15 +1032,27 @@ export async function driveValCap004(
       passed: dropRate <= maxDropRate,
     });
 
-    if (samples.length >= 10) {
-      const nominalFps = captureFormat
-        ? captureFormat.fps_num / captureFormat.fps_den
-        : 60;
-      const meanFps =
-        samples.reduce((s, x) => s + x.observedFps, 0) / samples.length;
+    const meanFps =
+      samples.length > 0
+        ? samples.reduce((s, x) => s + x.observedFps, 0) / samples.length
+        : 0;
+    if (nominalFps === null) {
+      // ISS-001: missing nominal — neither negotiated fps nor row-config
+      // provided a target. The cadence gate fails honestly; it never passes
+      // by default and is never collapsed into an environment skip. The
+      // observed mean fps and captureFormat remain in thresholds.json /
+      // capture-diagnostics.json so the underlying workload mismatch
+      // (ISS-003) and any encoder gap (ISS-002) remain visible.
+      thresholds.push({
+        name: "cadence (no nominal fps available)",
+        observed: `${meanFps.toFixed(3)} fps observed`,
+        required: "row nominal fps or non-zero negotiated fps",
+        passed: false,
+      });
+    } else if (samples.length >= 10) {
       const tol = THRESHOLDS.cadenceMeanToleranceFrac;
       thresholds.push({
-        name: `cadence mean within ±${(tol * 100).toFixed(1)}% of ${nominalFps.toFixed(2)} fps`,
+        name: `cadence mean within ±${(tol * 100).toFixed(1)}% of ${nominalFps.toFixed(2)} fps (nominal source=${nominalSource})`,
         observed: String(meanFps.toFixed(3)),
         required: `${(nominalFps * (1 - tol)).toFixed(2)}..${(nominalFps * (1 + tol)).toFixed(2)}`,
         passed: Math.abs(meanFps - nominalFps) / nominalFps <= tol,
