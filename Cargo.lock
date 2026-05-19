@@ -309,6 +309,7 @@ dependencies = [
  "async-trait",
  "clap",
  "libc",
+ "libloading",
  "pipewire",
  "serde",
  "serde_json",

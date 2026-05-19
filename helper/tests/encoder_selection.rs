@@ -224,30 +224,68 @@ async fn probe_event_payload_carries_every_backend() {
     assert_eq!(event.backends[1].codec.as_deref(), Some("h264"));
 }
 
+/// Verify that `COVE_NVENC_FORCE_UNAVAILABLE=1` causes the real NVENC backend to
+/// report unavailable without exercising any GPU hardware.  x264 must still
+/// report its own `not-implemented-yet` reason independently.
 #[tokio::test]
-async fn default_backends_probe_unavailable_with_t017a_marker() {
+async fn nvenc_force_unavailable_env_overrides_probe() {
+    // Temporarily set the env flag (test isolation: unset after).
+    std::env::set_var("COVE_NVENC_FORCE_UNAVAILABLE", "1");
     let backends = cove_replay_engine::encoder::default_backends();
     let mut cache = NegativeProbeCache::new();
-    let session = run_probes(&backends, &nv12_1080p60(), &mut cache).await;
+    let fmt = nv12_1080p60();
+    let session = run_probes(&backends, &fmt, &mut cache).await;
+    std::env::remove_var("COVE_NVENC_FORCE_UNAVAILABLE");
 
-    assert_eq!(backends.len(), 2);
     assert_eq!(backends[0].name(), "nvenc");
     assert_eq!(backends[1].name(), "libx264");
-    assert!(
-        session.selected.is_none(),
-        "T-017 skeleton must leave both backends Unavailable; real bindings land in T-017a"
-    );
-    for (name, outcome) in &session.results {
-        match outcome {
-            ProbeOutcome::Unavailable { reason, details } => {
-                assert_eq!(reason, "not-implemented-yet", "backend {name}");
-                assert_eq!(
-                    details.get("follow_up_ticket").and_then(|v| v.as_str()),
-                    Some("T-017a"),
-                    "backend {name}",
-                );
-            }
-            other => panic!("expected Unavailable, got {other:?} for {name}"),
+
+    // NVENC must report force-unavailable-by-env when the flag is set.
+    match session.results.iter().find(|(n, _)| n == "nvenc").map(|(_, o)| o) {
+        Some(ProbeOutcome::Unavailable { reason, .. }) => {
+            assert_eq!(reason, "force-unavailable-by-env");
         }
+        other => panic!("expected Unavailable for nvenc, got {other:?}"),
+    }
+
+    // x264 is still a stub and must remain not-implemented-yet.
+    match session.results.iter().find(|(n, _)| n == "libx264").map(|(_, o)| o) {
+        Some(ProbeOutcome::Unavailable { reason, .. }) => {
+            assert_eq!(reason, "not-implemented-yet");
+        }
+        other => panic!("expected Unavailable for libx264, got {other:?}"),
+    }
+}
+
+/// When NVENC hardware is present (probe returns Available), the first backend
+/// must be selected and report `accepts_shm: true`.
+///
+/// Skips cleanly when the probe returns Unavailable (no NVIDIA GPU / driver).
+#[tokio::test]
+async fn nvenc_probe_available_when_hardware_present() {
+    // Do not set COVE_NVENC_FORCE_UNAVAILABLE — let the real probe run.
+    std::env::remove_var("COVE_NVENC_FORCE_UNAVAILABLE");
+    let backends = cove_replay_engine::encoder::default_backends();
+    let mut cache = NegativeProbeCache::new();
+    let fmt = nv12_1080p60();
+    let session = run_probes(&backends, &fmt, &mut cache).await;
+
+    match session.results.iter().find(|(n, _)| n == "nvenc").map(|(_, o)| o) {
+        Some(ProbeOutcome::Available { capabilities, .. }) => {
+            assert!(capabilities.accepts_shm, "NVENC must accept SHM frames");
+            assert!(
+                capabilities.supported_codecs.iter().any(|c| c == "h264"),
+                "NVENC must list h264 in supported_codecs"
+            );
+            assert_eq!(
+                session.selected,
+                Some(0),
+                "nvenc must be selected when Available"
+            );
+        }
+        Some(ProbeOutcome::Unavailable { reason, .. }) => {
+            eprintln!("NVENC unavailable ({reason}); skipping hardware assertions");
+        }
+        None => panic!("nvenc not found in session results"),
     }
 }

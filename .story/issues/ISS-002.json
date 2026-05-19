@@ -12,11 +12,12 @@
   "phase": null,
   "relatedTickets": [
     "T-021",
-    "T-010a"
+    "T-010a",
+    "T-024"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Real NVENC backend implemented in T-024. Probe exercises cuInit → cuDeviceGetCount → NvEncodeAPICreateInstance → nvEncOpenEncodeSessionEx. configure/push_frame/drain/teardown produce real H.264 in fMP4 moof+mdat fragments. encoder.selected now fires for nvenc. All 139 tests pass.",
+  "resolvedDate": "2026-05-18",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-CAP-004 encoder.selected gate fails — encoder backends report not-implemented-yet (T-017a)"
 }

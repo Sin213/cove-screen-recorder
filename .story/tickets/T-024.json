@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-18",
+  "createdDate": "2026-05-18",
+  "description": "Implement a real NVENC encoder backend (not a stub) in helper/src/encoder/backends/nvenc/.\n\nReal probe: cuInit → cuDeviceGetCount → NvEncodeAPICreateInstance → nvEncOpenEncodeSessionEx session creation test. Precise unavailable reasons: no-cuda-driver, cuinit-failed:N, no-cuda-device, no-nvenc-library, nvenc-api-create-failed:N, session-create-failed:N.\n\nReal configure: H.264, CBR ~5Mbps, ~2s GOP, SHM frame input (DMA-BUF deferred). Real push_frame: SHM lock → memcpy → nvEncEncodePicture. Real drain: lock bitstream → read → unlock → EncodedFragment with real H.264 NALs. Real init_segment(): ftyp+moov bytes with SPS/PPS. Real fMP4 moof+mdat output in EncodedFragment.bytes.\n\nDependencies: Add libloading = \"0.8\" to helper/Cargo.toml. Update encoder_selection.rs and encoder_session.rs tests.\n\nHard constraints: Do NOT implement x264. Do NOT modify encoder.selected schema. Do NOT modify capture/segment/export/packaging/Electron files. ProbeOutcome::Available only when session creation actually succeeds. Resolves ISS-002.",
+  "id": "T-024",
+  "order": 140,
+  "phase": "p3b-implementation",
+  "status": "complete",
+  "title": "Implement real NVENC backend (T-017a)",
+  "type": "task"
+}

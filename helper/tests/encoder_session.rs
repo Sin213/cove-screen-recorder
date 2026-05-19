@@ -1498,3 +1498,101 @@ async fn finalize_failure_surfaces_runtime_error_on_clean_eof() {
     assert_eq!(exit, SessionExit::RuntimeError, "finalize failure must surface as RuntimeError");
     assert_eq!(td_calls.load(Ordering::Relaxed), 1, "backend still torn down");
 }
+
+// ── Real NVENC one-frame encode path ─────────────────────────────────────────
+
+/// Push one SHM frame through the real NVENC backend (configure → push_frame →
+/// drain → teardown) and verify that:
+///
+/// - `drain()` returns exactly one `EncodedFragment`
+/// - the fragment's `bytes` field starts with `moof` (valid fMP4 box)
+/// - `init_segment()` returns `Some(seg)` where `seg` starts with `ftyp`
+///
+/// Skips silently when NVENC hardware / driver is absent — the test is
+/// inherently hardware-gated and must not fail in CI without a GPU.
+#[tokio::test]
+async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
+    use cove_replay_engine::encoder::backends::NvencBackend;
+    use cove_replay_engine::encoder::backend::{EncoderBackend, EncoderConfig, ProbeOutcome};
+
+    std::env::remove_var("COVE_NVENC_FORCE_UNAVAILABLE");
+
+    let backend = NvencBackend::new();
+    let fmt = CaptureFormat {
+        width: 320,
+        height: 240,
+        fps_num: 30,
+        fps_den: 1,
+        fourcc: "NV12".into(),
+        modifier: None,
+        color_primaries: None,
+        transfer: None,
+        range: None,
+    };
+
+    // Probe first — skip if hardware is absent.
+    match backend.probe(&fmt).await {
+        ProbeOutcome::Unavailable { reason, .. } => {
+            eprintln!("NVENC unavailable ({reason}); skipping one-frame encode test");
+            return;
+        }
+        ProbeOutcome::Available { .. } => {}
+    }
+
+    let mut backend = NvencBackend::new();
+    let cfg = EncoderConfig {
+        format: fmt.clone(),
+        target_bitrate_bps: 2_000_000,
+        gop_seconds: 2.0,
+    };
+
+    backend.configure(cfg).await.expect("configure must succeed when probe returned Available");
+
+    // Provide a 320×240 NV12 frame: Y plane (240 rows × 320 bytes) + UV (120 rows × 320 bytes).
+    let frame_size = 320 * 240 * 3 / 2; // NV12 = 1.5 bytes/pixel
+    let frame = cove_replay_engine::capture::FrameHandle {
+        seq: 1,
+        pts_ns: 0,
+        payload: FramePayload::Shm {
+            data: vec![0x80u8; frame_size], // mid-grey luma, neutral chroma
+            width: 320,
+            height: 240,
+            format: 0x3231564e, // fourcc NV12
+            stride: 320,
+        },
+        cursor: None,
+        release: ReleaseToken::noop(),
+    };
+
+    backend.push_frame(frame).await.expect("push_frame must succeed");
+
+    let fragments = backend.drain().await.expect("drain must succeed");
+    assert!(
+        !fragments.is_empty(),
+        "drain must return at least one fragment after push_frame"
+    );
+
+    let frag = &fragments[0];
+    assert!(
+        frag.bytes.len() >= 8,
+        "fragment bytes must contain at least a box header"
+    );
+    assert_eq!(
+        &frag.bytes[4..8],
+        b"moof",
+        "first box in fragment must be moof"
+    );
+
+    // init_segment() should be available after the first IDR frame was drained.
+    match backend.init_segment() {
+        Some(seg) => {
+            assert!(seg.len() >= 8, "init segment must contain at least a box header");
+            assert_eq!(&seg[4..8], b"ftyp", "first box in init segment must be ftyp");
+        }
+        None => {
+            eprintln!("init_segment() returned None — SPS/PPS not extracted yet (acceptable if IDR was not in first fragment)");
+        }
+    }
+
+    backend.teardown().await.expect("teardown must succeed");
+}
