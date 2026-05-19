@@ -1,0 +1,41 @@
+=== PREFLIGHT: git status ===
+(clean — no output)
+
+=== PREFLIGHT: git log -10 ===
+39484a3 Implement NVENC encoder backend
+4ee353c Implement declared capture cell validation
+94f16ac Decide VAL-CAP-004 workload semantics
+78ce77c Fix variable-rate cadence nominal handling
+02a6eba Record interactive smoke failure issues
+195de32 Record operator smoke rerun evidence
+c5a6f92 Refresh MVP smoke validation verdict
+ff0a1d5 Implement HUD timer saving validation row
+cad5f0a Use v2 elapsed clock for active HUD states
+b1569b9 Add concurrent export validation driver
+
+=== PREFLIGHT: git diff --check ===
+(clean — no output)
+
+=== ISS-002 ===
+status: resolved
+resolvedDate: 2026-05-18
+NVENC backend implemented in T-024 (commit 39484a3)
+
+=== ISS-003 ===
+status: open (implementation complete, pending rerun evidence)
+T-023 implemented cell-match schema + driver
+
+=== BUILD: cargo build -p cove-replay-engine --release ===
+Finished `release` profile [optimized] target(s) in 9.25s (clean, 77 warnings non-fatal)
+
+=== TEST: cargo test -p cove-replay-engine ===
+139 tests, 0 failures (confirmed on second run; initial run had flaky race in encoder_selection)
+
+=== TYPECHECK: npm run typecheck ===
+(clean — no output)
+
+=== VALIDATE:BUILD: npm run validate:build ===
+(clean — no output)
+
+=== BUILD: npm run build ===
+built in 670ms (clean)
