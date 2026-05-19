@@ -260,7 +260,14 @@ async fn nvenc_force_unavailable_env_overrides_probe() {
 /// When NVENC hardware is present (probe returns Available), the first backend
 /// must be selected and report `accepts_shm: true`.
 ///
-/// Skips cleanly when the probe returns Unavailable (no NVIDIA GPU / driver).
+/// Default behavior on non-NVIDIA / no-driver hosts: probe returns Unavailable
+/// and the test logs a soft skip so CI without GPUs still passes.
+///
+/// Strict mode (`COVE_NVENC_REQUIRE_AVAILABLE=1`): Unavailable becomes a hard
+/// failure with the probe reason in the panic message.  This exists so
+/// hardware-positive runs on NVIDIA hosts cannot silently accept a probe
+/// regression (e.g. nvenc-api-create-failed:15 from a malformed version word).
+/// The strict env var is opt-in and never set in default CI.
 #[tokio::test]
 async fn nvenc_probe_available_when_hardware_present() {
     // Do not set COVE_NVENC_FORCE_UNAVAILABLE — let the real probe run.
@@ -284,6 +291,11 @@ async fn nvenc_probe_available_when_hardware_present() {
             );
         }
         Some(ProbeOutcome::Unavailable { reason, .. }) => {
+            if std::env::var("COVE_NVENC_REQUIRE_AVAILABLE").as_deref() == Ok("1") {
+                panic!(
+                    "COVE_NVENC_REQUIRE_AVAILABLE=1 but NVENC probe returned Unavailable: {reason}"
+                );
+            }
             eprintln!("NVENC unavailable ({reason}); skipping hardware assertions");
         }
         None => panic!("nvenc not found in session results"),

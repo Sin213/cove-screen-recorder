@@ -107,8 +107,33 @@ impl GUID {
     fn from_bytes(b: [u8; 16]) -> Self { Self { data: b } }
 }
 
-/// NV_ENC_INITIALIZE_PARAMS — core session config.
-/// Full struct per SDK 12.1 (version field + all mandatory padding).
+/// NV_ENC_INITIALIZE_PARAMS — core session config (SDK 12.1 layout).
+///
+/// The SDK packs the following ten bit-field members into a *single* `uint32_t`
+/// word immediately after `enablePTD`:
+///
+/// ```text
+///   bit 0  : reportSliceOffsets       (1)
+///   bit 1  : enableSubFrameWrite      (1)
+///   bit 2  : enableExternalMEHints    (1)
+///   bit 3  : enableMEOnlyMode         (1)
+///   bit 4  : enableWeightedPrediction (1)
+///   bit 5  : enableOutputInVidmem     (1)
+///   bits 6-31 : reservedBitFields     (26)
+/// ```
+///
+/// Rust does not expose C bit fields, so the whole word is represented as a
+/// single `flags: u32`.  Setting individual flags is done by OR-ing the
+/// corresponding bit value in `configure()`; zero-init means "all disabled".
+///
+/// Note: SDK 13+ extends this bit field with `splitEncodeMode (4 bits)`,
+/// `enableReconFrameOutput (1)`, and `enableOutputStats (1)`; the file comment
+/// in `ffi.rs` and this struct target SDK 12.1, so those bits remain inside
+/// the SDK-12.1 `reservedBitFields:26` slot and are not exposed here.
+///
+/// `maxMEHintCountsPerBlockRow` is two `NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKROW`
+/// structs of 4 × `u32` each (16 bytes/element).  We don't use ME hints, so
+/// this is declared as `[u32; 8]` and zero-initialised.
 #[repr(C)]
 struct NV_ENC_INITIALIZE_PARAMS {
     version: u32,
@@ -122,20 +147,20 @@ struct NV_ENC_INITIALIZE_PARAMS {
     frameRateDen: u32,
     enableEncodeAsync: u32,
     enablePTD: u32,
-    reportSliceOffsets: u32,
-    enableSubFrameWrite: u32,
-    enableExternalMEHints: u32,
-    enableMEOnlyMode: u32,
-    enableWeightedPrediction: u32,
-    enableOutputInVidmem: u32,
-    reserved: u32,
+    /// Packed bit field — see struct doc above.  Bit 0 = reportSliceOffsets,
+    /// bit 1 = enableSubFrameWrite, bit 2 = enableExternalMEHints,
+    /// bit 3 = enableMEOnlyMode, bit 4 = enableWeightedPrediction,
+    /// bit 5 = enableOutputInVidmem, bits 6-31 = reservedBitFields.
+    flags: u32,
     privDataSize: u32,
     privData: *mut c_void,
     encodeConfig: *mut c_void, // NV_ENC_CONFIG*
     maxEncodeWidth: u32,
     maxEncodeHeight: u32,
-    maxMEHintCountsPerBlock: [u32; 2],
-    reserved1: [u32; 289],
+    maxMEHintCountsPerBlockRow: [u32; 8],
+    tuningInfo: u32,   // NV_ENC_TUNING_INFO
+    bufferFormat: u32, // NV_ENC_BUFFER_FORMAT
+    reserved1: [u32; 287],
     reserved2: [*mut c_void; 64],
 }
 
@@ -228,12 +253,8 @@ struct NV_ENC_LOCK_BITSTREAM {
     reserved2: [*mut c_void; 64],
 }
 
-// Version macros (SDK 12.1)
-const NV_ENC_INITIALIZE_PARAMS_VER: u32 = NVENCAPI_VERSION | (5 << 31);
-const NV_ENC_CREATE_INPUT_BUFFER_VER: u32 = NVENCAPI_VERSION | (1 << 31);
-const NV_ENC_CREATE_BITSTREAM_BUFFER_VER: u32 = NVENCAPI_VERSION | (1 << 31);
-const NV_ENC_PIC_PARAMS_VER: u32 = NVENCAPI_VERSION | (6 << 31);
-const NV_ENC_LOCK_BITSTREAM_VER: u32 = NVENCAPI_VERSION | (1 << 31);
+// Version macros for the encode-path structs live in `ffi.rs` (centralised via
+// `nvencapi_struct_version()`); they are pulled in via `use ffi::*` above.
 
 // ── NV_ENC_INITIALIZE_PARAMS typed function aliases ───────────────────────────
 
@@ -292,7 +313,6 @@ struct NV_ENC_LOCK_INPUT_BUFFER {
     reserved1: [u32; 251],
     reserved2: [*mut c_void; 64],
 }
-const NV_ENC_LOCK_INPUT_BUFFER_VER: u32 = NVENCAPI_VERSION | (1 << 31);
 
 type FnNvEncLockInputBuffer = unsafe extern "C" fn(
     encoder: *mut c_void,

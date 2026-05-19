@@ -30,13 +30,29 @@ pub type FnCuCtxDestroy = unsafe extern "C" fn(ctx: CUcontext) -> CUresult;
 /// NvEncodeAPI version for SDK 12.1.
 pub const NVENCAPI_VERSION: u32 = 12 | (1 << 24);
 
+/// Compute the NVENCAPI struct version word for a struct of version `ver`.
+///
+/// Matches the SDK 12.1 NVENCAPI_STRUCT_VERSION macro:
+///     NVENCAPI_VERSION | (ver << 16) | (0x7 << 28)
+///
+/// The `0x7 << 28` magic tag is required by the NVIDIA runtime; omitting it
+/// causes NvEncodeAPICreateInstance / nvEncOpenEncodeSessionEx to reject
+/// the struct with NV_ENC_ERR_INVALID_VERSION (15).
+pub const fn nvencapi_struct_version(ver: u32) -> u32 {
+    NVENCAPI_VERSION | (ver << 16) | (0x7u32 << 28)
+}
+
 /// Status codes returned by NvEncode functions (NV_ENC_STATUS).
 pub type NVENCSTATUS = i32;
 pub const NV_ENC_SUCCESS: NVENCSTATUS = 0;
-pub const NV_ENC_ERR_INVALID_VERSION: NVENCSTATUS = 7;
+pub const NV_ENC_ERR_INVALID_VERSION: NVENCSTATUS = 15;
 
 pub type NV_ENC_DEVICE_TYPE = u32;
-pub const NV_ENC_DEVICE_TYPE_CUDA: NV_ENC_DEVICE_TYPE = 2;
+/// SDK 12.1 NV_ENC_DEVICE_TYPE enum: DIRECTX=0, CUDA=1, OPENGL=2, VULKAN=3.
+/// We pass a CUDA `CUcontext` in `NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS::device`,
+/// so the device-type tag must be `1`.  Passing `2` (OPENGL) makes the runtime
+/// reject the session with NV_ENC_ERR_INVALID_DEVICE (4).
+pub const NV_ENC_DEVICE_TYPE_CUDA: NV_ENC_DEVICE_TYPE = 1;
 
 /// Parameters for nvEncOpenEncodeSessionEx.
 /// Sized per SDK 12.1 NvEncodeAPI.h (version field at struct offset 0).
@@ -54,8 +70,11 @@ pub struct NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS {
 }
 
 /// Version constant for NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS.
-pub const NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER: u32 =
-    NVENCAPI_VERSION | (1 << 31);
+///
+/// Struct version 1 with the SDK struct-version tag; bit 31 is NOT set for
+/// this struct (it is set only on NV_ENCODE_API_FUNCTION_LIST_VER).
+/// Expected value: 0x7011000C.
+pub const NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER: u32 = nvencapi_struct_version(1);
 
 /// Typed function list returned by NvEncodeAPICreateInstance.
 ///
@@ -120,7 +139,41 @@ pub struct NV_ENCODE_API_FUNCTION_LIST {
 }
 
 /// Version constant for NV_ENCODE_API_FUNCTION_LIST.
-pub const NV_ENCODE_API_FUNCTION_LIST_VER: u32 = NVENCAPI_VERSION | (2 << 31);
+///
+/// Struct version 2 with the SDK struct-version tag plus the high bit
+/// (`1u32 << 31`) that NVENCAPI_STRUCT_VERSION_API marks on this list.
+/// Expected value: 0xF012000C.
+pub const NV_ENCODE_API_FUNCTION_LIST_VER: u32 =
+    nvencapi_struct_version(2) | (1u32 << 31);
 
 pub type FnNvEncodeAPICreateInstance =
     unsafe extern "C" fn(functionList: *mut NV_ENCODE_API_FUNCTION_LIST) -> NVENCSTATUS;
+
+// ── Encode-path struct version constants (SDK 12.1) ──────────────────────────
+//
+// These mirror the NV_ENC_*_VER macros in NvEncodeAPI.h.  Centralising them in
+// ffi.rs alongside `nvencapi_struct_version()` keeps the version-formula bug
+// class from recurring as parallel definitions in mod.rs.
+//
+// Macros that include `(1<<31)` in the SDK retain it here verbatim; the
+// remaining macros are bare `NVENCAPI_STRUCT_VERSION(ver)`.
+
+/// `NV_ENC_INITIALIZE_PARAMS_VER` — `NVENCAPI_STRUCT_VERSION(5) | (1<<31)`.
+pub const NV_ENC_INITIALIZE_PARAMS_VER: u32 =
+    nvencapi_struct_version(5) | (1u32 << 31);
+
+/// `NV_ENC_CREATE_INPUT_BUFFER_VER` — `NVENCAPI_STRUCT_VERSION(1)`.
+pub const NV_ENC_CREATE_INPUT_BUFFER_VER: u32 = nvencapi_struct_version(1);
+
+/// `NV_ENC_CREATE_BITSTREAM_BUFFER_VER` — `NVENCAPI_STRUCT_VERSION(1)`.
+pub const NV_ENC_CREATE_BITSTREAM_BUFFER_VER: u32 = nvencapi_struct_version(1);
+
+/// `NV_ENC_PIC_PARAMS_VER` — `NVENCAPI_STRUCT_VERSION(4) | (1<<31)`.
+pub const NV_ENC_PIC_PARAMS_VER: u32 =
+    nvencapi_struct_version(4) | (1u32 << 31);
+
+/// `NV_ENC_LOCK_BITSTREAM_VER` — `NVENCAPI_STRUCT_VERSION(1)`.
+pub const NV_ENC_LOCK_BITSTREAM_VER: u32 = nvencapi_struct_version(1);
+
+/// `NV_ENC_LOCK_INPUT_BUFFER_VER` — `NVENCAPI_STRUCT_VERSION(1)`.
+pub const NV_ENC_LOCK_INPUT_BUFFER_VER: u32 = nvencapi_struct_version(1);
