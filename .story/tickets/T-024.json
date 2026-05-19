@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": "2026-05-18",
+  "completedDate": null,
   "createdDate": "2026-05-18",
-  "description": "Implement a real NVENC encoder backend (not a stub) in helper/src/encoder/backends/nvenc/.\n\nReal probe: cuInit → cuDeviceGetCount → NvEncodeAPICreateInstance → nvEncOpenEncodeSessionEx session creation test. Precise unavailable reasons: no-cuda-driver, cuinit-failed:N, no-cuda-device, no-nvenc-library, nvenc-api-create-failed:N, session-create-failed:N.\n\nReal configure: H.264, CBR ~5Mbps, ~2s GOP, SHM frame input (DMA-BUF deferred). Real push_frame: SHM lock → memcpy → nvEncEncodePicture. Real drain: lock bitstream → read → unlock → EncodedFragment with real H.264 NALs. Real init_segment(): ftyp+moov bytes with SPS/PPS. Real fMP4 moof+mdat output in EncodedFragment.bytes.\n\nDependencies: Add libloading = \"0.8\" to helper/Cargo.toml. Update encoder_selection.rs and encoder_session.rs tests.\n\nHard constraints: Do NOT implement x264. Do NOT modify encoder.selected schema. Do NOT modify capture/segment/export/packaging/Electron files. ProbeOutcome::Available only when session creation actually succeeds. Resolves ISS-002.",
+  "description": "Real NVENC H.264 encoder backend (T-017a). Implementation complete in commit 39484a3: cuInit → cuDeviceGetCount → NvEncodeAPICreateInstance → nvEncOpenEncodeSessionEx probe chain, plus configure/push_frame/drain/init_segment/teardown with fMP4 output. 139 unit tests pass including nvenc_probe_available_when_hardware_present on RTX 4080 SUPER (driver 595.71.05). HOWEVER: T-021 rerun 5 (2026-05-19) shows encoder.probeResult returning available=false with reason nvenc-api-create-failed:15 at runtime. NvEncodeAPICreateInstance returned status 15. ISS-002 has been reopened with this runtime evidence. Investigate why the probe succeeds in tests but fails in the runner-spawned helper subprocess. See evidence: .story/handovers/evidence/2026-05-19-t-021-mvp-smoke-rerun-5/smoke-run/2026-05-19T06-59-35-326Z/VAL-CAP-004/encoder-probe-result.json",
   "id": "T-024",
   "order": 140,
   "phase": "p3b-implementation",
-  "status": "complete",
+  "status": "open",
   "title": "Implement real NVENC backend (T-017a)",
   "type": "task"
 }

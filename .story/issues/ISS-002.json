@@ -5,7 +5,7 @@
   ],
   "discoveredDate": "2026-05-18",
   "id": "ISS-002",
-  "impact": "VAL-CAP-004 requires encoder.selected backend=nvenc but encoder.probeResult shows both nvenc and libx264 as not-implemented-yet with follow_up_ticket=T-017a. The encoder.selected event is never emitted since no backend is implemented. Row will continue to fail until T-017a lands encoder selection. Blocks T-021 green verdict and T-010c gate.",
+  "impact": "NVENC probe fails at runtime with NvEncodeAPICreateInstance status 15 (nvenc-api-create-failed:15). T-024 implemented the NVENC backend and unit tests passed (including nvenc_probe_available_when_hardware_present on RTX 4080 SUPER / driver 595.71.05), but the runtime probe in VAL-CAP-004 rerun 5 (2026-05-19T06:59:35Z) returned unavailable. encoder.selected was never emitted. Blocks VAL-CAP-004 encoder gate and T-021 green verdict.",
   "location": [
     "helper/src/export/mod.rs"
   ],
@@ -15,9 +15,9 @@
     "T-010a",
     "T-024"
   ],
-  "resolution": "Real NVENC backend implemented in T-024. Probe exercises cuInit → cuDeviceGetCount → NvEncodeAPICreateInstance → nvEncOpenEncodeSessionEx. configure/push_frame/drain/teardown produce real H.264 in fMP4 moof+mdat fragments. encoder.selected now fires for nvenc. All 139 tests pass.",
-  "resolvedDate": "2026-05-18",
+  "resolution": null,
+  "resolvedDate": null,
   "severity": "high",
-  "status": "resolved",
+  "status": "open",
   "title": "VAL-CAP-004 encoder.selected gate fails — encoder backends report not-implemented-yet (T-017a)"
 }

@@ -1,0 +1,374 @@
+[
+  {
+    "t": 1779173987830,
+    "droppedSinceLast": 18,
+    "totalProduced": 107,
+    "observedFps": 107
+  },
+  {
+    "t": 1779173987881,
+    "droppedSinceLast": 0,
+    "totalProduced": 214,
+    "observedFps": 107
+  },
+  {
+    "t": 1779173988586,
+    "droppedSinceLast": 0,
+    "totalProduced": 319,
+    "observedFps": 105
+  },
+  {
+    "t": 1779173989587,
+    "droppedSinceLast": 0,
+    "totalProduced": 424,
+    "observedFps": 105
+  },
+  {
+    "t": 1779173990588,
+    "droppedSinceLast": 0,
+    "totalProduced": 530,
+    "observedFps": 106
+  },
+  {
+    "t": 1779173991589,
+    "droppedSinceLast": 0,
+    "totalProduced": 635,
+    "observedFps": 105
+  },
+  {
+    "t": 1779173992591,
+    "droppedSinceLast": 0,
+    "totalProduced": 741,
+    "observedFps": 106
+  },
+  {
+    "t": 1779173993593,
+    "droppedSinceLast": 0,
+    "totalProduced": 847,
+    "observedFps": 106
+  },
+  {
+    "t": 1779173994594,
+    "droppedSinceLast": 0,
+    "totalProduced": 952,
+    "observedFps": 105
+  },
+  {
+    "t": 1779173995595,
+    "droppedSinceLast": 0,
+    "totalProduced": 1058,
+    "observedFps": 106
+  },
+  {
+    "t": 1779173996596,
+    "droppedSinceLast": 0,
+    "totalProduced": 1163,
+    "observedFps": 105
+  },
+  {
+    "t": 1779173997599,
+    "droppedSinceLast": 0,
+    "totalProduced": 1268,
+    "observedFps": 105
+  },
+  {
+    "t": 1779173998600,
+    "droppedSinceLast": 0,
+    "totalProduced": 1372,
+    "observedFps": 104
+  },
+  {
+    "t": 1779173999601,
+    "droppedSinceLast": 0,
+    "totalProduced": 1476,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174000602,
+    "droppedSinceLast": 0,
+    "totalProduced": 1581,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174001603,
+    "droppedSinceLast": 0,
+    "totalProduced": 1686,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174002604,
+    "droppedSinceLast": 0,
+    "totalProduced": 1790,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174003605,
+    "droppedSinceLast": 0,
+    "totalProduced": 1894,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174004606,
+    "droppedSinceLast": 0,
+    "totalProduced": 1997,
+    "observedFps": 103
+  },
+  {
+    "t": 1779174005607,
+    "droppedSinceLast": 0,
+    "totalProduced": 2101,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174006608,
+    "droppedSinceLast": 0,
+    "totalProduced": 2206,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174007610,
+    "droppedSinceLast": 0,
+    "totalProduced": 2311,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174008612,
+    "droppedSinceLast": 0,
+    "totalProduced": 2417,
+    "observedFps": 106
+  },
+  {
+    "t": 1779174009613,
+    "droppedSinceLast": 0,
+    "totalProduced": 2522,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174010614,
+    "droppedSinceLast": 0,
+    "totalProduced": 2626,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174011615,
+    "droppedSinceLast": 0,
+    "totalProduced": 2731,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174012616,
+    "droppedSinceLast": 0,
+    "totalProduced": 2836,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174013618,
+    "droppedSinceLast": 0,
+    "totalProduced": 2941,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174014619,
+    "droppedSinceLast": 0,
+    "totalProduced": 3046,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174015620,
+    "droppedSinceLast": 0,
+    "totalProduced": 3151,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174016621,
+    "droppedSinceLast": 0,
+    "totalProduced": 3256,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174017622,
+    "droppedSinceLast": 0,
+    "totalProduced": 3362,
+    "observedFps": 106
+  },
+  {
+    "t": 1779174018622,
+    "droppedSinceLast": 0,
+    "totalProduced": 3467,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174019625,
+    "droppedSinceLast": 0,
+    "totalProduced": 3572,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174020626,
+    "droppedSinceLast": 0,
+    "totalProduced": 3677,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174021627,
+    "droppedSinceLast": 0,
+    "totalProduced": 3782,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174022628,
+    "droppedSinceLast": 0,
+    "totalProduced": 3887,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174023629,
+    "droppedSinceLast": 0,
+    "totalProduced": 3991,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174024630,
+    "droppedSinceLast": 0,
+    "totalProduced": 4097,
+    "observedFps": 106
+  },
+  {
+    "t": 1779174025631,
+    "droppedSinceLast": 0,
+    "totalProduced": 4201,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174026632,
+    "droppedSinceLast": 0,
+    "totalProduced": 4307,
+    "observedFps": 106
+  },
+  {
+    "t": 1779174027633,
+    "droppedSinceLast": 0,
+    "totalProduced": 4412,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174028634,
+    "droppedSinceLast": 0,
+    "totalProduced": 4517,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174029635,
+    "droppedSinceLast": 0,
+    "totalProduced": 4622,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174030636,
+    "droppedSinceLast": 0,
+    "totalProduced": 4727,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174031638,
+    "droppedSinceLast": 0,
+    "totalProduced": 4831,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174032639,
+    "droppedSinceLast": 0,
+    "totalProduced": 4936,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174033640,
+    "droppedSinceLast": 0,
+    "totalProduced": 5041,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174034641,
+    "droppedSinceLast": 0,
+    "totalProduced": 5145,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174035642,
+    "droppedSinceLast": 0,
+    "totalProduced": 5250,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174036643,
+    "droppedSinceLast": 0,
+    "totalProduced": 5354,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174037644,
+    "droppedSinceLast": 0,
+    "totalProduced": 5458,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174038645,
+    "droppedSinceLast": 0,
+    "totalProduced": 5564,
+    "observedFps": 106
+  },
+  {
+    "t": 1779174039647,
+    "droppedSinceLast": 0,
+    "totalProduced": 5668,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174040648,
+    "droppedSinceLast": 0,
+    "totalProduced": 5772,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174041649,
+    "droppedSinceLast": 0,
+    "totalProduced": 5878,
+    "observedFps": 106
+  },
+  {
+    "t": 1779174042650,
+    "droppedSinceLast": 0,
+    "totalProduced": 5983,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174043651,
+    "droppedSinceLast": 0,
+    "totalProduced": 6088,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174044652,
+    "droppedSinceLast": 0,
+    "totalProduced": 6192,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174045653,
+    "droppedSinceLast": 0,
+    "totalProduced": 6296,
+    "observedFps": 104
+  },
+  {
+    "t": 1779174046654,
+    "droppedSinceLast": 0,
+    "totalProduced": 6401,
+    "observedFps": 105
+  },
+  {
+    "t": 1779174047655,
+    "droppedSinceLast": 0,
+    "totalProduced": 6506,
+    "observedFps": 105
+  }
+]

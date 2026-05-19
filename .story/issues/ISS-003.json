@@ -16,9 +16,9 @@
     "T-010a",
     "T-023"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "T-023 cell-match gate confirmed by T-021 rerun 5 (2026-05-19T06:59:35Z). sessionReady negotiated 3840x2160 (4K). ThresholdResult: capture cell matches declared (1920x1080) observed=3840x2160 required=1920x1080 passed=false. thresholds.json records declaredCaptureFormat={1920,1080}, negotiatedCaptureFormat={3840,2160}, cellMismatch=true. Gate fires precisely as designed — explicit fail, not a silent pass. Evidence path: .story/handovers/evidence/2026-05-19-t-021-mvp-smoke-rerun-5/smoke-run/2026-05-19T06-59-35-326Z/VAL-CAP-004/thresholds.json",
+  "resolvedDate": "2026-05-19",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-CAP-004 capture workload mismatch — portal delivered 4K/variable-fps instead of 1080p60"
 }
