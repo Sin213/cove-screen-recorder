@@ -20,6 +20,39 @@ export interface SmokeRow {
    * and fail the cadence gate.
    */
   nominalFps?: number;
+
+  /**
+   * ISS-003 D3: declared capture-cell width/height the row expects the portal /
+   * PipeWire negotiation to deliver. Optional and additive — drivers that do
+   * not consult this field are unaffected. When set, the driver MUST assert
+   * the negotiated `sessionReady.format.width × height` exactly matches and
+   * surface a precise `ThresholdResult` (or an explicit configured skip per
+   * `onCellMismatch`) — never a silent pass on a different cell. The threshold
+   * key (drop-tier) is also resolved from this declared cell when present so
+   * the tier reflects row intent, not whatever the host happened to deliver.
+   */
+  expectedCaptureFormat?: { width: number; height: number };
+
+  /**
+   * ISS-003 D3: declared encoder backend the row expects to be selected.
+   * Optional and additive. When set, the driver MUST gate
+   * `encoder.selected.backend === expectedEncoderBackend` (strict equality)
+   * and feed the backend into `deriveThresholdKey`. This field does NOT
+   * synthesise or imply encoder availability — `encoder.selected` must remain
+   * a real helper-emitted event; ISS-002 still gates the actual backend.
+   */
+  expectedEncoderBackend?: string;
+
+  /**
+   * ISS-003 D3: per-row policy when the host does not deliver the declared
+   * `expectedCaptureFormat`. Default (`"fail"` or missing) keeps the row at
+   * `fail` through the precise cell-mismatch `ThresholdResult` so the gap is
+   * always visible in the per-row report. `"skip"` opts the row into an
+   * explicit `skip` whose message contains the literal token
+   * `host-does-not-deliver-declared-cell` so the matrix gate (N-008 §18)
+   * can route per-host coverage without hiding mismatch.
+   */
+  onCellMismatch?: "fail" | "skip";
 }
 
 /**
@@ -72,6 +105,16 @@ export const SMOKE_ROWS: SmokeRow[] = [
     // (fps_num=0). ISS-003 (4K/~105fps workload mismatch) remains the real
     // failure signal in that case — see handover.
     nominalFps: 60,
+    // ISS-003 D3: declared capture cell + encoder backend. The driver gates
+    // negotiated sessionReady.format against this declared cell exactly, and
+    // keys deriveThresholdKey off the declared cell so the drop tier reflects
+    // row intent (1080p60-nvenc), not whatever the host happens to deliver.
+    // onCellMismatch="fail" keeps the mismatch visible in the per-row report
+    // by default; switching to "skip" yields an explicit
+    // host-does-not-deliver-declared-cell skip for matrix-gated hosts.
+    expectedCaptureFormat: { width: 1920, height: 1080 },
+    expectedEncoderBackend: "nvenc",
+    onCellMismatch: "fail",
   },
   {
     id: "VAL-CAP-006",

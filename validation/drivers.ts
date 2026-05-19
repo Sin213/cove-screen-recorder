@@ -692,12 +692,25 @@ interface DiagSample {
 }
 
 function deriveThresholdKey(
-  format:
+  negotiatedFormat:
     | { width: number; height: number; fps_num: number; fps_den: number }
     | undefined,
-  encoderBackend: string,
+  fallbackEncoderBackend: string,
+  // ISS-003 D3: when the row declares an expected capture cell, threshold-key
+  // resolution prefers the declared height so the drop tier reflects row
+  // intent (e.g. 1080p60-nvenc) rather than whatever the host happened to
+  // deliver. The negotiated format is still recorded as evidence by the
+  // caller; this only changes which height drives the tier lookup. When no
+  // declared format is supplied the function preserves the previous
+  // negotiated-format behaviour (height fallback chain unchanged).
+  declaredFormat?: { width: number; height: number },
+  // ISS-003 D3: when the row declares an expected encoder backend, the suffix
+  // is taken from the declared value (no fallback heuristics). Otherwise the
+  // existing string-matching fallback runs against the caller-supplied
+  // backend hint, preserving prior behaviour for non-D3 callers.
+  declaredEncoderBackend?: string,
 ): string {
-  const height = format?.height ?? 1080;
+  const height = declaredFormat?.height ?? negotiatedFormat?.height ?? 1080;
   let resPrefix: string;
   if (height >= 2160) {
     resPrefix = "4k60";
@@ -707,18 +720,26 @@ function deriveThresholdKey(
     resPrefix = "1080p60";
   }
 
-  const be = encoderBackend.toLowerCase();
   let encSuffix: string;
-  if (be.includes("nvenc") || be.includes("nvidia")) {
-    encSuffix = "nvenc";
-  } else if (be.includes("vaapi")) {
-    encSuffix = "vaapi";
-  } else if (be.includes("qsv") || be.includes("quicksync") || be.includes("intel")) {
-    encSuffix = "qsv";
-  } else if (be === "nvenc") {
-    encSuffix = "nvenc";
+  if (declaredEncoderBackend && declaredEncoderBackend.length > 0) {
+    encSuffix = declaredEncoderBackend.toLowerCase();
   } else {
-    encSuffix = "libx264";
+    const be = fallbackEncoderBackend.toLowerCase();
+    if (be.includes("nvenc") || be.includes("nvidia")) {
+      encSuffix = "nvenc";
+    } else if (be.includes("vaapi")) {
+      encSuffix = "vaapi";
+    } else if (
+      be.includes("qsv") ||
+      be.includes("quicksync") ||
+      be.includes("intel")
+    ) {
+      encSuffix = "qsv";
+    } else if (be === "nvenc") {
+      encSuffix = "nvenc";
+    } else {
+      encSuffix = "libx264";
+    }
   }
 
   return `${resPrefix}-${encSuffix}`;
@@ -920,9 +941,31 @@ export async function driveValCap004(
     }
 
     // --- Stage 6: 60 s diagnostics observation window ----------------------
-    // VAL-CAP-004 is the NVENC row; always use the nvenc threshold key for drop
-    // rate (strictest gate) while asserting encoder.selected = nvenc explicitly.
-    const thresholdKey = deriveThresholdKey(captureFormat, "nvenc");
+    // ISS-003 D3: resolve declared cell + encoder backend from the row so the
+    // threshold tier reflects row intent rather than whatever the host
+    // happened to deliver. The negotiated capture format is still recorded
+    // verbatim in thresholds.json so the underlying mismatch (when present)
+    // remains visible as evidence — never overwritten or papered over.
+    const declaredCaptureFormat = row.expectedCaptureFormat;
+    const expectedEncoderBackend = row.expectedEncoderBackend ?? "nvenc";
+    const cellsMatch =
+      declaredCaptureFormat !== undefined &&
+      captureFormat !== undefined &&
+      captureFormat.width === declaredCaptureFormat.width &&
+      captureFormat.height === declaredCaptureFormat.height;
+    const cellMismatch =
+      declaredCaptureFormat !== undefined && !cellsMatch;
+
+    // VAL-CAP-004 is the NVENC row; the threshold key drives drop-rate tier.
+    // Under ISS-003 D3 the key is keyed off the declared cell when present,
+    // so a host that delivers 4K against a 1080p declaration still uses the
+    // 1080p60-nvenc strictest tier (not the looser 4k60-nvenc tier).
+    const thresholdKey = deriveThresholdKey(
+      captureFormat,
+      expectedEncoderBackend,
+      declaredCaptureFormat,
+      expectedEncoderBackend,
+    );
     const maxDropRate =
       (THRESHOLDS.captureDropRate as Record<string, number>)[thresholdKey] ??
       0;
@@ -930,7 +973,17 @@ export async function driveValCap004(
       key: thresholdKey,
       maxDropRate,
       cadenceMeanToleranceFrac: THRESHOLDS.cadenceMeanToleranceFrac,
+      // ISS-003 D3: declared vs negotiated capture cell are both recorded
+      // additively. `captureFormat` is the existing negotiated payload from
+      // sessionReady (preserved verbatim — same key, same shape). The new
+      // `declaredCaptureFormat`, `negotiatedCaptureFormat`, and `cellMismatch`
+      // fields make the row's intent and any host gap readable without
+      // cross-referencing rows.ts.
       captureFormat: captureFormat ?? null,
+      declaredCaptureFormat: declaredCaptureFormat ?? null,
+      negotiatedCaptureFormat: captureFormat ?? null,
+      cellMismatch,
+      expectedEncoderBackend,
       encoderObserved: encoderBackend || "(not received)",
       // ISS-001: surface the cadence nominal source so the evidence bundle
       // makes the variable-rate (fps_num=0) case readable without re-reading
@@ -941,6 +994,64 @@ export async function driveValCap004(
       nominalFps,
       nominalSource,
     });
+
+    // ISS-003 D3: optional skip path. When the row opts in via
+    // `onCellMismatch: "skip"` AND the host did not deliver the declared
+    // cell, the row is recorded as an explicit skip whose message contains
+    // the literal token `host-does-not-deliver-declared-cell` so the matrix
+    // gate (N-008 §18) can route per-host coverage. Default policy ("fail"
+    // or missing) skips this branch and continues; the cell-mismatch
+    // ThresholdResult below then keeps the row at fail through the
+    // threshold array — never a silent pass.
+    if (cellMismatch && row.onCellMismatch === "skip") {
+      const declaredStr = `${declaredCaptureFormat!.width}x${declaredCaptureFormat!.height}`;
+      const negotiatedStr = captureFormat
+        ? `${captureFormat.width}x${captureFormat.height}`
+        : "(no sessionReady format)";
+
+      // ISS-003 D3: the skip path must mirror the normal happy-path
+      // shutdown — capture.stopSession + engine.shutdown — so the helper
+      // tears down the PipeWire stream gracefully and emits its shutdown
+      // evidence. Without this, cleanup would fall to the finally-block
+      // SIGTERM, leaving resource-lifecycle behavior inconsistent with the
+      // fail path. Cleanup errors are recorded as evidence but never
+      // upgrade the skip into a fail — host-cell-mismatch remains the
+      // operative reason.
+      try {
+        const stopResp = await rpc.call("capture.stopSession", {}, 10_000);
+        writeJsonEvidence(evidenceDir, "stopSession-response.json", stopResp);
+      } catch (err) {
+        writeEvidence(
+          evidenceDir,
+          "stopSession-error.txt",
+          String(err) + "\n",
+        );
+      }
+      try {
+        const shutdownResp = await shutdownHelper(rpc);
+        writeJsonEvidence(evidenceDir, "shutdown-response.json", shutdownResp);
+      } catch (err) {
+        writeEvidence(
+          evidenceDir,
+          "shutdown-error.txt",
+          String(err) + "\n",
+        );
+      }
+      rpc.close();
+      rpc = null;
+
+      return makeReport(row, "skip", {
+        skipReason: "host-cell-mismatch",
+        message: `host-does-not-deliver-declared-cell: declared ${declaredStr}, negotiated ${negotiatedStr}`,
+        durationMs: Date.now() - start,
+        evidencePaths: {
+          "env-probe": evidenceDir + "/env-probe.json",
+          "sessionReady-notification":
+            evidenceDir + "/sessionReady-notification.json",
+          thresholds: evidenceDir + "/thresholds.json",
+        },
+      });
+    }
 
     const samples: DiagSample[] = [];
     let sessionLostNotif: RpcNotification | null = null;
@@ -1020,6 +1131,25 @@ export async function driveValCap004(
     // --- Stage 8: Threshold evaluation -------------------------------------
     const thresholds: ThresholdResult[] = [];
 
+    // ISS-003 D3: declared-cell gate runs before drop/cadence/backend gates
+    // so the report leads with the workload-mismatch evidence when present.
+    // Default policy ("fail" / missing) keeps the row at fail through this
+    // ThresholdResult; the "skip" branch above has already short-circuited
+    // when configured. Rows that do not declare an expectedCaptureFormat
+    // skip this gate entirely — additive behaviour, no impact on other rows.
+    if (declaredCaptureFormat !== undefined) {
+      const declaredStr = `${declaredCaptureFormat.width}x${declaredCaptureFormat.height}`;
+      const negotiatedStr = captureFormat
+        ? `${captureFormat.width}x${captureFormat.height}`
+        : "(no sessionReady format)";
+      thresholds.push({
+        name: `capture cell matches declared (${declaredStr})`,
+        observed: negotiatedStr,
+        required: declaredStr,
+        passed: cellsMatch,
+      });
+    }
+
     const totalDropped = samples.reduce((s, x) => s + x.droppedSinceLast, 0);
     const lastSample = samples[samples.length - 1];
     const totalProduced = lastSample?.totalProduced ?? 0;
@@ -1073,13 +1203,18 @@ export async function driveValCap004(
       passed: samples.length >= 1,
     });
 
-    // Row VAL-CAP-004 is NVENC-specific; assert the backend is nvenc.
-    const nvencObserved = encoderBackend || "(not received)";
+    // ISS-003 D3: encoder backend gate uses the row's declared
+    // expectedEncoderBackend (default "nvenc" preserved when the row does not
+    // declare one). The gate is still strict equality against the real
+    // `encoder.selected` event — this code does NOT synthesise the event or
+    // imply backend availability; ISS-002 still gates whether the helper
+    // actually emits a backend selection (T-017a).
+    const encoderObserved = encoderBackend || "(not received)";
     thresholds.push({
-      name: "encoder.selected backend is nvenc",
-      observed: nvencObserved,
-      required: "nvenc",
-      passed: encoderBackend === "nvenc",
+      name: `encoder.selected backend is ${expectedEncoderBackend}`,
+      observed: encoderObserved,
+      required: expectedEncoderBackend,
+      passed: encoderBackend === expectedEncoderBackend,
     });
 
     const durationMs = Date.now() - start;

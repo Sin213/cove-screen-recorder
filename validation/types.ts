@@ -1,6 +1,20 @@
 export type RowClassification = "scripted-local" | "manual" | "future-ci";
 export type RowStatus = "pass" | "fail" | "skip" | "error";
-export type SkipReason = "helper-not-available" | "manual" | "future-ci" | "dependency-failed" | "not-implemented";
+export type SkipReason =
+  | "helper-not-available"
+  | "manual"
+  | "future-ci"
+  | "dependency-failed"
+  | "not-implemented"
+  /**
+   * ISS-003 D3: the host did not deliver the row's declared
+   * `expectedCaptureFormat`. Only emitted when the row opts in via
+   * `onCellMismatch: "skip"`; default policy fails the row through a
+   * precise cell-mismatch ThresholdResult instead. Skip messages MUST
+   * include the literal token `host-does-not-deliver-declared-cell` so
+   * the matrix gate (N-008 §18) can recognise the per-host coverage gap.
+   */
+  | "host-cell-mismatch";
 export type RowTier = "must-pass" | "should-pass" | "informational";
 export type SuiteKind = "smoke" | "rc";
 export type Verdict = "pass" | "fail" | "skip" | "error";
