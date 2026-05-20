@@ -1,0 +1,22 @@
+{
+  "components": [
+    "segment-buffer",
+    "rolling-buffer"
+  ],
+  "discoveredDate": "2026-05-20",
+  "id": "ISS-005",
+  "impact": "replay.save fails with \"no committed segments available to pin\" — VAL-SEG-003 cannot pass. Full smoke suite blocks at this gate. Current diagnostics show fragments_received increasing but segments_committed remains 0 throughout the session. Cannot distinguish H1 (encoder only marks first frame as keyframe), H2 (duration_eligible never flips), or H3 (keyframes/duration present but commit predicate still does not fire) without additional diagnostic fields.",
+  "location": [
+    "helper/src/segment/buffer.rs"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-018",
+    "T-019"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-SEG-003: rolling buffer never commits a segment"
+}

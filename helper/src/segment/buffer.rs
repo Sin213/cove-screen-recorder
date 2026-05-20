@@ -181,6 +181,8 @@ struct BufferInner {
     formatchange_segments: u64,
     last_diagnostics: Instant,
     format_changed: bool,
+    keyframes_seen: u64,
+    last_keyframe_at: Option<Instant>,
 }
 
 impl BufferInner {
@@ -303,6 +305,14 @@ impl BufferInner {
             formatchange_segments: self.formatchange_segments,
             buffer_window_seconds_observed: buffer_window_secs,
             buffer_bytes_pct_of_cap: buffer_bytes_pct,
+            keyframes_seen: self.keyframes_seen,
+            duration_eligible: self.duration_eligible,
+            pending_duration_90k: self.pending.total_duration_90k,
+            pending_bytes: self.pending.total_bytes as u64,
+            last_keyframe_age_ms: self
+                .last_keyframe_at
+                .map(|t| t.elapsed().as_millis() as u64)
+                .unwrap_or(u64::MAX),
         };
         if let Ok(v) = serde_json::to_value(&evt) {
             let _ = self.notifier.try_notify("replay.segmentDiagnostics", v);
@@ -421,6 +431,8 @@ impl SegmentBuffer {
                 formatchange_segments: 0,
                 last_diagnostics: Instant::now(),
                 format_changed: false,
+                keyframes_seen: 0,
+                last_keyframe_at: None,
             })),
             close_tx: Arc::new(watch::channel(false).0),
             closing: Arc::new(AtomicBool::new(false)),
@@ -624,9 +636,11 @@ impl FragmentSink for SegmentBuffer {
             }
         }
 
-        // Commit on keyframe only when the segment has reached the target
-        // duration. This prevents scene-cut IDRs or short-GOP keyframes from
-        // creating many tiny segments with excessive write/fsync overhead.
+        if fragment.is_keyframe {
+            inner.keyframes_seen += 1;
+            inner.last_keyframe_at = Some(Instant::now());
+        }
+
         if fragment.is_keyframe && !inner.pending.is_empty() && inner.duration_eligible {
             inner.commit_pending().await?;
         }
@@ -1048,5 +1062,72 @@ mod tests {
         buf.flush().await.unwrap();
         let segs = buf.committed_segments().await;
         assert_eq!(segs.len(), 2, "keyframe after format change should start new segment");
+    }
+
+    #[tokio::test]
+    async fn diagnostics_event_includes_keyframe_metrics() {
+        let tmp = TempDir::new().unwrap();
+        let session_dir = tmp.path().join("session-diag");
+        let config = SegmentBufferConfig {
+            target_duration_90k: 180_000,
+            ..Default::default()
+        };
+        let mut buf = SegmentBuffer::new(
+            "session-diag".into(),
+            None,
+            &session_dir,
+            config,
+            test_notifier(),
+        ).unwrap();
+
+        buf.push(make_fragment(0, 0, 45_000, true)).await.unwrap();
+        buf.push(make_fragment(1, 45_000, 45_000, false)).await.unwrap();
+        buf.push(make_fragment(2, 90_000, 45_000, true)).await.unwrap();
+
+        let inner = buf.inner.lock().await;
+        assert_eq!(inner.keyframes_seen, 2);
+        assert!(inner.last_keyframe_at.is_some());
+        assert!(inner.last_keyframe_at.unwrap().elapsed().as_millis() < 5000);
+        assert_eq!(inner.pending.total_duration_90k, 135_000);
+        assert!(!inner.duration_eligible);
+    }
+
+    #[tokio::test]
+    async fn diagnostics_event_after_commit_resets_pending() {
+        let tmp = TempDir::new().unwrap();
+        let session_dir = tmp.path().join("session-diag-reset");
+        let config = SegmentBufferConfig {
+            target_duration_90k: 90_000,
+            ..Default::default()
+        };
+        let mut buf = SegmentBuffer::new(
+            "session-diag-reset".into(),
+            None,
+            &session_dir,
+            config,
+            test_notifier(),
+        ).unwrap();
+
+        buf.push(make_fragment(0, 0, 45_000, true)).await.unwrap();
+        buf.push(make_fragment(1, 45_000, 45_000, false)).await.unwrap();
+
+        {
+            let inner = buf.inner.lock().await;
+            assert_eq!(inner.keyframes_seen, 1);
+            assert_eq!(inner.pending.total_duration_90k, 90_000);
+            assert!(inner.duration_eligible);
+        }
+
+        buf.push(make_fragment(2, 90_000, 45_000, true)).await.unwrap();
+
+        {
+            let inner = buf.inner.lock().await;
+            assert_eq!(inner.keyframes_seen, 2);
+            assert_eq!(inner.pending.total_duration_90k, 45_000);
+            assert!(!inner.duration_eligible);
+            assert!(inner.last_keyframe_at.is_some());
+        }
+
+        assert!(session_dir.join("00000000.mp4").exists());
     }
 }

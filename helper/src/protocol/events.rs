@@ -146,6 +146,11 @@ pub struct SegmentDiagnosticsEvent {
     pub formatchange_segments: u64,
     pub buffer_window_seconds_observed: f64,
     pub buffer_bytes_pct_of_cap: f64,
+    pub keyframes_seen: u64,
+    pub duration_eligible: bool,
+    pub pending_duration_90k: u64,
+    pub pending_bytes: u64,
+    pub last_keyframe_age_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -304,6 +304,11 @@ async fn run_session_task(
             formatchange_segments: 0,
             buffer_window_seconds_observed: (tick as f64) * 1.0,
             buffer_bytes_pct_of_cap: 20.0,
+            keyframes_seen: tick * 2,
+            duration_eligible: tick > 0,
+            pending_duration_90k: 45_000,
+            pending_bytes: 50_000,
+            last_keyframe_age_ms: 500,
         };
         let _ = notifier
             .notify("replay.segmentDiagnostics", serde_json::to_value(seg_diag).unwrap())
