@@ -53,6 +53,24 @@ export interface SmokeRow {
    * can route per-host coverage without hiding mismatch.
    */
   onCellMismatch?: "fail" | "skip";
+
+  /**
+   * T-021 VAL-CAP-004 startup drop warmup: number of leading
+   * `capture.diagnostics` samples to exclude from the drop-rate calculation
+   * only. Optional and additive — drivers that do not consult this field are
+   * unaffected, and absence is treated as `0` (current behaviour preserved
+   * bit-identically). The cadence calculation MUST continue to use the
+   * unfiltered sample set; warmup affects drop-rate exclusively.
+   *
+   * Rationale: PipeWire / NVENC startup transient (~first second) yields a
+   * burst of dropped frames before steady state is reached (see rerun 8
+   * and rerun 10 evidence — all 19 drops landed in sample 1, samples 2–60
+   * had zero drops). This field lets a specific row separate that startup
+   * transient from steady-state drops without weakening the threshold
+   * constant (`THRESHOLDS.captureDropRate["1080p60-nvenc"]` remains `0`)
+   * and without affecting any other row.
+   */
+  dropWarmupSamples?: number;
 }
 
 /**
@@ -115,6 +133,11 @@ export const SMOKE_ROWS: SmokeRow[] = [
     expectedCaptureFormat: { width: 1920, height: 1080 },
     expectedEncoderBackend: "nvenc",
     onCellMismatch: "fail",
+    // T-021 startup drop warmup: exclude only the first diagnostics sample
+    // from the drop-rate calculation. Cadence calculation is intentionally
+    // unchanged in this pass and handled later. See SmokeRow.dropWarmupSamples
+    // doc-comment for the rerun 8 / rerun 10 evidence basis.
+    dropWarmupSamples: 1,
   },
   {
     id: "VAL-CAP-006",

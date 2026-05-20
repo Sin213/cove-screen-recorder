@@ -691,6 +691,123 @@ interface DiagSample {
   observedFps: number;
 }
 
+/**
+ * T-021 VAL-CAP-004 startup drop warmup: per-row, opt-in exclusion of the
+ * first N diagnostics samples from the drop-rate calculation only.
+ *
+ * - `warmupSamples = 0`: behaviour is bit-identical to the prior calculation
+ *   — sum droppedSinceLast across all samples; denominator is the last
+ *   sample's totalProduced; dropRate is 0 when the denominator is 0.
+ * - `warmupSamples > 0`: exclude the first `warmupSamples` samples; the
+ *   denominator becomes the post-warmup produced delta
+ *   (`lastEffective.totalProduced - lastWarmup.totalProduced`).
+ *
+ * `valid = false` is returned only when warmup > 0 leaves no effective
+ * samples or the produced delta is non-positive — the caller must fail
+ * closed in that case.
+ *
+ * This function does not consult cadence, observedFps, or thresholds; it
+ * is the single source of truth for drop-rate arithmetic with warmup.
+ */
+export interface DropRateWithWarmup {
+  warmupSamples: number;
+  totalSamples: number;
+  effectiveSamples: number;
+  totalDropped: number;
+  dropWarmupExcludedDropped: number;
+  dropWarmupProduced: number;
+  dropEffectiveProduced: number;
+  dropRate: number;
+  valid: boolean;
+}
+
+export function computeDropRateWithWarmup(
+  samples: ReadonlyArray<DiagSample>,
+  warmupSamples: number,
+): DropRateWithWarmup {
+  const warmup = Math.max(0, Math.floor(warmupSamples));
+  const totalSamples = samples.length;
+  const warmupSlice = samples.slice(0, Math.min(warmup, totalSamples));
+  const effective = samples.slice(Math.min(warmup, totalSamples));
+
+  const dropWarmupExcludedDropped = warmupSlice.reduce(
+    (s, x) => s + x.droppedSinceLast,
+    0,
+  );
+  const totalDroppedAll = samples.reduce(
+    (s, x) => s + x.droppedSinceLast,
+    0,
+  );
+  const totalDropped = effective.reduce(
+    (s, x) => s + x.droppedSinceLast,
+    0,
+  );
+
+  // Preserve current behaviour bit-identically when warmup === 0.
+  if (warmup === 0) {
+    const lastSample = samples[samples.length - 1];
+    const denom = lastSample?.totalProduced ?? 0;
+    return {
+      warmupSamples: 0,
+      totalSamples,
+      effectiveSamples: totalSamples,
+      totalDropped: totalDroppedAll,
+      dropWarmupExcludedDropped: 0,
+      dropWarmupProduced: 0,
+      dropEffectiveProduced: denom,
+      dropRate: denom > 0 ? totalDroppedAll / denom : 0,
+      valid: true,
+    };
+  }
+
+  if (effective.length === 0) {
+    return {
+      warmupSamples: warmup,
+      totalSamples,
+      effectiveSamples: 0,
+      totalDropped: 0,
+      dropWarmupExcludedDropped,
+      dropWarmupProduced:
+        warmupSlice[warmupSlice.length - 1]?.totalProduced ?? 0,
+      dropEffectiveProduced: 0,
+      dropRate: 0,
+      valid: false,
+    };
+  }
+
+  const lastWarmupProduced =
+    warmupSlice[warmupSlice.length - 1]?.totalProduced ?? 0;
+  const lastEffectiveProduced =
+    effective[effective.length - 1]?.totalProduced ?? 0;
+  const dropEffectiveProduced = lastEffectiveProduced - lastWarmupProduced;
+
+  if (dropEffectiveProduced <= 0) {
+    return {
+      warmupSamples: warmup,
+      totalSamples,
+      effectiveSamples: effective.length,
+      totalDropped,
+      dropWarmupExcludedDropped,
+      dropWarmupProduced: lastWarmupProduced,
+      dropEffectiveProduced,
+      dropRate: 0,
+      valid: false,
+    };
+  }
+
+  return {
+    warmupSamples: warmup,
+    totalSamples,
+    effectiveSamples: effective.length,
+    totalDropped,
+    dropWarmupExcludedDropped,
+    dropWarmupProduced: lastWarmupProduced,
+    dropEffectiveProduced,
+    dropRate: totalDropped / dropEffectiveProduced,
+    valid: true,
+  };
+}
+
 function deriveThresholdKey(
   negotiatedFormat:
     | { width: number; height: number; fps_num: number; fps_den: number }
@@ -1150,16 +1267,41 @@ export async function driveValCap004(
       });
     }
 
-    const totalDropped = samples.reduce((s, x) => s + x.droppedSinceLast, 0);
-    const lastSample = samples[samples.length - 1];
-    const totalProduced = lastSample?.totalProduced ?? 0;
-    const dropRate = totalProduced > 0 ? totalDropped / totalProduced : 0;
+    // T-021: opt-in per-row startup drop warmup. Default (undefined / 0)
+    // preserves the prior calculation bit-identically. Cadence (below) is
+    // intentionally unchanged in this pass — it continues to consume the
+    // unfiltered `samples` array.
+    const dropWarmupSamplesCfg = row.dropWarmupSamples ?? 0;
+    const dropCalc = computeDropRateWithWarmup(samples, dropWarmupSamplesCfg);
+    const dropRate = dropCalc.dropRate;
+    const dropPassed = dropCalc.valid && dropRate <= maxDropRate;
 
     thresholds.push({
       name: `drop rate <= ${maxDropRate} (${thresholdKey})`,
-      observed: String(dropRate.toFixed(6)),
+      observed: dropCalc.valid
+        ? `${dropRate.toFixed(6)} (warmup=${dropCalc.warmupSamples}, effectiveSamples=${dropCalc.effectiveSamples}, excludedDropped=${dropCalc.dropWarmupExcludedDropped}, dropEffectiveProduced=${dropCalc.dropEffectiveProduced})`
+        : `invalid (warmup=${dropCalc.warmupSamples}, effectiveSamples=${dropCalc.effectiveSamples}, dropEffectiveProduced=${dropCalc.dropEffectiveProduced})`,
       required: `<= ${maxDropRate}`,
-      passed: dropRate <= maxDropRate,
+      passed: dropPassed,
+    });
+
+    // T-021: honest evidence sidecar — record the warmup exclusion exactly,
+    // even when warmup=0 (no exclusion). Drivers/CI gates and human readers
+    // can verify whether startup samples were excluded without re-deriving.
+    writeJsonEvidence(evidenceDir, "drop-warmup.json", {
+      rowDropWarmupSamples: dropWarmupSamplesCfg,
+      warmupSamples: dropCalc.warmupSamples,
+      totalSamples: dropCalc.totalSamples,
+      effectiveSamples: dropCalc.effectiveSamples,
+      totalDropped: dropCalc.totalDropped,
+      dropWarmupExcludedDropped: dropCalc.dropWarmupExcludedDropped,
+      dropWarmupProduced: dropCalc.dropWarmupProduced,
+      dropEffectiveProduced: dropCalc.dropEffectiveProduced,
+      dropRate: dropCalc.dropRate,
+      valid: dropCalc.valid,
+      thresholdKey,
+      maxDropRate,
+      passed: dropPassed,
     });
 
     const meanFps =
