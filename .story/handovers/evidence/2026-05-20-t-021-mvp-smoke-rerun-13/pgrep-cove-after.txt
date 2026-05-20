@@ -1,0 +1,2 @@
+278112 /bin/bash -c source /home/sin/.claude/shell-snapshots/snapshot-bash-1779293420680-u2lsn9.sh 2>/dev/null || true && shopt -u extglob 2>/dev/null || true && eval 'pgrep -af cove-replay 2>&1 > .story/handovers/evidence/2026-05-20-t-021-mvp-smoke-rerun-13/pgrep-cove-after.txt; echo "exit: $?" >> .story/handovers/evidence/2026-05-20-t-021-mvp-smoke-rerun-13/pgrep-cove-after.txt' < /dev/null && pwd -P >| /tmp/claude-15a1-cwd
+exit: 0
