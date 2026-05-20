@@ -24,6 +24,9 @@ export interface ThresholdResult {
   observed: number | string | null;
   required: string;
   passed: boolean;
+  /** Omitted or true = gating (row fails if this threshold fails).
+   *  false = informational only (evidence bundle only, never fails the row). */
+  gating?: boolean;
 }
 
 /** N-008 §7 evidence bundle paths, all optional in the dry-run case. */

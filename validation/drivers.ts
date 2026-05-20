@@ -21,6 +21,7 @@ import {
 } from "./evidence";
 import {
   THRESHOLDS,
+  VARIABLE_RATE_CADENCE,
   FfprobeError,
   runFfprobe,
   extractVideoPts,
@@ -30,6 +31,98 @@ import {
 } from "./assertions";
 import { probeEnvironment, hasDisplayServer } from "./env-probe";
 import { launchMotion60, LoadScriptMissingError, LaunchedLoad } from "./loads";
+
+// ---------------------------------------------------------------------------
+// ISS-001 VAL-CAP-004: variable-rate cadence policy exports.
+// Pure functions / types — no I/O; unit-tested in drivers.cadence-policy.test.ts
+// ---------------------------------------------------------------------------
+
+export type CadenceNominalSource = "negotiated" | "row-config" | "missing";
+
+export interface CadenceEvalContext {
+  meanFps: number;
+  /** max(observedFps) - min(observedFps) across all samples in the window. */
+  spreadFps: number;
+  sampleCount: number;
+  nominalFps: number | null;
+  nominalSource: CadenceNominalSource;
+  /** captureFormat was present and had fps_num === 0 (KDE PipeWire variable-rate). */
+  isVariableRate: boolean;
+}
+
+/**
+ * Emit ThresholdResult[] for the cadence gate.  Two policies:
+ *
+ * variable-rate (isVariableRate && nominalSource==="row-config"):
+ *   - gating: mean in [0.85×nominal .. 1.02×nominal]
+ *   - gating: spread ≤ 6.0 fps
+ *   - informational (gating=false): strict ±0.5% mean gate (evidence only)
+ *
+ * strict (all other cases with a known nominal):
+ *   - gating: mean within ±cadenceMeanToleranceFrac of nominal
+ *
+ * Fail-closed paths (nominalFps===null or sampleCount<10) return a single
+ * failed gating threshold — never a silent pass.
+ */
+export function evaluateCadenceThresholds(ctx: CadenceEvalContext): ThresholdResult[] {
+  if (ctx.nominalFps === null) {
+    return [
+      {
+        name: "cadence (no nominal fps available)",
+        observed: `${ctx.meanFps.toFixed(3)} fps observed`,
+        required: "row nominal fps or non-zero negotiated fps",
+        passed: false,
+      },
+    ];
+  }
+  if (ctx.sampleCount < 10) {
+    return [
+      {
+        name: "cadence (insufficient samples for mean check)",
+        observed: String(ctx.sampleCount),
+        required: ">= 10 diagnostics samples",
+        passed: false,
+      },
+    ];
+  }
+
+  if (ctx.isVariableRate && ctx.nominalSource === "row-config") {
+    const minFps = ctx.nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMinFracOfNominal;
+    const maxFps = ctx.nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMaxFracOfNominal;
+    const tol = THRESHOLDS.cadenceMeanToleranceFrac;
+    return [
+      {
+        name: `cadence mean in variable-rate range [${minFps.toFixed(2)}..${maxFps.toFixed(2)}] fps (nominal source=${ctx.nominalSource})`,
+        observed: ctx.meanFps.toFixed(3),
+        required: `${minFps.toFixed(2)}..${maxFps.toFixed(2)}`,
+        passed: ctx.meanFps >= minFps && ctx.meanFps <= maxFps,
+      },
+      {
+        name: `cadence spread ≤ ${VARIABLE_RATE_CADENCE.variableRateCadenceMaxSpreadFps.toFixed(1)} fps (variable-rate compositor variance)`,
+        observed: ctx.spreadFps.toFixed(3),
+        required: `≤ ${VARIABLE_RATE_CADENCE.variableRateCadenceMaxSpreadFps.toFixed(1)}`,
+        passed: ctx.spreadFps <= VARIABLE_RATE_CADENCE.variableRateCadenceMaxSpreadFps,
+      },
+      {
+        name: `cadence mean within ±${(tol * 100).toFixed(1)}% of ${ctx.nominalFps.toFixed(2)} fps (nominal source=${ctx.nominalSource}, informational)`,
+        observed: ctx.meanFps.toFixed(3),
+        required: `${(ctx.nominalFps * (1 - tol)).toFixed(2)}..${(ctx.nominalFps * (1 + tol)).toFixed(2)}`,
+        passed: Math.abs(ctx.meanFps - ctx.nominalFps) / ctx.nominalFps <= tol,
+        gating: false,
+      },
+    ];
+  }
+
+  const tol = THRESHOLDS.cadenceMeanToleranceFrac;
+  return [
+    {
+      name: `cadence mean within ±${(tol * 100).toFixed(1)}% of ${ctx.nominalFps.toFixed(2)} fps (nominal source=${ctx.nominalSource})`,
+      observed: ctx.meanFps.toFixed(3),
+      required: `${(ctx.nominalFps * (1 - tol)).toFixed(2)}..${(ctx.nominalFps * (1 + tol)).toFixed(2)}`,
+      passed: Math.abs(ctx.meanFps - ctx.nominalFps) / ctx.nominalFps <= tol,
+    },
+  ];
+}
 
 export interface DriverContext {
   rpc: RpcClient | null;
@@ -1022,7 +1115,6 @@ export async function driveValCap004(
     // tolerance constants are not loosened; the underlying ISS-003 workload
     // mismatch remains visible because captureFormat and observed cadence
     // are both still recorded in evidence.
-    type CadenceNominalSource = "negotiated" | "row-config" | "missing";
     let nominalFps: number | null = null;
     let nominalSource: CadenceNominalSource = "missing";
     if (
@@ -1036,6 +1128,11 @@ export async function driveValCap004(
       nominalFps = row.nominalFps;
       nominalSource = "row-config";
     }
+    // ISS-001: explicit — only true when captureFormat was present but fps_num===0.
+    // Undefined captureFormat (no sessionReady yet) is NOT treated as variable-rate.
+    const isVariableRate = captureFormat !== undefined && captureFormat.fps_num === 0;
+    const cadencePolicy: "variable-rate" | "strict" =
+      isVariableRate && nominalSource === "row-config" ? "variable-rate" : "strict";
 
     // --- Stage 5: Drain encoder notifications buffered from startStream ----
     let encoderBackend = ""; // populated from encoder.selected if emitted
@@ -1102,14 +1199,17 @@ export async function driveValCap004(
       cellMismatch,
       expectedEncoderBackend,
       encoderObserved: encoderBackend || "(not received)",
-      // ISS-001: surface the cadence nominal source so the evidence bundle
-      // makes the variable-rate (fps_num=0) case readable without re-reading
-      // captureFormat. nominalFps is null when neither the negotiated format
-      // nor the row config provides a target; in that case the cadence gate
-      // is recorded as a failure with name="cadence (no nominal fps
-      // available)" — never a silent skip or pass.
+      // ISS-001: surface the cadence nominal source and policy so the evidence
+      // bundle makes the variable-rate (fps_num=0) case readable without
+      // re-reading captureFormat. nominalFps is null when neither the
+      // negotiated format nor the row config provides a target; in that case
+      // the cadence gate is recorded as a failure — never a silent pass.
       nominalFps,
       nominalSource,
+      cadencePolicy,
+      ...(cadencePolicy === "variable-rate"
+        ? { variableRateCadenceConstants: VARIABLE_RATE_CADENCE }
+        : {}),
     });
 
     // ISS-003 D3: optional skip path. When the row opts in via
@@ -1304,39 +1404,20 @@ export async function driveValCap004(
       passed: dropPassed,
     });
 
+    const fpsValues = samples.map((s) => s.observedFps);
     const meanFps =
-      samples.length > 0
-        ? samples.reduce((s, x) => s + x.observedFps, 0) / samples.length
-        : 0;
-    if (nominalFps === null) {
-      // ISS-001: missing nominal — neither negotiated fps nor row-config
-      // provided a target. The cadence gate fails honestly; it never passes
-      // by default and is never collapsed into an environment skip. The
-      // observed mean fps and captureFormat remain in thresholds.json /
-      // capture-diagnostics.json so the underlying workload mismatch
-      // (ISS-003) and any encoder gap (ISS-002) remain visible.
-      thresholds.push({
-        name: "cadence (no nominal fps available)",
-        observed: `${meanFps.toFixed(3)} fps observed`,
-        required: "row nominal fps or non-zero negotiated fps",
-        passed: false,
-      });
-    } else if (samples.length >= 10) {
-      const tol = THRESHOLDS.cadenceMeanToleranceFrac;
-      thresholds.push({
-        name: `cadence mean within ±${(tol * 100).toFixed(1)}% of ${nominalFps.toFixed(2)} fps (nominal source=${nominalSource})`,
-        observed: String(meanFps.toFixed(3)),
-        required: `${(nominalFps * (1 - tol)).toFixed(2)}..${(nominalFps * (1 + tol)).toFixed(2)}`,
-        passed: Math.abs(meanFps - nominalFps) / nominalFps <= tol,
-      });
-    } else {
-      thresholds.push({
-        name: "cadence (insufficient samples for mean check)",
-        observed: String(samples.length),
-        required: ">= 10 diagnostics samples",
-        passed: false,
-      });
-    }
+      fpsValues.length > 0 ? fpsValues.reduce((a, b) => a + b, 0) / fpsValues.length : 0;
+    const spreadFps =
+      fpsValues.length > 0 ? Math.max(...fpsValues) - Math.min(...fpsValues) : 0;
+    const cadenceResults = evaluateCadenceThresholds({
+      meanFps,
+      spreadFps,
+      sampleCount: samples.length,
+      nominalFps,
+      nominalSource,
+      isVariableRate,
+    });
+    thresholds.push(...cadenceResults);
 
     thresholds.push({
       name: "at least 1 diagnostics sample received",
@@ -1360,7 +1441,7 @@ export async function driveValCap004(
     });
 
     const durationMs = Date.now() - start;
-    const allPassed = thresholds.every((t) => t.passed);
+    const allPassed = thresholds.every((t) => t.gating === false || t.passed);
 
     return makeReport(row, allPassed ? "pass" : "fail", {
       durationMs,

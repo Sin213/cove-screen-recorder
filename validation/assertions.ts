@@ -101,6 +101,23 @@ export const THRESHOLDS = {
   restartLoopMaxIn60s: 3,
 } as const;
 
+/**
+ * ISS-001 VAL-CAP-004: constants for the variable-rate cadence policy.
+ * Applied when negotiatedCaptureFormat.fps_num === 0 (KDE PipeWire compositor
+ * delivers a variable-rate stream) and nominalSource === "row-config".
+ * Evidence basis: reruns 8/10/11 showed sustained ~55.45 fps delivery
+ * (55.45/60 = 0.924); the 0.85 floor rejects genuine 5 fps degeneracy while
+ * accepting compositor variance down to ~51 fps.  The 1.02 ceiling accepts
+ * burst frames up to 2% above nominal.  A spread ≤ 6.0 fps is consistent with
+ * compositor jitter (reruns 8/10/11 showed ≤0.5 fps spread) while rejecting
+ * bursty delivery patterns.
+ */
+export const VARIABLE_RATE_CADENCE = {
+  variableRateCadenceMinFracOfNominal: 0.85,
+  variableRateCadenceMaxFracOfNominal: 1.02,
+  variableRateCadenceMaxSpreadFps: 6.0,
+} as const;
+
 // ---------------------------------------------------------------------------
 // Pure predicate functions — no I/O, no subprocess calls.
 // T-010c wires these against observed ffprobe / IPC output.
