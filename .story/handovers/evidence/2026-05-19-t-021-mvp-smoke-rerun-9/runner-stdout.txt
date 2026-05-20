@@ -1,0 +1,20 @@
+[runner] Helper socket not found — all scripted-local rows will skip.
+[runner] VAL-PKG-001: skip (helper-not-available)
+[runner] VAL-CAP-001: skip (manual)
+[runner] VAL-CAP-003: pass — Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+[runner] VAL-CAP-004: fail — capture.startStream error: {"code":"not-implemented","message":"no-acceptable-buffer-type"}
+
+Suite: smoke  |  Verdict: FAIL  |  2026-05-20T02:01:17.842Z
+  pass=1  fail=1  skip=2  error=0
+
+ID              Status    Class           Reason / Message
+--------------------------------------------------------------------------------
+VAL-PKG-001     skip      scripted-local  helper-not-available
+VAL-CAP-001     skip      manual          manual
+VAL-CAP-003     pass      scripted-local  Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+VAL-CAP-004     fail      scripted-local  capture.startStream error: {"code":"not-implemented","message":"no-acceptable-buffer-type"}
+
+Stopped early at VAL-CAP-004 (first must-pass red).
+
+[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779242485206.json
+[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-20T02-01-17-842Z/report.json

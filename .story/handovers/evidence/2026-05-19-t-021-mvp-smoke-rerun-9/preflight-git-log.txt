@@ -1,0 +1,10 @@
+b5db18b Implement PipeWire framerate hint
+bf6a339 Record MVP smoke rerun 8 evidence
+814034f Record MVP smoke rerun 7 evidence
+d5f39b0 Record MVP smoke rerun 6 evidence
+1260dd2 Fix NVENC encode path FFI layout
+9a5ff33 Fix NVENC probe FFI versions
+f29b14a Record MVP smoke rerun 5 failure evidence
+8fe6aef Record MVP smoke rerun 4 evidence
+39484a3 Implement NVENC encoder backend
+4ee353c Implement declared capture cell validation
