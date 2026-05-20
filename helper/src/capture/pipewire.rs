@@ -159,6 +159,9 @@ enum PwCommand {
     /// buffer was delivered. Disconnect the stream, set the SHM-fallback flag, and
     /// reconnect so the next `param_changed` advertises SHM-only buffer constraints.
     RetryShmAfterDmaBufFailure,
+    /// T-016a: live framerate-hint update. The PW thread re-runs `update_params` with a
+    /// freshly built format pod whose default rate matches the clamped hint (1..=240).
+    UpdateFramerate(u32),
 }
 
 type PwCmdTx = pipewire::channel::Sender<PwCommand>;
@@ -179,6 +182,10 @@ struct DiagCounters {
     /// `param_changed` advertises SHM-only `SPA_PARAM_BUFFERS_dataType` instead of DMA-BUF.
     /// Sticky for the rest of the session once set.
     force_shm_on_negotiation: AtomicBool,
+    /// T-016a: live PipeWire framerate hint shared with the PW thread. `0` means
+    /// "no caller-supplied hint" and the format pod falls back to its 60/1 default.
+    /// `set_framerate_hint` clamps to 1..=240 before writing.
+    framerate_hint: AtomicU32,
 }
 
 impl DiagCounters {
@@ -189,6 +196,7 @@ impl DiagCounters {
             buffer_type: AtomicU8::new(0),
             in_flight: AtomicI64::new(0),
             force_shm_on_negotiation: AtomicBool::new(false),
+            framerate_hint: AtomicU32::new(0),
         }
     }
 }
@@ -371,7 +379,71 @@ fn build_buffer_datatype_pod(mask: u32) -> anyhow::Result<Vec<u8>> {
 
 /// Build the serialized `EnumFormat` pod used at `stream.connect()` time. Factored out so
 /// the cmd handler can rebuild it for the DMA-BUF→SHM reconnect retry path.
-fn build_format_enum_pod() -> anyhow::Result<Vec<u8>> {
+///
+/// T-016a: accepts a caller-supplied framerate hint (clamped to 1..=240) which becomes the
+/// pod's default rate. When `framerate_hint` is `None`, the default is 60 fps. The range
+/// always spans 1/1..=240/1 so the compositor can still pick a different rate inside that
+/// window.
+fn build_format_enum_pod(framerate_hint: Option<u32>) -> anyhow::Result<Vec<u8>> {
+    use pipewire::spa::{
+        param::{
+            format::{FormatProperties, MediaSubtype, MediaType},
+            video::VideoFormat,
+            ParamType,
+        },
+        pod::{self, Value},
+        utils::{Fraction, Rectangle, SpaTypes},
+    };
+    let default_rate = framerate_hint.unwrap_or(60).clamp(1, 240);
+    let obj = pipewire::spa::pod::object!(
+        SpaTypes::ObjectParamFormat,
+        ParamType::EnumFormat,
+        pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
+        pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+        pod::property!(
+            FormatProperties::VideoFormat,
+            Choice,
+            Enum,
+            Id,
+            VideoFormat::NV12,
+            VideoFormat::NV12,
+            VideoFormat::P010_10LE,
+            VideoFormat::BGRx,
+            VideoFormat::BGRA
+        ),
+        pod::property!(
+            FormatProperties::VideoSize,
+            Choice,
+            Range,
+            Rectangle,
+            Rectangle { width: 1920, height: 1080 },
+            Rectangle { width: 1, height: 1 },
+            Rectangle { width: 8192, height: 4320 }
+        ),
+        pod::property!(
+            FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            Fraction { num: default_rate, denom: 1 },
+            Fraction { num: 1, denom: 1 },
+            Fraction { num: 240, denom: 1 }
+        ),
+    );
+    let bytes = pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &Value::Object(obj),
+    )
+    .map_err(|e| anyhow::anyhow!("serialize EnumFormat pod: {e}"))?
+    .0
+    .into_inner();
+    Ok(bytes)
+}
+
+/// T-016a legacy permissive fallback pod. Kept verbatim from the pre-T-016a shape (default
+/// and min `Fraction { num: 0, denom: 1 }`, max `240/1`) so we can retry `stream.connect`
+/// once if a compositor rejects the nonzero-rate pod produced by `build_format_enum_pod`.
+fn build_format_enum_pod_legacy_permissive() -> anyhow::Result<Vec<u8>> {
     use pipewire::spa::{
         param::{
             format::{FormatProperties, MediaSubtype, MediaType},
@@ -420,7 +492,7 @@ fn build_format_enum_pod() -> anyhow::Result<Vec<u8>> {
         std::io::Cursor::new(Vec::new()),
         &Value::Object(obj),
     )
-    .map_err(|e| anyhow::anyhow!("serialize EnumFormat pod: {e}"))?
+    .map_err(|e| anyhow::anyhow!("serialize legacy EnumFormat pod: {e}"))?
     .0
     .into_inner();
     Ok(bytes)
@@ -520,6 +592,11 @@ struct PwInner {
     diag_counters: Option<Arc<DiagCounters>>,
     negotiated_format: Option<CaptureFormat>,
     stream_paused: bool,
+    /// T-016a: most recent caller-supplied framerate hint for this session. `None`
+    /// means "use the format pod default" (currently 60 fps). Mirrored into
+    /// `DiagCounters::framerate_hint` once the PW thread is live so the cmd handler
+    /// can read it without re-locking `inner`.
+    framerate_hint: Option<u32>,
 }
 
 // ── PipeWireSource ────────────────────────────────────────────────────────────
@@ -552,6 +629,7 @@ impl PipeWireSource {
                 diag_counters: None,
                 negotiated_format: None,
                 stream_paused: false,
+                framerate_hint: None,
             })),
             session_counter: AtomicU32::new(0),
             stream_counter: AtomicU32::new(0),
@@ -584,6 +662,7 @@ impl PipeWireSource {
         inner.diag_counters = None;
         inner.negotiated_format = None;
         inner.stream_paused = false;
+        inner.framerate_hint = None;
         inner.phase = PwPhase::Idle;
     }
 
@@ -780,6 +859,7 @@ impl PipeWireSource {
         inner.pw_fd = Some(fd);
         inner.pw_node_id = Some(node_id);
         inner.portal_close_tx = Some(close_tx);
+        inner.framerate_hint = opts.framerate_hint.map(|fps| fps.clamp(1, 240));
         inner.phase = PwPhase::SessionRequested;
         info!(session_id, node_id, "portal session established");
         Ok(())
@@ -834,10 +914,18 @@ impl CaptureSource for PipeWireSource {
         let cmd_tx_thread = cmd_tx.clone();
 
         {
+            // T-016a: install the live cmd_tx + counters AND seed the framerate-hint
+            // atomic from `inner.framerate_hint` in the SAME critical section. This
+            // closes a startup race where a concurrent `set_framerate_hint` (which is
+            // allowed once `phase != Idle`) would see no counters/cmd_tx, persist its
+            // value into `inner.framerate_hint`, and never reach the PW thread.
             let mut inner = self.inner.lock().await;
             inner.pw_quit = Some(Arc::clone(&quit_flag));
             inner.pw_cmd_tx = Some(cmd_tx);
             inner.diag_counters = Some(Arc::clone(&counters));
+            counters
+                .framerate_hint
+                .store(inner.framerate_hint.unwrap_or(0), Ordering::Relaxed);
         }
 
         let counters_c = Arc::clone(&counters);
@@ -1073,12 +1161,22 @@ impl CaptureSource for PipeWireSource {
         Ok(())
     }
 
-    async fn set_framerate_hint(&self, _fps: u32) -> anyhow::Result<()> {
-        let inner = self.inner.lock().await;
+    async fn set_framerate_hint(&self, fps: u32) -> anyhow::Result<()> {
+        // T-016a: persist the clamped hint on `PwInner`, mirror it into the live
+        // `DiagCounters` atomic, and (when a PW stream is up) push a fresh format pod
+        // through `update_params` so the compositor sees the new default rate.
+        let mut inner = self.inner.lock().await;
         if inner.phase == PwPhase::Idle {
             anyhow::bail!("no active session");
         }
-        // TODO T-016a: forward to encoder framerate hint
+        let clamped = fps.clamp(1, 240);
+        inner.framerate_hint = Some(clamped);
+        if let Some(ref counters) = inner.diag_counters {
+            counters.framerate_hint.store(clamped, Ordering::Relaxed);
+        }
+        if let Some(ref tx) = inner.pw_cmd_tx {
+            let _ = tx.send(PwCommand::UpdateFramerate(clamped));
+        }
         Ok(())
     }
 
@@ -1648,14 +1746,40 @@ fn pw_thread_run(
         .register()
         .map_err(|e| anyhow::anyhow!("pw listener register: {e}"))?;
 
-    let values = build_format_enum_pod()?;
-    let mut params = [Pod::from_bytes(&values)
+    // T-016a: prefer the nonzero-rate pod whose default fraction is the (clamped)
+    // caller-supplied framerate hint. Fall back exactly once to the legacy permissive
+    // pod (default/min 0/1, max 240/1) if the compositor rejects the primary pod.
+    let primary_hint = {
+        let raw = counters.framerate_hint.load(Ordering::Relaxed);
+        if raw == 0 { None } else { Some(raw) }
+    };
+    let primary_bytes = build_format_enum_pod(primary_hint)?;
+    let mut primary_params = [Pod::from_bytes(&primary_bytes)
         .ok_or_else(|| anyhow::anyhow!("pod from_bytes failed"))?];
 
     let connect_flags = StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS;
-    stream
-        .connect(Direction::Input, Some(node_id), connect_flags, &mut params)
-        .map_err(|e| anyhow::anyhow!("pw stream connect: {e}"))?;
+    if let Err(e_primary) = stream.connect(
+        Direction::Input,
+        Some(node_id),
+        connect_flags,
+        &mut primary_params,
+    ) {
+        warn!(
+            "PW stream connect rejected nonzero-rate format pod ({e_primary}); retrying with legacy permissive pod"
+        );
+        let _ = stream.disconnect();
+        let legacy_bytes = build_format_enum_pod_legacy_permissive()?;
+        let mut legacy_params = [Pod::from_bytes(&legacy_bytes)
+            .ok_or_else(|| anyhow::anyhow!("legacy pod from_bytes failed"))?];
+        stream
+            .connect(
+                Direction::Input,
+                Some(node_id),
+                connect_flags,
+                &mut legacy_params,
+            )
+            .map_err(|e| anyhow::anyhow!("pw stream connect (legacy fallback): {e}"))?;
+    }
 
     let loop_ref = main_loop.loop_();
 
@@ -1704,7 +1828,11 @@ fn pw_thread_run(
                 }
                 info!("PW: DMA-BUF negotiation hard-failed; reconnecting with SHM-only fallback");
                 let _ = stream_cmd.disconnect();
-                match build_format_enum_pod() {
+                let retry_hint = {
+                    let raw = counters_cmd.framerate_hint.load(Ordering::Relaxed);
+                    if raw == 0 { None } else { Some(raw) }
+                };
+                match build_format_enum_pod(retry_hint) {
                     Ok(bytes) => match Pod::from_bytes(&bytes) {
                         Some(format_pod) => {
                             let mut retry_params = [format_pod];
@@ -1742,6 +1870,24 @@ fn pw_thread_run(
                             REASON_NO_ACCEPTABLE_BUFFER_TYPE,
                         );
                     }
+                }
+            }
+            // T-016a: live framerate-hint refresh. The async caller has already clamped
+            // `fps` to 1..=240 and updated `counters.framerate_hint`; here we rebuild
+            // the format pod and push it via `update_params` so the compositor sees the
+            // new default rate without a full session restart.
+            PwCommand::UpdateFramerate(fps) => {
+                counters_cmd.framerate_hint.store(fps, Ordering::Relaxed);
+                match build_format_enum_pod(Some(fps)) {
+                    Ok(bytes) => match Pod::from_bytes(&bytes) {
+                        Some(format_pod) => {
+                            let _ = stream_cmd.update_params(&mut [format_pod]);
+                        }
+                        None => warn!(
+                            "PW framerate update: rebuilt format pod failed validation"
+                        ),
+                    },
+                    Err(e) => warn!("PW framerate update: failed to rebuild format pod: {e}"),
                 }
             }
         }
@@ -2226,8 +2372,63 @@ mod tests {
     fn format_enum_pod_builds() {
         // The cmd handler rebuilds this pod for the SHM-only reconnect path; if
         // serialization broke we'd silently fall through to no-acceptable-buffer-type.
-        let bytes = build_format_enum_pod().expect("format enum pod serializes");
+        let bytes = build_format_enum_pod(None).expect("format enum pod serializes");
         assert!(!bytes.is_empty());
+    }
+
+    // ---- T-016a: framerate hint ------------------------------------------------
+
+    #[test]
+    fn format_enum_pod_default_matches_explicit_60() {
+        // `None` must produce the same pod as an explicit 60 fps hint. This pins the
+        // 60/1 default; any drift would silently change the format the compositor sees.
+        let default_bytes = build_format_enum_pod(None).expect("default pod serializes");
+        let explicit_bytes =
+            build_format_enum_pod(Some(60)).expect("explicit 60 pod serializes");
+        assert_eq!(
+            default_bytes, explicit_bytes,
+            "default hint must serialize identically to Some(60)"
+        );
+    }
+
+    #[test]
+    fn format_enum_pod_clamps_low_hint_to_one() {
+        // Hints below 1 fps are clamped up to 1 fps before they reach the pod.
+        let clamped = build_format_enum_pod(Some(0)).expect("clamp-low pod serializes");
+        let floor = build_format_enum_pod(Some(1)).expect("explicit 1 pod serializes");
+        assert_eq!(
+            clamped, floor,
+            "fps=0 must clamp to fps=1 (matches range floor 1/1)"
+        );
+    }
+
+    #[test]
+    fn format_enum_pod_clamps_high_hint_to_240() {
+        // Hints above 240 fps are clamped down to 240 fps before they reach the pod.
+        let clamped =
+            build_format_enum_pod(Some(9_999)).expect("clamp-high pod serializes");
+        let ceiling =
+            build_format_enum_pod(Some(240)).expect("explicit 240 pod serializes");
+        assert_eq!(
+            clamped, ceiling,
+            "fps=9999 must clamp to fps=240 (matches range ceiling 240/1)"
+        );
+    }
+
+    #[test]
+    fn legacy_permissive_pod_differs_from_default_60() {
+        // The legacy permissive fallback (default/min 0/1) must serialize cleanly and
+        // produce a different byte sequence from the new nonzero-rate default pod so
+        // that the connect-retry path actually sends different constraints.
+        let new_default =
+            build_format_enum_pod(None).expect("nonzero-rate default pod serializes");
+        let legacy =
+            build_format_enum_pod_legacy_permissive().expect("legacy pod serializes");
+        assert!(!legacy.is_empty(), "legacy permissive pod must be non-empty");
+        assert_ne!(
+            new_default, legacy,
+            "legacy permissive pod must differ from the nonzero-rate default pod"
+        );
     }
 
     #[test]
