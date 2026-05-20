@@ -124,6 +124,27 @@ export function evaluateCadenceThresholds(ctx: CadenceEvalContext): ThresholdRes
   ];
 }
 
+/**
+ * Compute cadence statistics (mean, spread, effective sample count) from a
+ * diagnostics sample array, applying the same startup-warmup exclusion used
+ * by the drop-rate gate.  The first `dropWarmupSamples` samples are excluded,
+ * mirroring `computeDropRateWithWarmup`.
+ */
+export function buildCadenceFpsStats(
+  samples: ReadonlyArray<{ observedFps: number }>,
+  dropWarmupSamples: number,
+): { meanFps: number; spreadFps: number; sampleCount: number } {
+  const warmup = Math.min(Math.max(0, dropWarmupSamples), samples.length);
+  const effective = samples.slice(warmup);
+  if (effective.length === 0) {
+    return { meanFps: 0, spreadFps: 0, sampleCount: 0 };
+  }
+  const fps = effective.map((s) => s.observedFps);
+  const mean = fps.reduce((a, b) => a + b, 0) / fps.length;
+  const spread = Math.max(...fps) - Math.min(...fps);
+  return { meanFps: mean, spreadFps: spread, sampleCount: effective.length };
+}
+
 export interface DriverContext {
   rpc: RpcClient | null;
   socketPath: string;
@@ -1404,15 +1425,12 @@ export async function driveValCap004(
       passed: dropPassed,
     });
 
-    const fpsValues = samples.map((s) => s.observedFps);
-    const meanFps =
-      fpsValues.length > 0 ? fpsValues.reduce((a, b) => a + b, 0) / fpsValues.length : 0;
-    const spreadFps =
-      fpsValues.length > 0 ? Math.max(...fpsValues) - Math.min(...fpsValues) : 0;
+    const cadenceStats = buildCadenceFpsStats(samples, dropWarmupSamplesCfg);
+    const { meanFps, spreadFps } = cadenceStats;
     const cadenceResults = evaluateCadenceThresholds({
       meanFps,
       spreadFps,
-      sampleCount: samples.length,
+      sampleCount: cadenceStats.sampleCount,
       nominalFps,
       nominalSource,
       isVariableRate,

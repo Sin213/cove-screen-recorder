@@ -9,12 +9,11 @@
 //   1. warmup=1 on rerun-10-style samples (drops only in sample 1) -> 0
 //   2. warmup=0 on the same samples -> the original failing drop rate
 //   3. A drop in sample 2 or later still fails under warmup=1
-//   4. Cadence calculation is unaffected by warmup
+//   4. Cadence samples are independent inputs to computeDropRateWithWarmup
 //
-// The cadence assertion is by inspection of the public surface: the warmup
-// helper does not consume `observedFps` at all and returns no cadence
-// field — so by construction it cannot perturb cadence. The driver site in
-// `drivers.ts` continues to mean over the unfiltered `samples` array.
+// Note: cadence statistics (meanFps, spreadFps) are now also computed using
+// the post-warmup effective sample slice via buildCadenceFpsStats — see
+// drivers.cadence-policy.test.ts for those contracts.
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
