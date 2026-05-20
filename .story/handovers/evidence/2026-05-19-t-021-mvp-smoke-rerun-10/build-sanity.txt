@@ -1,0 +1,14 @@
+=== cargo build -p cove-replay-engine --release ===
+(pre-existing NVENC warnings; release profile finished)
+
+=== cargo test -p cove-replay-engine -- --test-threads=1 ===
+Passed (all suites green)
+
+=== npm run typecheck ===
+OK
+
+=== npm run validate:build ===
+OK
+
+=== npm run build ===
+OK (vite + electron tsc)
