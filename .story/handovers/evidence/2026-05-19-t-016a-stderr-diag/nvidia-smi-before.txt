@@ -1,0 +1,50 @@
+Tue May 19 20:14:01 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.71.05              Driver Version: 595.71.05      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GeForce RTX 4080 ...    Off |   00000000:01:00.0  On |                  N/A |
+|  0%   47C    P2             50W /  320W |    4947MiB /  16376MiB |      1%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A            1205      G   /usr/lib/Xorg                            37MiB |
+|    0   N/A  N/A            1920      G   /usr/bin/ksecretd                         3MiB |
+|    0   N/A  N/A            1998      G   /usr/bin/kwin_wayland                    97MiB |
+|    0   N/A  N/A            2070      G   /usr/bin/Xwayland                        33MiB |
+|    0   N/A  N/A            2104      G   /usr/bin/ksmserver                        3MiB |
+|    0   N/A  N/A            2106      G   /usr/bin/kded6                            3MiB |
+|    0   N/A  N/A            2179      G   /usr/bin/kaccess                          3MiB |
+|    0   N/A  N/A            2180      G   ...it-kde-authentication-agent-1          3MiB |
+|    0   N/A  N/A            2272      G   /usr/bin/kdeconnectd                      3MiB |
+|    0   N/A  N/A            2320      G   /usr/bin/flameshot                        3MiB |
+|    0   N/A  N/A            2561      G   /usr/lib/xdg-desktop-portal-kde           3MiB |
+|    0   N/A  N/A            2636      G   /opt/Mullvad VPN/mullvad-gui             33MiB |
+|    0   N/A  N/A            2852      G   ...ess --variations-seed-version        102MiB |
+|    0   N/A  N/A            2861      G   /usr/bin/kwalletd6                        3MiB |
+|    0   N/A  N/A            3180      G   ...rack-uuid=3190708993808206286        103MiB |
+|    0   N/A  N/A            3335      G   /usr/lib/firefox/firefox                 10MiB |
+|    0   N/A  N/A            4768      G   /usr/lib/baloorunner                      3MiB |
+|    0   N/A  N/A            6150      G   /usr/bin/konsole                          3MiB |
+|    0   N/A  N/A            7620      G   /usr/bin/qbittorrent                      3MiB |
+|    0   N/A  N/A            9695    C+G   /usr/bin/mpv                            942MiB |
+|    0   N/A  N/A           12061      G   /usr/bin/konsole                          3MiB |
+|    0   N/A  N/A           35970      C   ...oder_session-21952dbce89e5c7b        254MiB |
+|    0   N/A  N/A           38484      C   ...oder_session-21952dbce89e5c7b        254MiB |
+|    0   N/A  N/A           40778      C   ...oder_session-21952dbce89e5c7b        254MiB |
+|    0   N/A  N/A           41265      G   /usr/bin/localsend                      155MiB |
+|    0   N/A  N/A           43592      C   ...oder_session-21952dbce89e5c7b        254MiB |
+|    0   N/A  N/A           62675      G   /usr/bin/plasmashell                    139MiB |
+|    0   N/A  N/A           82237    C+G   /usr/lib/vesktop/vesktop               1324MiB |
+|    0   N/A  N/A          137087      G   ...signal-desktop/signal-desktop        163MiB |
+|    0   N/A  N/A          137509      G   /usr/bin/dolphin                          3MiB |
+|    0   N/A  N/A          144188      G   /usr/bin/kate                             3MiB |
++-----------------------------------------------------------------------------------------+

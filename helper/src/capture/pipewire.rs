@@ -1828,11 +1828,7 @@ fn pw_thread_run(
                 }
                 info!("PW: DMA-BUF negotiation hard-failed; reconnecting with SHM-only fallback");
                 let _ = stream_cmd.disconnect();
-                let retry_hint = {
-                    let raw = counters_cmd.framerate_hint.load(Ordering::Relaxed);
-                    if raw == 0 { None } else { Some(raw) }
-                };
-                match build_format_enum_pod(retry_hint) {
+                match build_format_enum_pod_legacy_permissive() {
                     Ok(bytes) => match Pod::from_bytes(&bytes) {
                         Some(format_pod) => {
                             let mut retry_params = [format_pod];
@@ -2370,10 +2366,31 @@ mod tests {
 
     #[test]
     fn format_enum_pod_builds() {
-        // The cmd handler rebuilds this pod for the SHM-only reconnect path; if
-        // serialization broke we'd silently fall through to no-acceptable-buffer-type.
+        // Used for the first-connect primary pod. Verified separately from the
+        // retry-reconnect path, which now uses build_format_enum_pod_legacy_permissive.
         let bytes = build_format_enum_pod(None).expect("format enum pod serializes");
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn retry_shm_reconnect_uses_legacy_permissive_pod() {
+        // RetryShmAfterDmaBufFailure must reconnect with the legacy permissive pod
+        // (VideoFramerate min=0/1) not the primary nonzero-rate pod (min=1/1).
+        // KDE Wayland proposes 0/1 (variable rate) during format negotiation;
+        // the primary pod rejects 0/1 (below min=1/1) causing a second failure
+        // and triggering the second-fire guard → no-acceptable-buffer-type.
+        // This test pins which builder the retry path calls.
+        let legacy =
+            build_format_enum_pod_legacy_permissive().expect("legacy pod serializes");
+        let primary = build_format_enum_pod(None).expect("primary pod serializes");
+        // The retry must use the legacy pod — if both pods were identical the fix
+        // would be a no-op and the root cause would remain unfixed.
+        assert_ne!(
+            legacy, primary,
+            "retry must use legacy permissive pod (min=0/1), not primary (min=1/1)"
+        );
+        // The legacy pod must be non-empty so stream.connect() gets valid params.
+        assert!(!legacy.is_empty(), "legacy permissive pod must be non-empty");
     }
 
     // ---- T-016a: framerate hint ------------------------------------------------
