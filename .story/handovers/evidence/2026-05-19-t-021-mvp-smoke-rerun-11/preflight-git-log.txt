@@ -1,0 +1,8 @@
+b4bdb9f Handle VAL-CAP-004 startup drop warmup
+a519115 Record MVP smoke rerun 10 evidence
+803e402 Fix PipeWire SHM retry framerate fallback
+5bfacfa Record MVP smoke rerun 9 evidence
+b5db18b Implement PipeWire framerate hint
+bf6a339 Record MVP smoke rerun 8 evidence
+814034f Record MVP smoke rerun 7 evidence
+d5f39b0 Record MVP smoke rerun 6 evidence

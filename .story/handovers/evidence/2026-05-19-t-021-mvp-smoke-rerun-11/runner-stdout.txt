@@ -1,0 +1,13 @@
+
+Suite: smoke  |  Verdict: FAIL  |  2026-05-20T07:03:17.825Z
+  pass=1  fail=1  skip=2  error=0
+
+ID              Status    Class           Reason / Message
+--------------------------------------------------------------------------------
+VAL-PKG-001     skip      scripted-local  helper-not-available
+VAL-CAP-001     skip      manual          manual
+VAL-CAP-003     pass      scripted-local  Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+VAL-CAP-004     fail      scripted-local  Capture quality gates failed — see thresholds (key=1080p60-nvenc, samples=60)
+
+Stopped early at VAL-CAP-004 (first must-pass red).
+

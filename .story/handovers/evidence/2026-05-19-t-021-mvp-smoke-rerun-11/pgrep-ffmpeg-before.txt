@@ -1,0 +1,4 @@
+# Real ffmpeg processes
+
+# pgrep -af ffmpeg (filtered: exclude /bin/bash wrappers)
+(no matches)

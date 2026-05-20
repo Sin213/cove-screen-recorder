@@ -1,0 +1,4 @@
+# Real cove-replay-engine processes (excluding shell wrappers)
+
+# pgrep -af cove-replay-engine (filtered: exclude /bin/bash wrappers)
+(no matches)
