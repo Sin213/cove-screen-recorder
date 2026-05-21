@@ -1,0 +1,24 @@
+{
+  "jsonrpc": "2.0",
+  "method": "encoder.probeResult",
+  "params": {
+    "backends": [
+      {
+        "available": true,
+        "backend": "nvenc",
+        "codec": "h264",
+        "details": null
+      },
+      {
+        "available": false,
+        "backend": "libx264",
+        "codec": "h264",
+        "details": {
+          "follow_up_ticket": "T-017a",
+          "reason": "not-implemented-yet",
+          "slot": "libx264"
+        }
+      }
+    ]
+  }
+}

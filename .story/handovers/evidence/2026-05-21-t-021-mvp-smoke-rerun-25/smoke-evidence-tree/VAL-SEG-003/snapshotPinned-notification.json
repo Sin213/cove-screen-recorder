@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "replay.snapshotPinned",
+  "params": {
+    "bytes_pinned": 5529608,
+    "segments_count": 9,
+    "session_id": "pw-session-0000-694672-1779404178591",
+    "snapshot_id": "snap-1779404199074632455-0000"
+  }
+}

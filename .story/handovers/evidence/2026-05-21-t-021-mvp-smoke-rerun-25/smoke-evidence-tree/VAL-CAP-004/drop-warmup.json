@@ -1,0 +1,15 @@
+{
+  "rowDropWarmupSamples": 1,
+  "warmupSamples": 1,
+  "totalSamples": 60,
+  "effectiveSamples": 59,
+  "totalDropped": 0,
+  "dropWarmupExcludedDropped": 19,
+  "dropWarmupProduced": 62,
+  "dropEffectiveProduced": 3240,
+  "dropRate": 0,
+  "valid": true,
+  "thresholdKey": "1080p60-nvenc",
+  "maxDropRate": 0,
+  "passed": true
+}
