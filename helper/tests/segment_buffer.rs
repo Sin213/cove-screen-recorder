@@ -31,6 +31,7 @@ fn make_fragment(seq: u64, pts_90k: u64, duration_90k: u32, is_keyframe: bool) -
         duration_90k,
         is_keyframe,
         bytes,
+        diagnostics: Default::default(),
     }
 }
 

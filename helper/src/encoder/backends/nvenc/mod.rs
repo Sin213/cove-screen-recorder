@@ -21,7 +21,8 @@ use crate::capture::FrameHandle;
 use crate::encoder::backend::{
     EncoderBackend, EncoderCapabilities, EncoderConfig, EncoderError, ProbeOutcome,
 };
-use crate::encoder::fragment::EncodedFragment;
+use crate::encoder::fragment::{EncodedFragment, FragmentDiagnostics};
+use crate::encoder::h264::scan_nal_types;
 use crate::protocol::types::CaptureFormat;
 
 use ffi::*;
@@ -832,6 +833,13 @@ impl EncoderBackend for NvencBackend {
                 Vec::new()
             };
 
+            // Diagnostic-only: record NVENC pictureType and scan NAL types in
+            // the Annex-B AU. These values flow to SegmentDiagnosticsEvent
+            // (ISS-005 H1a vs H1b triage) and MUST NOT influence is_keyframe,
+            // segment-commit, or replay.save behaviour.
+            let picture_type_raw: u32 = lock_params.pictureType;
+            let nal_counts = scan_nal_types(&au_bytes);
+
             // Extract SPS/PPS from the first IDR frame if not yet captured.
             if sess.sps.is_none() {
                 if let Some((sps, pps)) = extract_sps_pps(&au_bytes) {
@@ -863,6 +871,10 @@ impl EncoderBackend for NvencBackend {
                 duration_90k: pf.duration_90k,
                 is_keyframe: pf.is_keyframe,
                 bytes: frag_bytes,
+                diagnostics: FragmentDiagnostics {
+                    nal_counts,
+                    picture_type: picture_type_raw,
+                },
             });
         }
 

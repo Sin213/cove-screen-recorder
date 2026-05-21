@@ -309,6 +309,16 @@ async fn run_session_task(
             pending_duration_90k: 45_000,
             pending_bytes: 50_000,
             last_keyframe_age_ms: 500,
+            // ISS-005 H1a/H1b sim values — plausible, diagnostic-only.
+            // NVENC NV_ENC_PIC_TYPE: P=0, B=1, I=2, IDR=3, BI=4 (raw u32).
+            // Even ticks simulate IDR (3); odd ticks simulate P (0).
+            last_fragment_idr_nal_count: if tick % 2 == 0 { 1 } else { 0 },
+            last_fragment_non_idr_slice_count: if tick % 2 == 0 { 0 } else { 1 },
+            last_fragment_sps_count: if tick % 2 == 0 { 1 } else { 0 },
+            last_fragment_pps_count: if tick % 2 == 0 { 1 } else { 0 },
+            last_fragment_sei_count: 0,
+            last_fragment_other_nal_count: 0,
+            last_fragment_picture_type: if tick % 2 == 0 { 3 } else { 0 },
         };
         let _ = notifier
             .notify("replay.segmentDiagnostics", serde_json::to_value(seg_diag).unwrap())

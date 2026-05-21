@@ -188,6 +188,7 @@ impl EncoderBackend for FakeBackend {
                     duration_90k: 1500,
                     is_keyframe: seq == 0,
                     bytes: vec![0u8; payload_size],
+                    diagnostics: Default::default(),
                 });
                 Ok(())
             }
@@ -882,6 +883,7 @@ async fn clean_stream_end_flushes_tail_fragment_from_backend() {
         duration_90k: 1500,
         is_keyframe: true,
         bytes: vec![0u8; 4096],
+        diagnostics: Default::default(),
     });
     let (_cfg_calls, td_calls, push_calls) = backend.counters();
     let (notifier, _notif_rx) = Notifier::new();
@@ -1002,6 +1004,7 @@ async fn final_drain_retries_sink_back_pressure_then_succeeds_at_eof() {
         duration_90k: 1500,
         is_keyframe: true,
         bytes: vec![0u8; 1024],
+        diagnostics: Default::default(),
     });
     let (notifier, _notif_rx) = Notifier::new();
     let (sink, accepted) = BackPressureNTimesSink::new(3); // reject 3 times then accept
@@ -1035,6 +1038,7 @@ async fn final_drain_unresolved_sink_back_pressure_becomes_runtime_error() {
         duration_90k: 1500,
         is_keyframe: true,
         bytes: vec![0u8; 128],
+        diagnostics: Default::default(),
     });
     let (_cfg_calls, td_calls, _push_calls) = backend.counters();
     let (notifier, mut notif_rx) = Notifier::new();
@@ -1128,6 +1132,7 @@ async fn final_drain_retries_backend_back_pressure_then_succeeds_at_eof() {
             duration_90k: 1500,
             is_keyframe: true,
             bytes: vec![0u8; 256],
+            diagnostics: Default::default(),
         }]),
     };
     let (notifier, _notif_rx) = Notifier::new();
@@ -1298,6 +1303,7 @@ async fn final_drain_succeeds_when_sink_accepts_on_last_allowed_iteration() {
         duration_90k: 1500,
         is_keyframe: true,
         bytes: vec![0u8; 256],
+        diagnostics: Default::default(),
     });
     let (notifier, _notif_rx) = Notifier::new();
     let (sink, accepted) = BackPressureNTimesSink::new(3);
@@ -1394,6 +1400,7 @@ async fn final_drain_succeeds_when_backend_emits_on_last_allowed_iteration() {
             duration_90k: 1500,
             is_keyframe: true,
             bytes: vec![0u8; 64],
+            diagnostics: Default::default(),
         }]),
     };
     let (notifier, _notif_rx) = Notifier::new();

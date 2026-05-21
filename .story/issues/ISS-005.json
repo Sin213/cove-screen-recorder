@@ -5,9 +5,14 @@
   ],
   "discoveredDate": "2026-05-20",
   "id": "ISS-005",
-  "impact": "replay.save fails with \"no committed segments available to pin\" — VAL-SEG-003 cannot pass. Full smoke suite blocks at this gate. Current diagnostics show fragments_received increasing but segments_committed remains 0 throughout the session. Cannot distinguish H1 (encoder only marks first frame as keyframe), H2 (duration_eligible never flips), or H3 (keyframes/duration present but commit predicate still does not fire) without additional diagnostic fields.",
+  "impact": "Rerun 14 confirmed H1 (keyframes_seen stays at 1). H1a vs H1b ambiguity remains: H1a = NVENC emits no periodic IDR NALs, H1b = NVENC emits IDRs but helper is_keyframe metadata is mismarked. Diagnostic pass adds H.264 NAL counts (idr/non_idr_slice/sps/pps/sei/other) + raw NVENC pictureType to SegmentDiagnosticsEvent so a smoke rerun distinguishes the two branches. NO behavior change in this pass — diagnostics-only, is_keyframe/commit predicate/replay.save all unchanged.",
   "location": [
-    "helper/src/segment/buffer.rs"
+    "helper/src/segment/buffer.rs",
+    "helper/src/encoder/backends/nvenc/mod.rs",
+    "helper/src/encoder/h264.rs",
+    "helper/src/encoder/fragment.rs",
+    "helper/src/protocol/events.rs",
+    "helper/src/sim/dispatch.rs"
   ],
   "phase": null,
   "relatedTickets": [

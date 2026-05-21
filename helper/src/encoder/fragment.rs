@@ -8,6 +8,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 
+use super::h264::NalCounts;
+
+/// Additive per-fragment diagnostic metadata for ISS-005 H1a/H1b triage.
+///
+/// Populated by encoder backends when available; defaults are zero, which
+/// means "not observed" and is safe for sinks that do not inspect it. This
+/// data MUST NOT drive any commit/keyframe/save behaviour.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FragmentDiagnostics {
+    pub nal_counts: NalCounts,
+    /// Raw NVENC `NV_ENC_LOCK_BITSTREAM_PARAMS.pictureType` value.
+    /// Encoder-specific u32; recorded only for diagnostics.
+    pub picture_type: u32,
+}
+
 /// One encoded fMP4 fragment (moof + mdat).  Wire format is opaque to the sink.
 #[derive(Debug, Clone)]
 pub struct EncodedFragment {
@@ -16,6 +31,9 @@ pub struct EncodedFragment {
     pub duration_90k: u32,
     pub is_keyframe: bool,
     pub bytes: Vec<u8>,
+    /// Additive diagnostic payload; defaults to zero counts / pictureType=0.
+    /// Does NOT participate in commit-predicate or keyframe-gate decisions.
+    pub diagnostics: FragmentDiagnostics,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +120,7 @@ mod tests {
             duration_90k: 1500,
             is_keyframe: true,
             bytes: vec![0u8; 1024],
+            diagnostics: FragmentDiagnostics::default(),
         })
         .await
         .unwrap();
@@ -111,6 +130,7 @@ mod tests {
             duration_90k: 1500,
             is_keyframe: false,
             bytes: vec![0u8; 2048],
+            diagnostics: FragmentDiagnostics::default(),
         })
         .await
         .unwrap();

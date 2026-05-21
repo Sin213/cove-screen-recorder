@@ -183,6 +183,15 @@ struct BufferInner {
     format_changed: bool,
     keyframes_seen: u64,
     last_keyframe_at: Option<Instant>,
+    // ISS-005 H1a/H1b diagnostics — latest fragment's NAL counts + pictureType.
+    // Recorded for emission only; do not gate commit predicate or keyframe flag.
+    last_fragment_idr_nal_count: u32,
+    last_fragment_non_idr_slice_count: u32,
+    last_fragment_sps_count: u32,
+    last_fragment_pps_count: u32,
+    last_fragment_sei_count: u32,
+    last_fragment_other_nal_count: u32,
+    last_fragment_picture_type: u32,
 }
 
 impl BufferInner {
@@ -313,6 +322,13 @@ impl BufferInner {
                 .last_keyframe_at
                 .map(|t| t.elapsed().as_millis() as u64)
                 .unwrap_or(u64::MAX),
+            last_fragment_idr_nal_count: self.last_fragment_idr_nal_count,
+            last_fragment_non_idr_slice_count: self.last_fragment_non_idr_slice_count,
+            last_fragment_sps_count: self.last_fragment_sps_count,
+            last_fragment_pps_count: self.last_fragment_pps_count,
+            last_fragment_sei_count: self.last_fragment_sei_count,
+            last_fragment_other_nal_count: self.last_fragment_other_nal_count,
+            last_fragment_picture_type: self.last_fragment_picture_type,
         };
         if let Ok(v) = serde_json::to_value(&evt) {
             let _ = self.notifier.try_notify("replay.segmentDiagnostics", v);
@@ -433,6 +449,13 @@ impl SegmentBuffer {
                 format_changed: false,
                 keyframes_seen: 0,
                 last_keyframe_at: None,
+                last_fragment_idr_nal_count: 0,
+                last_fragment_non_idr_slice_count: 0,
+                last_fragment_sps_count: 0,
+                last_fragment_pps_count: 0,
+                last_fragment_sei_count: 0,
+                last_fragment_other_nal_count: 0,
+                last_fragment_picture_type: 0,
             })),
             close_tx: Arc::new(watch::channel(false).0),
             closing: Arc::new(AtomicBool::new(false)),
@@ -628,6 +651,20 @@ impl FragmentSink for SegmentBuffer {
 
         inner.fragments_received += 1;
 
+        // ISS-005 H1a/H1b diagnostics — record the latest fragment's NAL
+        // counts + pictureType for emission on the next diagnostics tick.
+        // Recorded for every observed fragment so we can see whether NVENC
+        // emits periodic IDR NALs (or signals IDR via pictureType) even when
+        // is_keyframe is only flipped once. MUST NOT influence decisions.
+        let d = &fragment.diagnostics;
+        inner.last_fragment_idr_nal_count = d.nal_counts.idr;
+        inner.last_fragment_non_idr_slice_count = d.nal_counts.non_idr_slice;
+        inner.last_fragment_sps_count = d.nal_counts.sps;
+        inner.last_fragment_pps_count = d.nal_counts.pps;
+        inner.last_fragment_sei_count = d.nal_counts.sei;
+        inner.last_fragment_other_nal_count = d.nal_counts.other;
+        inner.last_fragment_picture_type = d.picture_type;
+
         if !inner.seen_first_keyframe {
             if fragment.is_keyframe {
                 inner.seen_first_keyframe = true;
@@ -686,7 +723,14 @@ mod tests {
         bytes.extend_from_slice(&mdat_size.to_be_bytes());
         bytes.extend_from_slice(b"mdat");
         bytes.extend_from_slice(&mdat_payload);
-        EncodedFragment { seq, pts_90k, duration_90k, is_keyframe, bytes }
+        EncodedFragment {
+            seq,
+            pts_90k,
+            duration_90k,
+            is_keyframe,
+            bytes,
+            diagnostics: Default::default(),
+        }
     }
 
     #[tokio::test]
@@ -1128,6 +1172,166 @@ mod tests {
             assert!(inner.last_keyframe_at.is_some());
         }
 
+        assert!(session_dir.join("00000000.mp4").exists());
+    }
+
+    // ── ISS-005 H1a/H1b diagnostic forwarding ────────────────────────────
+    //
+    // These two tests prove:
+    //   (1) the segment diagnostics surface forwards the LATEST observed
+    //       fragment's NAL counts + raw pictureType (additive fields only);
+    //   (2) the commit predicate is UNCHANGED — diagnostic payloads (even
+    //       ones shaped like an IDR) cannot trigger a commit on a fragment
+    //       whose `is_keyframe` flag is false.
+
+    use crate::encoder::fragment::FragmentDiagnostics;
+    use crate::encoder::h264::NalCounts;
+
+    fn make_fragment_with_diag(
+        seq: u64,
+        pts_90k: u64,
+        duration_90k: u32,
+        is_keyframe: bool,
+        diagnostics: FragmentDiagnostics,
+    ) -> EncodedFragment {
+        let mut f = make_fragment(seq, pts_90k, duration_90k, is_keyframe);
+        f.diagnostics = diagnostics;
+        f
+    }
+
+    #[tokio::test]
+    async fn diagnostics_forwards_latest_fragment_nal_counts_and_picture_type() {
+        let tmp = TempDir::new().unwrap();
+        let session_dir = tmp.path().join("session-iss005-fwd");
+        let config = SegmentBufferConfig {
+            target_duration_90k: 180_000,
+            ..Default::default()
+        };
+        let mut buf = SegmentBuffer::new(
+            "session-iss005-fwd".into(),
+            None,
+            &session_dir,
+            config,
+            test_notifier(),
+        )
+        .unwrap();
+
+        // First fragment: NVENC reports IDR with SPS/PPS bring-up + SEI.
+        let d_idr = FragmentDiagnostics {
+            nal_counts: NalCounts {
+                idr: 1,
+                non_idr_slice: 0,
+                sps: 1,
+                pps: 1,
+                sei: 1,
+                other: 0,
+            },
+            picture_type: 3, // raw NV_ENC_PIC_TYPE_IDR (P=0,B=1,I=2,IDR=3,BI=4)
+        };
+        buf.push(make_fragment_with_diag(0, 0, 45_000, true, d_idr))
+            .await
+            .unwrap();
+
+        {
+            let inner = buf.inner.lock().await;
+            assert_eq!(inner.last_fragment_idr_nal_count, 1);
+            assert_eq!(inner.last_fragment_non_idr_slice_count, 0);
+            assert_eq!(inner.last_fragment_sps_count, 1);
+            assert_eq!(inner.last_fragment_pps_count, 1);
+            assert_eq!(inner.last_fragment_sei_count, 1);
+            assert_eq!(inner.last_fragment_other_nal_count, 0);
+            assert_eq!(inner.last_fragment_picture_type, 3);
+        }
+
+        // Second fragment: non-IDR slice (P-frame), no parameter sets.
+        let d_p = FragmentDiagnostics {
+            nal_counts: NalCounts {
+                idr: 0,
+                non_idr_slice: 1,
+                sps: 0,
+                pps: 0,
+                sei: 0,
+                other: 0,
+            },
+            picture_type: 0, // raw NV_ENC_PIC_TYPE_P
+        };
+        buf.push(make_fragment_with_diag(1, 45_000, 45_000, false, d_p))
+            .await
+            .unwrap();
+
+        let inner = buf.inner.lock().await;
+        // Latest observed fragment was the P-frame — its values surface now.
+        assert_eq!(inner.last_fragment_idr_nal_count, 0);
+        assert_eq!(inner.last_fragment_non_idr_slice_count, 1);
+        assert_eq!(inner.last_fragment_sps_count, 0);
+        assert_eq!(inner.last_fragment_pps_count, 0);
+        assert_eq!(inner.last_fragment_sei_count, 0);
+        assert_eq!(inner.last_fragment_other_nal_count, 0);
+        assert_eq!(inner.last_fragment_picture_type, 0);
+    }
+
+    #[tokio::test]
+    async fn diagnostic_payload_does_not_change_commit_predicate() {
+        // Commit predicate is `is_keyframe && !pending.is_empty() &&
+        // duration_eligible`. A non-keyframe fragment carrying IDR-shaped
+        // diagnostic NAL counts MUST NOT cause a commit.
+        let tmp = TempDir::new().unwrap();
+        let session_dir = tmp.path().join("session-iss005-commit");
+        let config = SegmentBufferConfig {
+            target_duration_90k: 90_000,
+            ..Default::default()
+        };
+        let mut buf = SegmentBuffer::new(
+            "session-iss005-commit".into(),
+            None,
+            &session_dir,
+            config,
+            test_notifier(),
+        )
+        .unwrap();
+
+        // Real keyframe to flip seen_first_keyframe.
+        buf.push(make_fragment(0, 0, 45_000, true)).await.unwrap();
+
+        // Fragments past the duration target, carrying IDR-claiming
+        // diagnostics, but with is_keyframe=false. Must NOT commit.
+        let idr_diag = FragmentDiagnostics {
+            nal_counts: NalCounts {
+                idr: 1,
+                non_idr_slice: 0,
+                sps: 1,
+                pps: 1,
+                sei: 0,
+                other: 0,
+            },
+            picture_type: 3,
+        };
+        for seq in 1..=3u64 {
+            buf.push(make_fragment_with_diag(
+                seq,
+                seq * 45_000,
+                45_000,
+                false,
+                idr_diag,
+            ))
+            .await
+            .unwrap();
+        }
+
+        {
+            let inner = buf.inner.lock().await;
+            assert!(inner.duration_eligible, "duration target reached");
+            assert_eq!(inner.keyframes_seen, 1, "no new keyframe pushed yet");
+        }
+        assert!(
+            !session_dir.join("00000000.mp4").exists(),
+            "must not commit while is_keyframe stays false"
+        );
+
+        // Real keyframe — commit fires as before.
+        buf.push(make_fragment(4, 4 * 45_000, 45_000, true))
+            .await
+            .unwrap();
         assert!(session_dir.join("00000000.mp4").exists());
     }
 }

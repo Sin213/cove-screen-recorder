@@ -43,6 +43,7 @@
 pub mod backend;
 pub mod backends;
 pub mod fragment;
+pub mod h264;
 pub mod probe;
 // `session` consumes `crate::capture::FrameReceiver` and exercises the
 // `EncoderBackend::push_frame` / `drain` / `configure` methods, all of which

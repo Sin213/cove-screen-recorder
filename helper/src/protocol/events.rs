@@ -151,6 +151,14 @@ pub struct SegmentDiagnosticsEvent {
     pub pending_duration_90k: u64,
     pub pending_bytes: u64,
     pub last_keyframe_age_ms: u64,
+    // ISS-005 H1a/H1b diagnostics — additive, default-safe, do not gate behaviour.
+    pub last_fragment_idr_nal_count: u32,
+    pub last_fragment_non_idr_slice_count: u32,
+    pub last_fragment_sps_count: u32,
+    pub last_fragment_pps_count: u32,
+    pub last_fragment_sei_count: u32,
+    pub last_fragment_other_nal_count: u32,
+    pub last_fragment_picture_type: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
