@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "error": {
+    "code": -32600,
+    "message": "no committed segments available to pin"
+  }
+}

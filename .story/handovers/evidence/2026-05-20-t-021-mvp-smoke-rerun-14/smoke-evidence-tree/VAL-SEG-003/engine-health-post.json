@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "active_exports": 0,
+    "active_sessions": 0,
+    "active_snapshots": 0,
+    "diagnostics_dir": "",
+    "rolling_buffer_bytes": 0,
+    "state": "ready",
+    "uptime_ms": 31216
+  }
+}
