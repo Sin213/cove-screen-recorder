@@ -1,0 +1,7 @@
+Build: PASS (Finished in 0.11s)
+cargo test --lib: 91 passed
+cargo test encoder_session: 28 passed
+cargo test segment_buffer: 7 passed
+npm run typecheck: PASS
+npm run validate:build: PASS
+npm run build: PASS

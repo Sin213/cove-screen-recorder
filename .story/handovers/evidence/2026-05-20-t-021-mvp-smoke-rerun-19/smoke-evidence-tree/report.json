@@ -1,0 +1,361 @@
+{
+  "schema": "cove-validation-report/v1",
+  "suite": "smoke",
+  "startedAt": "2026-05-21T09:30:29.683Z",
+  "completedAt": "2026-05-21T09:34:40.947Z",
+  "rows": [
+    {
+      "id": "VAL-PKG-001",
+      "title": "coveApi.env.probe() returns clean result within 5 s",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "packaging",
+      "linkedSourceCase": "N-007",
+      "status": "skip",
+      "skipReason": "helper-not-available",
+      "message": "v2 helper IPC socket absent — start cove-replay-engine before running scripted-local rows."
+    },
+    {
+      "id": "VAL-CAP-001",
+      "title": "sessionReady event within 30 s of requestSession",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-CAP-003",
+      "title": "Portal denial emits captureError and leaves helper in IDLE",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "pass",
+      "message": "Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE",
+      "durationMs": 157,
+      "evidencePaths": {
+        "extra": {
+          "sessionLost": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-CAP-003/sessionLost-notification.json",
+          "engine-health": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-CAP-003/engine-health.json"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "capture.sessionLost notification received",
+          "observed": "received",
+          "required": "notification received",
+          "passed": true
+        },
+        {
+          "name": "sessionLost reason is portal-denied",
+          "observed": "portal-denied",
+          "required": "portal-denied",
+          "passed": true
+        },
+        {
+          "name": "helper state is ready (IDLE) after portal denial",
+          "observed": "ready",
+          "required": "ready",
+          "passed": true
+        },
+        {
+          "name": "response within budget",
+          "observed": 157,
+          "required": "<= 30000 ms",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "VAL-CAP-004",
+      "title": "1080p60 monitor capture 60 s L-MOTION-60 on NVENC — drop and cadence gates",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "pass",
+      "message": "Monitor capture passed drop+cadence gates (60 samples, key=1080p60-nvenc)",
+      "durationMs": 64629,
+      "evidencePaths": {
+        "extra": {
+          "env-probe": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-CAP-004/env-probe.json",
+          "capture-diagnostics": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-CAP-004/capture-diagnostics.json",
+          "thresholds": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-CAP-004/thresholds.json"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "capture cell matches declared (1920x1080)",
+          "observed": "1920x1080",
+          "required": "1920x1080",
+          "passed": true
+        },
+        {
+          "name": "drop rate <= 0 (1080p60-nvenc)",
+          "observed": "0.000000 (warmup=1, effectiveSamples=59, excludedDropped=17, dropEffectiveProduced=3206)",
+          "required": "<= 0",
+          "passed": true
+        },
+        {
+          "name": "cadence mean in variable-rate range [51.00..61.20] fps (nominal source=row-config)",
+          "observed": "54.339",
+          "required": "51.00..61.20",
+          "passed": true
+        },
+        {
+          "name": "cadence spread ≤ 6.0 fps (variable-rate compositor variance)",
+          "observed": "3.000",
+          "required": "≤ 6.0",
+          "passed": true
+        },
+        {
+          "name": "cadence mean within ±0.5% of 60.00 fps (nominal source=row-config, informational)",
+          "observed": "54.339",
+          "required": "59.70..60.30",
+          "passed": false,
+          "gating": false
+        },
+        {
+          "name": "at least 1 diagnostics sample received",
+          "observed": "60",
+          "required": ">= 1",
+          "passed": true
+        },
+        {
+          "name": "encoder.selected backend is nvenc",
+          "observed": "nvenc",
+          "required": "nvenc",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "VAL-CAP-006",
+      "title": "Minimised window captures 60 s without frame loss — Issue #3 proof",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "capture",
+      "linkedSourceCase": "N-003",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-UI-005",
+      "title": "Region overlay renders correctly and clips output — Issue #1 proof",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "ui-fsm",
+      "linkedSourceCase": null,
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-ENC-001",
+      "title": "NVENC positive probe result cached and reported via encoder.probeResult",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "encoder",
+      "linkedSourceCase": "N-004",
+      "status": "pass",
+      "message": "NVENC probe confirmed available via encoder.probeResult",
+      "durationMs": 3872,
+      "evidencePaths": {
+        "extra": {
+          "env-probe": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-ENC-001/env-probe.json",
+          "encoder-probe-result": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-ENC-001/encoder-probe-result.json",
+          "encoder-selected": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-ENC-001/encoder-selected.json"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "encoder.probeResult received",
+          "observed": "received",
+          "required": "notification received",
+          "passed": true
+        },
+        {
+          "name": "nvenc backend available in probeResult",
+          "observed": "nvenc available=true",
+          "required": "nvenc available=true",
+          "passed": true
+        },
+        {
+          "name": "encoder.selected backend is nvenc",
+          "observed": "nvenc",
+          "required": "nvenc",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "VAL-ENC-006",
+      "title": "encoder.selected visible in HUD and diagnostics after session start",
+      "classification": "manual",
+      "tier": "must-pass",
+      "ownerOnFail": "encoder",
+      "linkedSourceCase": "N-004",
+      "status": "skip",
+      "skipReason": "manual",
+      "message": "Operator-driven; record outcome via --ingest flag (not yet implemented)."
+    },
+    {
+      "id": "VAL-SEG-001",
+      "title": "Rolling 60 s window stays within configured disk budget during capture",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "rolling-buffer",
+      "linkedSourceCase": "N-005",
+      "status": "pass",
+      "message": "Segment buffer stayed within disk budget over 64 samples (max 0.01%)",
+      "durationMs": 68477,
+      "evidencePaths": {
+        "extra": {
+          "env-probe": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-001/env-probe.json",
+          "segment-diagnostics": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-001/segment-diagnostics.jsonl"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "replay.segmentDiagnostics samples collected",
+          "observed": 64,
+          "required": ">= 1",
+          "passed": true
+        },
+        {
+          "name": "full 65-second observation window elapsed",
+          "observed": "65 s",
+          "required": ">= 65 s",
+          "passed": true
+        },
+        {
+          "name": "buffer_bytes_pct_of_cap never exceeds 100%",
+          "observed": "0.01%",
+          "required": "<= 100% (no invalid samples)",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "VAL-SEG-003",
+      "title": "replay.save completes within latency gate while capture continues",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "rolling-buffer",
+      "linkedSourceCase": "N-005",
+      "status": "pass",
+      "message": "replay.save completed in 1 ms (gate: 2250 ms)",
+      "durationMs": 28040,
+      "evidencePaths": {
+        "extra": {
+          "env-probe": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-003/env-probe.json",
+          "save-response": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-003/save-response.json",
+          "save-latency": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-003/save-latency.json",
+          "diagnostics-during-save": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-003/diagnostics-during-save.jsonl",
+          "engine-health-post": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-SEG-003/engine-health-post.json"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "replay.save completed without error",
+          "observed": "ok",
+          "required": "no error",
+          "passed": true
+        },
+        {
+          "name": "replay.save latency within gate",
+          "observed": 1,
+          "required": "<= 2250 ms",
+          "passed": true
+        },
+        {
+          "name": "replay.snapshotPinned notification received",
+          "observed": "received",
+          "required": "notification received",
+          "passed": true
+        },
+        {
+          "name": "capture diagnostics received during/after save (capture not paused)",
+          "observed": 3,
+          "required": ">= 1",
+          "passed": true
+        },
+        {
+          "name": "active_snapshots is 0 after release",
+          "observed": 0,
+          "required": "0",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "VAL-EXP-001",
+      "title": "Fast stream-copy export of 60 s window completes and emits export.completed",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "export",
+      "linkedSourceCase": "N-006",
+      "status": "fail",
+      "message": "Export validation failed — see thresholds",
+      "durationMs": 81033,
+      "evidencePaths": {
+        "extra": {
+          "env-probe": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-EXP-001/env-probe.json",
+          "save-response": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-EXP-001/save-response.json",
+          "export-start-response": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-EXP-001/export-start-response.json",
+          "export-terminal-event": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-EXP-001/export-terminal-event.json",
+          "sha256-check": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T09-30-29-683Z/VAL-EXP-001/sha256-check.json"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "terminal event is export.completed",
+          "observed": "export.failed",
+          "required": "export.completed",
+          "passed": false
+        },
+        {
+          "name": "export file exists at final_path",
+          "observed": "not found",
+          "required": "file exists",
+          "passed": false
+        },
+        {
+          "name": "runner SHA256 matches helper SHA256",
+          "observed": "(not computed)",
+          "required": "(not provided)",
+          "passed": false
+        },
+        {
+          "name": "export.completed includes bytes field",
+          "observed": "(absent)",
+          "required": "non-null number",
+          "passed": false
+        },
+        {
+          "name": "no cove-replay-engine after shutdown",
+          "observed": "0",
+          "required": "0",
+          "passed": true
+        },
+        {
+          "name": "no ffmpeg after shutdown",
+          "observed": "0",
+          "required": "0",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "totalPass": 5,
+  "totalFail": 1,
+  "totalSkip": 5,
+  "totalError": 0,
+  "verdict": "fail",
+  "stoppedEarly": true,
+  "stoppedAtRow": "VAL-EXP-001"
+}
