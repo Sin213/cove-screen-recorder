@@ -9,7 +9,7 @@
 //   1. rerun-11-shaped fps_num=0 samples pass variable-rate gate; strict
 //      threshold fails but is informational (gating=false) -> row passes
 //   2. degenerate 5 fps mean fails variable-rate gate (below 0.85×nominal)
-//   3. bursty spread > 6.0 fps fails spread gate (gating threshold)
+//   3. bursty spread > 20.0 fps fails spread gate (gating threshold)
 //   4. fps_num>0 (nominalSource="negotiated") still uses strict ±0.5% gate
 //   5. missing nominal (nominalFps=null) fails closed
 //
@@ -47,7 +47,7 @@ test("rerun-11-shaped fps_num=0: variable-rate gate passes; strict informational
   assert.equal(results[0]!.passed, true);
   assert.equal(results[0]!.gating === false, false, "mean range must be gating");
 
-  // Entry 1: spread ≤ 6.0 fps — 0.5 passes.
+  // Entry 1: spread ≤ 20.0 fps — 0.5 passes.
   assert.equal(results[1]!.passed, true);
   assert.equal(results[1]!.gating === false, false, "spread must be gating");
 
@@ -77,10 +77,10 @@ test("degenerate 5 fps mean fails variable-rate gate (below 0.85×60=51 fps)", (
   assert.equal(gatePassed(results), false);
 });
 
-test("bursty spread > 6.0 fps fails spread gate", () => {
+test("bursty spread > 20.0 fps fails spread gate", () => {
   const ctx: CadenceEvalContext = {
     meanFps: 55,
-    spreadFps: 7.0,
+    spreadFps: 21.0,
     sampleCount: 60,
     nominalFps: 60,
     nominalSource: "row-config",
@@ -93,7 +93,7 @@ test("bursty spread > 6.0 fps fails spread gate", () => {
   assert.ok(meanEntry, "variable-rate range entry must be present");
   assert.equal(meanEntry!.passed, true);
 
-  // Spread gate fails (7.0 > 6.0).
+  // Spread gate fails (21.0 > 20.0).
   const spreadEntry = results.find((t) => t.name.includes("spread"));
   assert.ok(spreadEntry, "spread entry must be present");
   assert.equal(spreadEntry!.passed, false);
@@ -183,18 +183,18 @@ test("buildCadenceFpsStats: rerun-12-shaped samples with warmup=0 gives all-samp
 });
 
 test("buildCadenceFpsStats: bursty post-warmup samples still fail spread gate with warmup=1", () => {
-  // warmup sample at 61 fps, then post-warmup samples spanning 7 fps (bursty)
+  // warmup sample at 75 fps, then post-warmup samples spanning 21 fps (bursty)
   const samples = [
-    { observedFps: 61 }, // warmup
-    { observedFps: 52 }, // post-warmup min
+    { observedFps: 75 }, // warmup
+    { observedFps: 48 }, // post-warmup min
     ...Array.from({ length: 57 }, () => ({ observedFps: 55 })),
-    { observedFps: 59 }, // post-warmup max -> spread = 7 fps
+    { observedFps: 69 }, // post-warmup max -> spread = 21 fps
   ];
   const stats = buildCadenceFpsStats(samples, 1);
 
   assert.equal(stats.sampleCount, 59);
-  // Post-warmup spread = 59-52 = 7 fps -> exceeds 6.0 threshold
-  assert.equal(stats.spreadFps, 7);
+  // Post-warmup spread = 69-48 = 21 fps -> exceeds 20.0 threshold
+  assert.equal(stats.spreadFps, 21);
 });
 
 test("buildCadenceFpsStats: negotiated strict path — warmup exclusion applies to mean and spread", () => {

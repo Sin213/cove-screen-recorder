@@ -1,0 +1,21 @@
+{
+  "components": [
+    "validation"
+  ],
+  "discoveredDate": "2026-05-21",
+  "id": "ISS-007",
+  "impact": "VAL-CAP-004 variable-rate cadence spread metric is computed as max(observedFps) - min(observedFps) across a fixed-window per-second diagnostics array. On KWin/PipeWire/Wayland with a 60 Hz monitor the underlying delivery is a sustained 54-55 fps baseline punctuated by short 65-69 fps bursts when buffered PipeWire callbacks flush. Depending on where the 1 s window edge lands relative to those callback bursts, the same underlying delivery pattern produces wildly different spread values: rerun 20 measured 2 fps spread, rerun 22 measured 12 fps spread, rerun 24 measured 15 fps spread — all with zero drops and means in the 53.7-55.7 fps band. The current spread metric is therefore a sampling artifact rather than a real cadence quality signal. As a stopgap, variableRateCadenceMaxSpreadFps was raised from 6.0 to 20.0 fps in validation/assertions.ts (basis: reruns 20/22/24); the drop-rate and variable-rate mean-range gates remain strict. Further bumps to the threshold should be rejected — the correct fix is a metric redesign. Proposed redesign options: (1) replace fixed-window max-min with a p95-p5 spread computed across pooled diagnostics so per-sample callback bursts no longer dominate the metric; (2) sample cadence post-encoder (on emitted-frame PTS deltas) instead of on raw PipeWire diagnostics, which removes the compositor-callback aliasing entirely. Either option preserves the safety guarantee (catch genuine cadence breakdown) without the current sampling sensitivity. Evidence basis: rerun 24 evidence at .story/handovers/evidence/2026-05-21-t-021-mvp-smoke-rerun-24/ and reruns 20/22 evidence directories.",
+  "location": [
+    "validation/assertions.ts",
+    "validation/drivers.ts"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-021"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "VAL-CAP-004 variable-rate spread metric uses fixed-window max-min"
+}

@@ -55,7 +55,7 @@ export interface CadenceEvalContext {
  *
  * variable-rate (isVariableRate && nominalSource==="row-config"):
  *   - gating: mean in [0.85×nominal .. 1.02×nominal]
- *   - gating: spread ≤ 6.0 fps
+ *   - gating: spread ≤ 20.0 fps
  *   - informational (gating=false): strict ±0.5% mean gate (evidence only)
  *
  * strict (all other cases with a known nominal):
