@@ -32,6 +32,29 @@ use ffi::*;
 /// Width × height alignment required by NVENC (16-pixel macroblocks).
 fn align16(v: u32) -> u32 { (v + 15) & !15 }
 
+/// Returns a nominal fps_num for use when PipeWire reports variable-rate (fps_num == 0).
+/// Variable-rate PipeWire streams use 60 fps as the nominal cadence for gop_size and
+/// NVENC frameRateNum; real frame timing comes from pts_ns in push_frame.
+fn nominal_fps_num(fps_num: u32) -> u32 {
+    if fps_num == 0 { 60 } else { fps_num }
+}
+
+/// Convert a nanosecond capture timestamp to 90 kHz ticks.
+/// Clamps negative values to 0. Uses i128 intermediate to avoid overflow.
+fn ns_to_pts_90k(pts_ns: i64) -> u64 {
+    if pts_ns <= 0 {
+        return 0;
+    }
+    let ticks = (pts_ns as i128 * 90_000_i128) / 1_000_000_000_i128;
+    ticks.min(u64::MAX as i128) as u64
+}
+
+/// Enforce monotonic PTS. Returns `candidate` if it strictly advances past `last`,
+/// otherwise returns `last + 1` (saturating) so muxed fragments never repeat or regress.
+fn next_monotonic_pts(candidate: u64, last: u64) -> u64 {
+    if candidate > last { candidate } else { last.saturating_add(1) }
+}
+
 // ── Active encode session state ───────────────────────────────────────────────
 
 struct EncodeSession {
@@ -49,7 +72,8 @@ struct EncodeSession {
 
     /// Sequence number incremented per drained fragment.
     seq: u64,
-    /// DTS in 90 kHz ticks accumulated across frames.
+    /// Last monotonic real PipeWire PTS in 90 kHz ticks (not a fake accumulator).
+    /// Updated each push_frame call; used by next_monotonic_pts to enforce forward progress.
     dts_90k: u64,
 
     /// SPS and PPS extracted from the first encoder output (IDR frame).
@@ -586,7 +610,9 @@ impl EncoderBackend for NvencBackend {
 
         let enc_width = align16(cfg.format.width);
         let enc_height = align16(cfg.format.height);
-        let fps_num = cfg.format.fps_num.max(1);
+        // Use nominal_fps_num so a variable-rate PipeWire stream (fps_num=0) configures
+        // NVENC at 60/1 instead of 1/1, giving a correct GOP size and rate hint.
+        let fps_num = nominal_fps_num(cfg.format.fps_num);
         let fps_den = cfg.format.fps_den.max(1);
         let gop_size = ((fps_num as f32 / fps_den as f32) * cfg.gop_seconds).round() as u32;
 
@@ -763,10 +789,14 @@ impl EncoderBackend for NvencBackend {
         let encode_pic: FnNvEncEncodePicture = unsafe {
             std::mem::transmute(sess.fn_list.nvEncEncodePicture)
         };
-        let fps_num = sess.cfg.format.fps_num.max(1);
+        // nominal fps for duration: 60/1 → 1500 ticks; variable-rate PipeWire (fps_num=0)
+        // gets 60 fps nominal so duration is realistic even when the stream has no declared rate.
+        let fps_num = nominal_fps_num(sess.cfg.format.fps_num);
         let fps_den = sess.cfg.format.fps_den.max(1);
-        let duration_90k = ((90000 * fps_den) / fps_num) as u32;
-        let pts_90k = sess.dts_90k;
+        let duration_90k = ((90_000 * fps_den) / fps_num) as u32;
+        // Drive PTS from the real capture timestamp rather than the accumulated fake counter.
+        let candidate = ns_to_pts_90k(frame.pts_ns);
+        let pts_90k = next_monotonic_pts(candidate, sess.dts_90k);
 
         // ISS-005 phase 1: force a real periodic IDR every `gop_size` frames so
         // the rolling-buffer commit predicate can fire more than once. The old
@@ -809,7 +839,9 @@ impl EncoderBackend for NvencBackend {
             pts_90k,
             duration_90k,
         });
-        sess.dts_90k += duration_90k as u64;
+        // Track the last monotonic real PipeWire PTS in 90k ticks so the next
+        // frame's next_monotonic_pts call can enforce forward progress.
+        sess.dts_90k = pts_90k;
         sess.frame_count += 1;
         Ok(())
     }
@@ -969,3 +1001,65 @@ fn find_nal_end(data: &[u8], from: usize) -> Option<usize> {
 // the loaded libraries.  The session is never shared across threads.
 unsafe impl Send for NvencBackend {}
 unsafe impl Sync for NvencBackend {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nominal_fps_num_uses_60_for_variable_rate() {
+        assert_eq!(nominal_fps_num(0), 60);
+    }
+
+    #[test]
+    fn nominal_fps_num_passthrough_for_nonzero() {
+        assert_eq!(nominal_fps_num(30), 30);
+        assert_eq!(nominal_fps_num(60), 60);
+        assert_eq!(nominal_fps_num(120), 120);
+    }
+
+    #[test]
+    fn ns_to_pts_90k_converts_one_second_to_90000() {
+        assert_eq!(ns_to_pts_90k(1_000_000_000), 90_000);
+    }
+
+    #[test]
+    fn ns_to_pts_90k_clamps_negative_to_zero() {
+        assert_eq!(ns_to_pts_90k(-1), 0);
+        assert_eq!(ns_to_pts_90k(i64::MIN), 0);
+    }
+
+    #[test]
+    fn next_monotonic_pts_accepts_forward_candidate() {
+        assert_eq!(next_monotonic_pts(1000, 500), 1000);
+        assert_eq!(next_monotonic_pts(1, 0), 1);
+    }
+
+    #[test]
+    fn next_monotonic_pts_advances_when_candidate_repeats_or_goes_backward() {
+        // Same as last → advance by 1
+        assert_eq!(next_monotonic_pts(500, 500), 501);
+        // Behind last → advance by 1
+        assert_eq!(next_monotonic_pts(100, 500), 501);
+        // Saturating on u64::MAX
+        assert_eq!(next_monotonic_pts(0, u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn variable_rate_produces_correct_duration_and_pts_from_ns() {
+        // fps_num=0, fps_den=1 → nominal 60/1 → duration_90k = 90000*1/60 = 1500
+        let fps_num = nominal_fps_num(0);
+        let fps_den = 1u32;
+        let duration_90k = (90_000 * fps_den / fps_num) as u32;
+        assert_eq!(duration_90k, 1500);
+
+        // Two frames 16.667 ms apart → ~1500 ticks apart
+        let pts0 = ns_to_pts_90k(0);
+        let pts1 = ns_to_pts_90k(16_666_667);
+        // First frame: candidate == last (both 0) → monotonic enforcer bumps to 1
+        let r0 = next_monotonic_pts(pts0, 0);
+        assert_eq!(r0, 1);
+        // 16.667 ms ≈ 1499–1500 ticks (integer division)
+        assert!(pts1 >= 1499 && pts1 <= 1501, "pts1={pts1}");
+    }
+}
