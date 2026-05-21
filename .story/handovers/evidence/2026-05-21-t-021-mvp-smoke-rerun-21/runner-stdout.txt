@@ -1,0 +1,21 @@
+
+Suite: smoke  |  Verdict: FAIL  |  2026-05-21T18:48:01.076Z
+  pass=2  fail=1  skip=9  error=0
+
+ID              Status    Class           Reason / Message
+--------------------------------------------------------------------------------
+VAL-PKG-001     skip      scripted-local  helper-not-available
+VAL-CAP-001     skip      manual          manual
+VAL-CAP-003     pass      scripted-local  Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+VAL-CAP-004     skip      scripted-local  helper-not-available
+VAL-CAP-006     skip      manual          manual
+VAL-UI-005      skip      manual          manual
+VAL-ENC-001     skip      scripted-local  helper-not-available
+VAL-ENC-006     skip      manual          manual
+VAL-SEG-001     skip      scripted-local  helper-not-available
+VAL-SEG-003     skip      scripted-local  helper-not-available
+VAL-EXP-001     pass      scripted-local  Export completed: 565857 bytes, SHA256 verified, 60 s window (30.00 s actual)
+VAL-EXP-010     fail      scripted-local  PTS/cadence assertion failed — cadence mean ±0.5% of nominal; cadence p95 ±2.0% of nominal; cadence p99 ±5.0% of nominal; frame count within ±1 of round(duration × fps)
+
+Stopped early at VAL-EXP-010 (first must-pass red).
+
