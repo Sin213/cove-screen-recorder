@@ -1,0 +1,578 @@
+=== Build/Test Sanity ===
+
+### cargo build -p cove-replay-engine --release ###
+   Compiling cove-replay-engine v0.1.0 (/home/sin/Projects/cove-screen-recorder/helper)
+warning: unreachable expression
+   --> helper/src/export/mod.rs:102:5
+    |
+ 87 | /     match std::fs::hard_link(old, new) {
+ 88 | |         Ok(()) => {
+ 89 | |             let _ = std::fs::remove_file(old); // best-effort; new is already committed
+ 90 | |             return Ok(());
+...   |
+100 | |         Err(_) => return Err(std::io::Error::from_raw_os_error(libc::EOPNOTSUPP)),
+101 | |     }
+    | |_____- any code following this `match` expression is unreachable, as all arms diverge
+102 |       unreachable!()
+    |       ^^^^^^^^^^^^^^ unreachable expression
+    |
+    = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `cuda_lib`
+   --> helper/src/encoder/backends/nvenc/mod.rs:444:14
+    |
+444 |         let (cuda_lib, cu_init, cu_device_get_count, cu_device_get, cu_ctx_create, cu_ctx_destroy) =
+    |              ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cuda_lib`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `gop_size`
+   --> helper/src/encoder/backends/nvenc/mod.rs:582:13
+    |
+582 |         let gop_size = ((fps_num as f32 / fps_den as f32) * cfg.gop_seconds).round() as u32;
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gop_size`
+
+warning: structure field `encodeGUID` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:129:5
+    |
+129 |     encodeGUID: GUID,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `encode_guid`
+    |
+    = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: structure field `presetGUID` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:130:5
+    |
+130 |     presetGUID: GUID,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `preset_guid`
+
+warning: structure field `encodeWidth` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:131:5
+    |
+131 |     encodeWidth: u32,
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `encode_width`
+
+warning: structure field `encodeHeight` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:132:5
+    |
+132 |     encodeHeight: u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `encode_height`
+
+warning: structure field `darWidth` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:133:5
+    |
+133 |     darWidth: u32,
+    |     ^^^^^^^^ help: convert the identifier to snake case: `dar_width`
+
+warning: structure field `darHeight` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:134:5
+    |
+134 |     darHeight: u32,
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `dar_height`
+
+warning: structure field `frameRateNum` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:135:5
+    |
+135 |     frameRateNum: u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `frame_rate_num`
+
+warning: structure field `frameRateDen` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:136:5
+    |
+136 |     frameRateDen: u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `frame_rate_den`
+
+warning: structure field `enableEncodeAsync` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:137:5
+    |
+137 |     enableEncodeAsync: u32,
+    |     ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `enable_encode_async`
+
+warning: structure field `enablePTD` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:138:5
+    |
+138 |     enablePTD: u32,
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `enable_ptd`
+
+warning: structure field `privDataSize` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:144:5
+    |
+144 |     privDataSize: u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `priv_data_size`
+
+warning: structure field `privData` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:145:5
+    |
+145 |     privData: *mut c_void,
+    |     ^^^^^^^^ help: convert the identifier to snake case: `priv_data`
+
+warning: structure field `encodeConfig` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:146:5
+    |
+146 |     encodeConfig: *mut c_void, // NV_ENC_CONFIG*
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `encode_config`
+
+warning: structure field `maxEncodeWidth` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:147:5
+    |
+147 |     maxEncodeWidth: u32,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `max_encode_width`
+
+warning: structure field `maxEncodeHeight` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:148:5
+    |
+148 |     maxEncodeHeight: u32,
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `max_encode_height`
+
+warning: structure field `maxMEHintCountsPerBlockRow` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:149:5
+    |
+149 |     maxMEHintCountsPerBlockRow: [u32; 8],
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `max_mehint_counts_per_block_row`
+
+warning: structure field `tuningInfo` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:150:5
+    |
+150 |     tuningInfo: u32,   // NV_ENC_TUNING_INFO
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `tuning_info`
+
+warning: structure field `bufferFormat` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:151:5
+    |
+151 |     bufferFormat: u32, // NV_ENC_BUFFER_FORMAT
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `buffer_format`
+
+warning: structure field `memoryHeap` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:162:5
+    |
+162 |     memoryHeap: u32,   // NV_ENC_MEMORY_HEAP (deprecated but still required)
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `memory_heap`
+
+warning: structure field `bufferFmt` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:163:5
+    |
+163 |     bufferFmt: u32,
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `buffer_fmt`
+
+warning: structure field `inputBuffer` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:165:5
+    |
+165 |     inputBuffer: *mut c_void,  // out: NV_ENC_INPUT_PTR
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `input_buffer`
+
+warning: structure field `pSysMemBuffer` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:166:5
+    |
+166 |     pSysMemBuffer: *mut c_void,
+    |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `p_sys_mem_buffer`
+
+warning: structure field `memoryHeap` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:176:5
+    |
+176 |     memoryHeap: u32, // reserved / deprecated
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `memory_heap`
+
+warning: structure field `bitstreamBuffer` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:178:5
+    |
+178 |     bitstreamBuffer: *mut c_void, // out: NV_ENC_OUTPUT_PTR
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `bitstream_buffer`
+
+warning: structure field `bitstreamBufferPtr` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:179:5
+    |
+179 |     bitstreamBufferPtr: *mut c_void,
+    |     ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `bitstream_buffer_ptr`
+
+warning: structure field `inputWidth` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:188:5
+    |
+188 |     inputWidth: u32,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `input_width`
+
+warning: structure field `inputHeight` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:189:5
+    |
+189 |     inputHeight: u32,
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `input_height`
+
+warning: structure field `inputPitch` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:190:5
+    |
+190 |     inputPitch: u32,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `input_pitch`
+
+warning: structure field `encodePicFlags` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:191:5
+    |
+191 |     encodePicFlags: u32,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `encode_pic_flags`
+
+warning: structure field `frameIdx` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:192:5
+    |
+192 |     frameIdx: u32,
+    |     ^^^^^^^^ help: convert the identifier to snake case: `frame_idx`
+
+warning: structure field `inputTimeStamp` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:193:5
+    |
+193 |     inputTimeStamp: u64,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `input_time_stamp`
+
+warning: structure field `inputDuration` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:194:5
+    |
+194 |     inputDuration: u64,
+    |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `input_duration`
+
+warning: structure field `inputBuffer` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:195:5
+    |
+195 |     inputBuffer: *mut c_void,  // NV_ENC_INPUT_PTR
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `input_buffer`
+
+warning: structure field `outputBitstream` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:196:5
+    |
+196 |     outputBitstream: *mut c_void, // NV_ENC_OUTPUT_PTR
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `output_bitstream`
+
+warning: structure field `completionEvent` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:197:5
+    |
+197 |     completionEvent: *mut c_void,
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `completion_event`
+
+warning: structure field `bufferFmt` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:198:5
+    |
+198 |     bufferFmt: u32,       // NV_ENC_BUFFER_FORMAT — added in SDK 12.x
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `buffer_fmt`
+
+warning: structure field `pictureStruct` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:199:5
+    |
+199 |     pictureStruct: u32,
+    |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `picture_struct`
+
+warning: structure field `pictureType` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:200:5
+    |
+200 |     pictureType: u32, // NV_ENC_PIC_TYPE — 0 = auto
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `picture_type`
+
+warning: structure field `codecPicParams` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:201:5
+    |
+201 |     codecPicParams: [u8; 1024], // NV_ENC_CODEC_PIC_PARAMS union: uint32_t reserved[256] = 1024 bytes
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `codec_pic_params`
+
+warning: structure field `meHintCountsPerBlock` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:202:5
+    |
+202 |     meHintCountsPerBlock: [u8; 32], // NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE[2]: 16 bytes each
+    |     ^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `me_hint_counts_per_block`
+
+warning: structure field `meExternalHints` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:203:5
+    |
+203 |     meExternalHints: *mut c_void,
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `me_external_hints`
+
+warning: structure field `qpDeltaMap` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:206:5
+    |
+206 |     qpDeltaMap: *mut i8,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `qp_delta_map`
+
+warning: structure field `qpDeltaMapSize` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:207:5
+    |
+207 |     qpDeltaMapSize: u32,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `qp_delta_map_size`
+
+warning: structure field `reservedBitFields` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:208:5
+    |
+208 |     reservedBitFields: u32,
+    |     ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `reserved_bit_fields`
+
+warning: structure field `meHintRefPicDist` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:209:5
+    |
+209 |     meHintRefPicDist: [u16; 2],
+    |     ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `me_hint_ref_pic_dist`
+
+warning: structure field `reservedBitFields2` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:210:5
+    |
+210 |     reservedBitFields2: u32,
+    |     ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `reserved_bit_fields2`
+
+warning: structure field `outputBitstream` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:220:5
+    |
+220 |     outputBitstream: *mut c_void,
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `output_bitstream`
+
+warning: structure field `sliceOffsets` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:221:5
+    |
+221 |     sliceOffsets: *mut u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `slice_offsets`
+
+warning: structure field `frameIdx` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:222:5
+    |
+222 |     frameIdx: u32,
+    |     ^^^^^^^^ help: convert the identifier to snake case: `frame_idx`
+
+warning: structure field `hwEncodeStatus` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:223:5
+    |
+223 |     hwEncodeStatus: u32,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `hw_encode_status`
+
+warning: structure field `numSlices` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:224:5
+    |
+224 |     numSlices: u32,
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `num_slices`
+
+warning: structure field `bitstreamSizeInBytes` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:225:5
+    |
+225 |     bitstreamSizeInBytes: u32,
+    |     ^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `bitstream_size_in_bytes`
+
+warning: structure field `outputTimeStamp` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:226:5
+    |
+226 |     outputTimeStamp: u64,
+    |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `output_time_stamp`
+
+warning: structure field `outputDuration` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:227:5
+    |
+227 |     outputDuration: u64,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `output_duration`
+
+warning: structure field `bitstreamBufferPtr` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:228:5
+    |
+228 |     bitstreamBufferPtr: *mut c_void, // out
+    |     ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `bitstream_buffer_ptr`
+
+warning: structure field `pictureType` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:229:5
+    |
+229 |     pictureType: u32,
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `picture_type`
+
+warning: structure field `pictureStruct` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:230:5
+    |
+230 |     pictureStruct: u32,
+    |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `picture_struct`
+
+warning: structure field `frameAvgQP` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:231:5
+    |
+231 |     frameAvgQP: u32,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `frame_avg_qp`
+
+warning: structure field `frameSatd` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:232:5
+    |
+232 |     frameSatd: u32,
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `frame_satd`
+
+warning: structure field `ltrFrameIdx` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:233:5
+    |
+233 |     ltrFrameIdx: u32,
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `ltr_frame_idx`
+
+warning: structure field `ltrFrameBitmap` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:234:5
+    |
+234 |     ltrFrameBitmap: u32,
+    |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `ltr_frame_bitmap`
+
+warning: structure field `intraMBCount` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:236:5
+    |
+236 |     intraMBCount: u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `intra_mbcount`
+
+warning: structure field `interMBCount` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:237:5
+    |
+237 |     interMBCount: u32,
+    |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `inter_mbcount`
+
+warning: structure field `averageMVX` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:238:5
+    |
+238 |     averageMVX: i32,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `average_mvx`
+
+warning: structure field `averageMVY` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:239:5
+    |
+239 |     averageMVY: i32,
+    |     ^^^^^^^^^^ help: convert the identifier to snake case: `average_mvy`
+
+warning: structure field `doNotWait` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:294:5
+    |
+294 |     doNotWait: u32,
+    |     ^^^^^^^^^ help: convert the identifier to snake case: `do_not_wait`
+
+warning: structure field `inputBuffer` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:296:5
+    |
+296 |     inputBuffer: *mut c_void,
+    |     ^^^^^^^^^^^ help: convert the identifier to snake case: `input_buffer`
+
+warning: structure field `bufferDataPtr` should have a snake case name
+   --> helper/src/encoder/backends/nvenc/mod.rs:298:5
+    |
+298 |     bufferDataPtr: *mut c_void,
+    |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `buffer_data_ptr`
+
+warning: `cove-replay-engine` (lib) generated 71 warnings (run `cargo fix --lib -p cove-replay-engine` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 9.33s
+build exit=0
+
+### cargo test -p cove-replay-engine --lib ###
+test segment::buffer::tests::closed_buffer_rejects_push ... ok
+test segment::buffer::tests::diagnostics_event_includes_keyframe_metrics ... ok
+test segment::buffer::tests::diagnostics_forwards_latest_fragment_nal_counts_and_picture_type ... ok
+test segment::buffer::tests::commits_deferred_to_next_keyframe_after_duration ... ok
+test segment::buffer::tests::diagnostic_payload_does_not_change_commit_predicate ... ok
+test segment::buffer::tests::commits_on_keyframe_after_duration_eligible ... ok
+test segment::buffer::tests::scene_cut_keyframe_before_duration_does_not_commit ... ok
+test segment::buffer::tests::stream_id_propagated_to_buffer ... ok
+test segment::recovery::tests::scan_handles_nonexistent_root ... ok
+test segment::buffer::tests::pre_keyframe_only_stream_produces_no_segments ... ok
+test segment::recovery::tests::scan_removes_empty_session_dirs ... ok
+test segment::recovery::tests::scan_detects_init_segment ... ok
+test segment::recovery::tests::discard_removes_session_dir ... ok
+test segment::buffer::tests::set_init_segment_persists_init_mp4 ... ok
+test segment::recovery::tests::scan_discovers_committed_segments ... ok
+test segment::buffer::tests::diagnostics_event_after_commit_resets_pending ... ok
+test segment::recovery::tests::scan_reports_missing_init_segment ... ok
+test segment::recovery::tests::scan_removes_orphan_files_not_in_manifest ... ok
+test segment::buffer::tests::eviction_respects_window ... ok
+test transport::server::tests::private_socket_dir_created_with_0700 ... ok
+test segment::buffer::tests::format_change_resets_duration_eligible ... ok
+test transport::server::tests::remove_own_socket_removes_matching_socket ... ok
+test transport::server::tests::remove_own_socket_skips_replacement_socket ... ok
+test transport::server::tests::socket_dir_non_0700_rejected ... ok
+test segment::buffer::tests::pre_keyframe_fragments_are_dropped ... ok
+test transport::server::tests::socket_dir_0700_existing_accepted ... ok
+test transport::server::tests::socket_dir_world_writable_rejected ... ok
+test segment::writer::tests::remove_is_idempotent ... ok
+test segment::writer::tests::commit_creates_final_file_not_partial ... ok
+test transport::server::tests::unlink_if_identity_matches_handles_already_gone ... ok
+test segment::writer::tests::discard_partials_removes_only_partial_files ... ok
+test transport::server::tests::unlink_if_identity_matches_removes_same_socket ... ok
+test segment::buffer::tests::finalize_commits_tail_segment ... ok
+test transport::server::tests::socket_lock_is_exclusive ... ok
+test transport::server::tests::unlink_if_identity_matches_skips_replacement_socket ... ok
+test segment::buffer::tests::format_change_resets_keyframe_gate ... ok
+test segment::buffer::tests::pinning_prevents_eviction ... ok
+
+test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+lib-tests exit=0
+
+### cargo test -p cove-replay-engine --test encoder_session ###
+test clean_stream_end_with_drain_runtime_error_emits_runtime_event ... ok
+test final_drain_flushes_fragments_held_from_mid_session_sink_back_pressure ... ok
+test finalize_failure_surfaces_runtime_error_on_clean_eof ... ok
+test mid_session_sink_back_pressure_holds_fragments_for_retry ... ok
+test fragments_flow_through_sink ... ok
+test final_drain_succeeds_when_backend_emits_on_last_allowed_iteration ... ok
+test final_drain_unresolved_sink_back_pressure_becomes_runtime_error ... ok
+test final_drain_retries_backend_back_pressure_then_succeeds_at_eof ... ok
+test final_drain_succeeds_when_sink_accepts_on_last_allowed_iteration ... ok
+test final_drain_retries_sink_back_pressure_then_succeeds_at_eof ... ok
+test happy_path_runs_to_completion_and_tears_down ... ok
+test mid_session_pending_fragments_cap_emits_runtime_error ... ok
+test release_token_fires_for_every_frame_consumed ... ok
+test release_token_fires_after_runtime_error_for_remaining_frames ... ok
+test runtime_error_drains_already_buffered_frames_before_returning ... ok
+test runtime_error_returns_promptly_without_waiting_for_sender_drop ... ok
+test runtime_error_ends_session_emits_event_and_tears_down ... ok
+test push_frame_runtime_cleanup_completes_even_when_notifier_is_saturated ... ok
+test advisory_telemetry_does_not_stall_encode_loop_with_saturated_notifier ... ok
+test back_pressure_fires_once_per_sustained_window ... ok
+test diagnostics_fires_when_period_elapses ... ok
+test nvenc_one_frame_shm_encode_produces_fmp4_fragment ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+encoder_session exit=0
+
+### cargo test -p cove-replay-engine --test segment_buffer ###
+    |
+241 |     buf.notify_format_change().await;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this `Result` may be an `Err` variant, which should be handled
+    = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default
+help: use `let _ = ...` to ignore the resulting value
+    |
+241 |     let _ = buf.notify_format_change().await;
+    |     +++++++
+
+warning: `cove-replay-engine` (test "segment_buffer") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running tests/segment_buffer.rs (target/debug/deps/segment_buffer-ccb0425c4d6cdb7a)
+
+running 6 tests
+test resolve_segments_root_returns_valid_path ... ok
+test format_change_forces_new_segment ... ok
+test recovery_scan_finds_prior_sessions ... ok
+test disk_full_produces_session_lost ... ok
+test pin_snapshot_and_release ... ok
+test end_to_end_capture_produces_segments ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+segment_buffer exit=0
+
+### npm run typecheck ###
+
+> cove-screen-recorder@1.1.0 typecheck
+> tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.validation.json --noEmit
+
+typecheck exit=0
+
+### npm run validate:build ###
+
+> cove-screen-recorder@1.1.0 validate:build
+> tsc -p tsconfig.validation.json
+
+validate-build exit=0
+
+### npm run build ###
+(node:403768) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/sin/Projects/cove-screen-recorder/postcss.config.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/sin/Projects/cove-screen-recorder/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ 53 modules transformed.
+rendering chunks...
+computing gzip size...
+../dist/index.html                   1.04 kB │ gzip:  0.53 kB
+../dist/assets/index-Boy1UxXX.css   30.64 kB │ gzip:  6.79 kB
+../dist/assets/index-iv7Y1lCF.js   209.00 kB │ gzip: 64.45 kB
+✓ built in 754ms
+
+> cove-screen-recorder@1.1.0 build:electron
+> tsc -p tsconfig.electron.json
+
+build exit=0
