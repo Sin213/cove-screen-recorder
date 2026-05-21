@@ -1,0 +1,186 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "codec": "h264",
+    "discontinuity_at_pts_90k": [],
+    "framerate_hint": 0,
+    "has_discontinuity": false,
+    "height": 1080,
+    "init_segment_bytes": 0,
+    "init_segment_path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/init.mp4",
+    "segments": [
+      {
+        "byte_size": 27469,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 538,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000538.mp4",
+        "pts_end_90k": 97020000,
+        "pts_start_90k": 96840000
+      },
+      {
+        "byte_size": 28905,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 539,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000539.mp4",
+        "pts_end_90k": 97200000,
+        "pts_start_90k": 97020000
+      },
+      {
+        "byte_size": 28949,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 540,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000540.mp4",
+        "pts_end_90k": 97380000,
+        "pts_start_90k": 97200000
+      },
+      {
+        "byte_size": 28779,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 541,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000541.mp4",
+        "pts_end_90k": 97560000,
+        "pts_start_90k": 97380000
+      },
+      {
+        "byte_size": 29359,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 542,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000542.mp4",
+        "pts_end_90k": 97740000,
+        "pts_start_90k": 97560000
+      },
+      {
+        "byte_size": 28955,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 543,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000543.mp4",
+        "pts_end_90k": 97920000,
+        "pts_start_90k": 97740000
+      },
+      {
+        "byte_size": 27942,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 544,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000544.mp4",
+        "pts_end_90k": 98100000,
+        "pts_start_90k": 97920000
+      },
+      {
+        "byte_size": 27718,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 545,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000545.mp4",
+        "pts_end_90k": 98280000,
+        "pts_start_90k": 98100000
+      },
+      {
+        "byte_size": 31776,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 546,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000546.mp4",
+        "pts_end_90k": 98460000,
+        "pts_start_90k": 98280000
+      },
+      {
+        "byte_size": 26464,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 547,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000547.mp4",
+        "pts_end_90k": 98640000,
+        "pts_start_90k": 98460000
+      },
+      {
+        "byte_size": 27467,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 548,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000548.mp4",
+        "pts_end_90k": 98820000,
+        "pts_start_90k": 98640000
+      },
+      {
+        "byte_size": 27173,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 549,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000549.mp4",
+        "pts_end_90k": 99000000,
+        "pts_start_90k": 98820000
+      },
+      {
+        "byte_size": 27311,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 550,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000550.mp4",
+        "pts_end_90k": 99180000,
+        "pts_start_90k": 99000000
+      },
+      {
+        "byte_size": 27003,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 551,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000551.mp4",
+        "pts_end_90k": 99360000,
+        "pts_start_90k": 99180000
+      },
+      {
+        "byte_size": 26400,
+        "discontinuity": false,
+        "duration_90k": 180000,
+        "fragment_count": 2,
+        "index": 552,
+        "is_keyframe_first": true,
+        "path": "/run/user/1000/cove-screen-recorder/segments/pw-session-0000-447871-1779336055245/00000552.mp4",
+        "pts_end_90k": 99540000,
+        "pts_start_90k": 99360000
+      }
+    ],
+    "session_id": "pw-session-0000-447871-1779336055245",
+    "snapshot_id": "snap-1779336075753631962-0000",
+    "timescale": 90000,
+    "trim_end_pts_90k": 99540000,
+    "trim_start_pts_90k": 96840000,
+    "width": 1920
+  }
+}

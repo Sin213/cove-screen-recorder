@@ -1,0 +1,10 @@
+{
+  "method": "export.failed",
+  "params": {
+    "details": "exit code: Some(254)",
+    "diagnostics_path": "",
+    "export_id": "exp-1779336150642625860-0001",
+    "reason_code": "ffmpeg-nonzero-exit",
+    "stage": "copy"
+  }
+}

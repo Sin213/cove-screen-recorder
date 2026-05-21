@@ -1,0 +1,14 @@
+[runner] Helper socket not found — all scripted-local rows will skip.
+[runner] VAL-PKG-001: skip (helper-not-available)
+[runner] VAL-CAP-001: skip (manual)
+[runner] VAL-CAP-003: pass — Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+[runner] VAL-CAP-004: pass — Monitor capture passed drop+cadence gates (60 samples, key=1080p60-nvenc)
+[runner] VAL-CAP-006: skip (manual)
+[runner] VAL-UI-005: skip (manual)
+[runner] VAL-ENC-001: pass — NVENC probe confirmed available via encoder.probeResult
+[runner] VAL-ENC-006: skip (manual)
+[runner] VAL-SEG-001: pass — Segment buffer stayed within disk budget over 64 samples (max 0.01%)
+[runner] VAL-SEG-003: pass — replay.save completed in 1 ms (gate: 2250 ms)
+[runner] VAL-EXP-001: fail — Export validation failed — see thresholds
+[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779336160732.json
+[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T03-58-14-880Z/report.json
