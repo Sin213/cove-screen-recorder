@@ -902,7 +902,7 @@ async fn run_export(
     let diag_path_str = diag_path.to_string_lossy().into_owned();
     {
         let argv_str = format!(
-            "ffmpeg -y -i {} -c copy -movflags +faststart -progress pipe:1 {}",
+            "ffmpeg -y -i {} -c copy -movflags +faststart -progress pipe:1 -f mp4 {}",
             concat_input,
             tmp_path.to_str().unwrap_or("<tmp>"),
         );
@@ -975,6 +975,8 @@ async fn run_export(
         "+faststart",
         "-progress",
         "pipe:1",
+        "-f",
+        "mp4",
     ])
     .arg(tmp_path.to_str().unwrap_or("/dev/null"))
     .stdout(std::process::Stdio::piped())
