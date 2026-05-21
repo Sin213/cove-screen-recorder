@@ -249,6 +249,134 @@ async fn format_change_forces_new_segment() {
     assert!(session_dir.join("00000001.mp4").exists());
 }
 
+/// ISS-005 phase 2 — cumulative IDR observability is diagnostic-only.
+///
+/// Proves:
+///   - `idr_nal_count_total` increments per fragment whose
+///     `diagnostics.nal_counts.idr > 0`.
+///   - `picture_type_idr_count_total` increments per fragment whose
+///     `diagnostics.picture_type == NV_ENC_PIC_TYPE_IDR (3)`.
+///   - Fragments with all-zero IDR diagnostics do NOT increment either counter.
+///   - A fragment with `is_keyframe = false` cannot trigger a segment commit
+///     no matter how IDR-shaped its diagnostics are — the commit predicate
+///     still gates on the bitstream-derived `is_keyframe` flag (ISS-005 phase 1).
+#[tokio::test]
+async fn cumulative_idr_counters_track_diagnostics_without_committing() {
+    use cove_replay_engine::encoder::fragment::FragmentDiagnostics;
+    use cove_replay_engine::encoder::h264::NalCounts;
+
+    let tmp = TempDir::new().unwrap();
+    let session_dir = tmp.path().join("iss005-cumul");
+    let config = SegmentBufferConfig {
+        target_duration_90k: 180_000,
+        ..Default::default()
+    };
+
+    // Custom notifier so we can inspect the SegmentDiagnosticsEvent payload.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);
+    let notifier = Notifier::from_sender(tx);
+
+    let mut buf = SegmentBuffer::new(
+        "iss005-cumul".into(),
+        None,
+        &session_dir,
+        config,
+        notifier,
+    )
+    .unwrap();
+
+    // 1) Real keyframe with IDR-shaped diagnostics — flips seen_first_keyframe,
+    //    pending grows by 45_000 90k ticks (< target).
+    let idr_diag = FragmentDiagnostics {
+        nal_counts: NalCounts {
+            idr: 1,
+            non_idr_slice: 0,
+            sps: 1,
+            pps: 1,
+            sei: 0,
+            other: 0,
+        },
+        picture_type: 3, // NV_ENC_PIC_TYPE_IDR
+    };
+    let mut idr_kf = make_fragment(0, 0, 45_000, true);
+    idr_kf.diagnostics = idr_diag;
+    buf.push(idr_kf).await.unwrap();
+
+    // 2) Non-IDR fragment (all-zero diagnostics) — counters MUST stay flat.
+    let mut non_idr_p = make_fragment(1, 45_000, 45_000, false);
+    non_idr_p.diagnostics = FragmentDiagnostics::default();
+    buf.push(non_idr_p).await.unwrap();
+
+    // 3) Non-keyframe fragment with IDR-shaped diagnostics — counters MUST
+    //    increment, but commit predicate (gated on `is_keyframe`) MUST NOT
+    //    fire. This is the load-bearing assertion that diagnostic counters
+    //    cannot influence the commit pipeline.
+    let mut non_kf_with_idr_diag = make_fragment(2, 90_000, 45_000, false);
+    non_kf_with_idr_diag.diagnostics = idr_diag;
+    buf.push(non_kf_with_idr_diag).await.unwrap();
+
+    // Wait past the 1Hz diagnostic gate so the next push emits.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    // 4) Final keyframe (with IDR diag) triggers emit_diagnostics on push.
+    //    Pending duration is 4 × 45_000 = 180_000 = target, so duration_eligible
+    //    will flip AFTER this push. Commit predicate ran BEFORE this push when
+    //    pending was 135_000 < target, so committed_segments must still be empty.
+    let mut idr_kf2 = make_fragment(3, 135_000, 45_000, true);
+    idr_kf2.diagnostics = idr_diag;
+    buf.push(idr_kf2).await.unwrap();
+
+    // Drain notifications; find the most recent segmentDiagnostics event.
+    let mut events: Vec<serde_json::Value> = Vec::new();
+    while let Ok(bytes) = rx.try_recv() {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            events.push(v);
+        }
+    }
+    let diag_params = events
+        .iter()
+        .filter_map(|v| {
+            let method = v.get("method")?.as_str()?;
+            if method != "replay.segmentDiagnostics" {
+                return None;
+            }
+            v.get("params").cloned()
+        })
+        .last()
+        .expect("at least one replay.segmentDiagnostics event after 1.1s sleep + push");
+
+    // 3 IDR-shaped fragments pushed (seq 0, 2, 3) → counters at 3.
+    // 1 non-IDR fragment pushed (seq 1) → no increment.
+    assert_eq!(
+        diag_params["idr_nal_count_total"].as_u64(),
+        Some(3),
+        "idr_nal_count_total should equal the count of IDR-shaped fragments (3), got {diag_params:?}",
+    );
+    assert_eq!(
+        diag_params["picture_type_idr_count_total"].as_u64(),
+        Some(3),
+        "picture_type_idr_count_total should equal the count of IDR-picture-type fragments (3), got {diag_params:?}",
+    );
+
+    // Only the two `is_keyframe=true` fragments incremented `keyframes_seen`.
+    // The non-keyframe fragment with IDR-shaped diagnostics (seq 2) MUST NOT
+    // count as a keyframe.
+    assert_eq!(
+        diag_params["keyframes_seen"].as_u64(),
+        Some(2),
+        "keyframes_seen must come from is_keyframe flag, not diagnostics counters",
+    );
+
+    // Commit predicate gates on `fragment.is_keyframe`. The non-kf-with-IDR-diag
+    // fragment (seq 2) cannot trigger a commit, and the final keyframe (seq 3)
+    // pushed while duration_eligible was still false also cannot. Therefore
+    // committed_segments must remain empty.
+    assert!(
+        buf.committed_segments().await.is_empty(),
+        "diagnostic IDR counters MUST NOT influence the segment commit predicate"
+    );
+}
+
 #[tokio::test]
 async fn resolve_segments_root_returns_valid_path() {
     let root = resolve_segments_root();

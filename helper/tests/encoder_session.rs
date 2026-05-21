@@ -1589,6 +1589,19 @@ async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
         b"moof",
         "first box in fragment must be moof"
     );
+    // ISS-005 phase 1: emitted `is_keyframe` is now derived from the Annex-B
+    // bitstream (nal_counts.idr > 0), not the encoder-side input intent. The
+    // session-start frame is forced via FORCEIDR (frame_count % gop_size == 0),
+    // so the first emitted fragment must carry a real IDR NAL.
+    assert!(
+        frag.is_keyframe,
+        "first emitted fragment must be a keyframe — FORCEIDR at frame 0 should produce IDR NAL"
+    );
+    assert!(
+        frag.diagnostics.nal_counts.idr > 0,
+        "first emitted fragment must contain at least one IDR NAL — got idr={}",
+        frag.diagnostics.nal_counts.idr
+    );
 
     // init_segment() should be available after the first IDR frame was drained.
     match backend.init_segment() {
@@ -1599,6 +1612,141 @@ async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
         None => {
             eprintln!("init_segment() returned None — SPS/PPS not extracted yet (acceptable if IDR was not in first fragment)");
         }
+    }
+
+    backend.teardown().await.expect("teardown must succeed");
+}
+
+// ── Real NVENC GOP-boundary IDR cadence (ISS-005 phase 1) ────────────────────
+
+/// Push `gop_size + 1` SHM frames through the real NVENC backend and verify
+/// that NVENC emits *periodic* IDRs at the cadence implied by
+/// `cfg.gop_seconds`, not just a single session-start IDR.
+///
+/// Specifically:
+///
+/// - At least two emitted fragments carry `is_keyframe = true`.
+/// - The IDR fragments land near frame 0 and frame `gop_size`, with a ±1
+///   tolerance to accommodate any internal NVENC buffering / preset behaviour.
+/// - `is_keyframe` is derived from the bitstream (`nal_counts.idr > 0`), so a
+///   `true` here is direct evidence of a real IDR NAL — not encoder-side intent.
+///
+/// This is the load-bearing assertion for the ISS-005 H1a fix: if it passes,
+/// FORCEIDR actually produces IDR-typed NALs on this driver/preset. If it
+/// fails, the fix must escalate to `encodeConfig` (Candidate A) and the
+/// segmenter still cannot commit. The test is hardware-gated and skips
+/// cleanly when NVENC is unavailable.
+#[tokio::test]
+async fn nvenc_periodic_idr_at_gop_boundary() {
+    use cove_replay_engine::encoder::backend::{EncoderBackend, EncoderConfig, ProbeOutcome};
+    use cove_replay_engine::encoder::backends::NvencBackend;
+
+    std::env::remove_var("COVE_NVENC_FORCE_UNAVAILABLE");
+
+    // Use the same gop_size formula production uses, but pick a small GOP so
+    // the test stays fast on hardware. fps=30, gop_seconds=0.5 → gop_size=15.
+    let fmt = CaptureFormat {
+        width: 320,
+        height: 240,
+        fps_num: 30,
+        fps_den: 1,
+        fourcc: "NV12".into(),
+        modifier: None,
+        color_primaries: None,
+        transfer: None,
+        range: None,
+    };
+    let gop_seconds: f32 = 0.5;
+    let gop_size: u32 = ((fmt.fps_num as f32 / fmt.fps_den as f32) * gop_seconds).round() as u32;
+    assert!(gop_size >= 2, "test pre-condition: gop_size must be >= 2");
+
+    let probe_backend = NvencBackend::new();
+    match probe_backend.probe(&fmt).await {
+        ProbeOutcome::Unavailable { reason, .. } => {
+            eprintln!(
+                "NVENC unavailable ({reason}); skipping periodic-IDR GOP-boundary test"
+            );
+            return;
+        }
+        ProbeOutcome::Available { .. } => {}
+    }
+
+    let mut backend = NvencBackend::new();
+    let cfg = EncoderConfig {
+        format: fmt.clone(),
+        target_bitrate_bps: 2_000_000,
+        gop_seconds,
+    };
+    backend.configure(cfg).await.expect("configure must succeed");
+
+    // 320x240 NV12 = w*h + w*h/2 = 115_200 bytes.
+    let frame_size = (fmt.width * fmt.height * 3 / 2) as usize;
+    let total_frames: u64 = gop_size as u64 + 1;
+    for i in 0..total_frames {
+        let frame = cove_replay_engine::capture::FrameHandle {
+            seq: i + 1,
+            pts_ns: (i as i64) * 33_333_333,
+            payload: FramePayload::Shm {
+                data: vec![0x80u8; frame_size],
+                width: fmt.width,
+                height: fmt.height,
+                format: 0x3231564e, // fourcc NV12
+                stride: fmt.width,
+            },
+            cursor: None,
+            release: ReleaseToken::noop(),
+        };
+        backend
+            .push_frame(frame)
+            .await
+            .unwrap_or_else(|e| panic!("push_frame {i} must succeed: {e:?}"));
+    }
+
+    let fragments = backend.drain().await.expect("drain must succeed");
+    assert_eq!(
+        fragments.len() as u64,
+        total_frames,
+        "drain must return one fragment per pushed frame"
+    );
+
+    // Collect the indices (frame numbers) of fragments flagged as keyframes by
+    // the bitstream-derived `is_keyframe` (nal_counts.idr > 0).
+    let keyframe_indices: Vec<usize> = fragments
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.is_keyframe)
+        .map(|(i, _)| i)
+        .collect();
+
+    assert!(
+        keyframe_indices.len() >= 2,
+        "expected at least two periodic IDRs over {total_frames} frames (gop_size={gop_size}); \
+         got keyframe indices {keyframe_indices:?}. \
+         If this fails, NVENC is ignoring FORCEIDR on this driver/preset and the fix must \
+         escalate to encodeConfig.gopLength / NV_ENC_CONFIG (Candidate A) per the ISS-005 plan."
+    );
+
+    // Expect one near frame 0 and one near frame `gop_size`, ±1 tolerance.
+    let near_zero = keyframe_indices.iter().any(|&i| i <= 1);
+    let near_gop = keyframe_indices
+        .iter()
+        .any(|&i| (i as i64 - gop_size as i64).abs() <= 1);
+    assert!(
+        near_zero,
+        "expected an IDR fragment near frame 0; keyframe indices: {keyframe_indices:?}"
+    );
+    assert!(
+        near_gop,
+        "expected an IDR fragment near frame gop_size={gop_size}; keyframe indices: {keyframe_indices:?}"
+    );
+
+    // Sanity: every keyframe-flagged fragment must actually have nal_counts.idr > 0.
+    for &idx in &keyframe_indices {
+        let f = &fragments[idx];
+        assert!(
+            f.diagnostics.nal_counts.idr > 0,
+            "fragment {idx} flagged is_keyframe but nal_counts.idr = 0"
+        );
     }
 
     backend.teardown().await.expect("teardown must succeed");

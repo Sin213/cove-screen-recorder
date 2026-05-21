@@ -159,6 +159,11 @@ pub struct SegmentDiagnosticsEvent {
     pub last_fragment_sei_count: u32,
     pub last_fragment_other_nal_count: u32,
     pub last_fragment_picture_type: u32,
+    // ISS-005 phase 2 — cumulative IDR observability (additive, diagnostic-only).
+    // Increments per fragment in the rolling buffer's push path; never gates
+    // commit, seen_first_keyframe, or replay.save.
+    pub idr_nal_count_total: u64,
+    pub picture_type_idr_count_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

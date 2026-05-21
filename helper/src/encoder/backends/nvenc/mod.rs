@@ -62,6 +62,16 @@ struct EncodeSession {
     /// Width / height actually configured in the encoder (aligned).
     enc_width: u32,
     enc_height: u32,
+
+    /// IDR cadence in frames. Derived from `fps * cfg.gop_seconds`, clamped to
+    /// `>= 1`. ISS-005 phase 1: `push_frame` ORs `NV_ENC_PIC_FLAG_FORCEIDR` into
+    /// `encodePicFlags` whenever `frame_count % gop_size == 0` so NVENC emits
+    /// real periodic IDRs instead of a session-start-only IDR.
+    gop_size: u32,
+
+    /// Count of frames submitted to NVENC. Drives only the FORCEIDR cadence;
+    /// independent of `seq` (drained fragments) and `dts_90k` (90 kHz wall-time).
+    frame_count: u64,
 }
 
 struct PendingFrame {
@@ -69,7 +79,6 @@ struct PendingFrame {
     output_buf: *mut c_void,  // NV_ENC_OUTPUT_PTR
     pts_90k: u64,
     duration_90k: u32,
-    is_keyframe: bool,
 }
 
 // ── NVENC structures needed for configure / push_frame / drain ────────────────
@@ -77,8 +86,8 @@ struct PendingFrame {
 /// NV_ENC_PIC_STRUCT
 const NV_ENC_PIC_STRUCT_FRAME: u32 = 1;
 
-/// NV_ENC_PIC_FLAGS
-const NV_ENC_PIC_FLAG_FORCEINTRA: u32 = 0x1;
+/// NV_ENC_PIC_FLAGS — see SDK 12.x `nvEncodeAPI.h`.
+const NV_ENC_PIC_FLAG_FORCEIDR: u32 = 0x2;
 
 /// NV_ENC_CODEC_H264_GUID — bytes confirmed via nvEncGetEncodeGUIDs at runtime
 /// (driver 595.71.05 / RTX 4080 SUPER).
@@ -621,6 +630,8 @@ impl EncoderBackend for NvencBackend {
             pending_frames: Vec::new(),
             enc_width,
             enc_height,
+            gop_size: gop_size.max(1),
+            frame_count: 0,
         }));
 
         Ok(())
@@ -756,7 +767,13 @@ impl EncoderBackend for NvencBackend {
         let fps_den = sess.cfg.format.fps_den.max(1);
         let duration_90k = ((90000 * fps_den) / fps_num) as u32;
         let pts_90k = sess.dts_90k;
-        let is_keyframe = sess.pending_frames.is_empty() && sess.sps.is_none();
+
+        // ISS-005 phase 1: force a real periodic IDR every `gop_size` frames so
+        // the rolling-buffer commit predicate can fire more than once. The old
+        // "first-frame-only" heuristic (`pending_frames.is_empty() && sps.is_none()`)
+        // is gone — the actual `is_keyframe` for emitted fragments is derived
+        // from the H.264 bitstream in `drain` (nal_counts.idr > 0).
+        let is_idr_boundary = sess.frame_count % sess.gop_size as u64 == 0;
 
         let mut pic_params = unsafe { std::mem::zeroed::<NV_ENC_PIC_PARAMS>() };
         pic_params.version = NV_ENC_PIC_PARAMS_VER;
@@ -768,8 +785,8 @@ impl EncoderBackend for NvencBackend {
         pic_params.bufferFmt = NV_ENC_BUFFER_FORMAT_NV12;
         pic_params.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
         pic_params.inputTimeStamp = pts_90k;
-        if is_keyframe {
-            pic_params.encodePicFlags = NV_ENC_PIC_FLAG_FORCEINTRA;
+        if is_idr_boundary {
+            pic_params.encodePicFlags |= NV_ENC_PIC_FLAG_FORCEIDR;
         }
 
         let enc_status = unsafe { encode_pic(sess.encoder, &mut pic_params) };
@@ -781,14 +798,19 @@ impl EncoderBackend for NvencBackend {
             return Err(EncoderError::Runtime(format!("encode-picture-failed:{enc_status}")));
         }
 
+        // The EMITTED `EncodedFragment.is_keyframe` is derived from the
+        // bitstream in `drain` (`nal_counts.idr > 0`), so the encoder-side
+        // intent (`is_idr_boundary`) does not need to ride along on
+        // `PendingFrame`. This keeps the rolling buffer's commit predicate
+        // driven by ground truth, not encoder hints.
         sess.pending_frames.push(PendingFrame {
             input_buf,
             output_buf,
             pts_90k,
             duration_90k,
-            is_keyframe,
         });
         sess.dts_90k += duration_90k as u64;
+        sess.frame_count += 1;
         Ok(())
     }
 
@@ -833,12 +855,15 @@ impl EncoderBackend for NvencBackend {
                 Vec::new()
             };
 
-            // Diagnostic-only: record NVENC pictureType and scan NAL types in
-            // the Annex-B AU. These values flow to SegmentDiagnosticsEvent
-            // (ISS-005 H1a vs H1b triage) and MUST NOT influence is_keyframe,
-            // segment-commit, or replay.save behaviour.
+            // Record NVENC pictureType and scan NAL types in the Annex-B AU.
+            // ISS-005 phase 1: `is_keyframe` for emitted fragments is derived
+            // from `nal_counts.idr > 0` — ground truth from the actual bitstream,
+            // not the encoder-side input intent carried on `PendingFrame`. This
+            // is what drives the rolling-buffer commit predicate. `picture_type`
+            // remains diagnostic-only.
             let picture_type_raw: u32 = lock_params.pictureType;
             let nal_counts = scan_nal_types(&au_bytes);
+            let nal_is_keyframe = nal_counts.idr > 0;
 
             // Extract SPS/PPS from the first IDR frame if not yet captured.
             if sess.sps.is_none() {
@@ -861,7 +886,7 @@ impl EncoderBackend for NvencBackend {
                 sess.seq,
                 pf.pts_90k,
                 pf.duration_90k,
-                pf.is_keyframe,
+                nal_is_keyframe,
                 &au_bytes,
             );
 
@@ -869,7 +894,7 @@ impl EncoderBackend for NvencBackend {
                 seq: sess.seq,
                 pts_90k: pf.pts_90k,
                 duration_90k: pf.duration_90k,
-                is_keyframe: pf.is_keyframe,
+                is_keyframe: nal_is_keyframe,
                 bytes: frag_bytes,
                 diagnostics: FragmentDiagnostics {
                     nal_counts,

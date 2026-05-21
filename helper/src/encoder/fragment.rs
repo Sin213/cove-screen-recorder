@@ -10,6 +10,11 @@ use async_trait::async_trait;
 
 use super::h264::NalCounts;
 
+/// NVENC `NV_ENC_PIC_TYPE` value for an IDR picture. Used by the rolling
+/// buffer to maintain a cumulative IDR-by-picture-type diagnostic counter
+/// across the lifetime of a session. Diagnostic-only; never drives commit.
+pub const NV_ENC_PIC_TYPE_IDR: u32 = 3;
+
 /// Additive per-fragment diagnostic metadata for ISS-005 H1a/H1b triage.
 ///
 /// Populated by encoder backends when available; defaults are zero, which

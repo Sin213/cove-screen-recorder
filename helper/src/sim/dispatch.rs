@@ -319,6 +319,11 @@ async fn run_session_task(
             last_fragment_sei_count: 0,
             last_fragment_other_nal_count: 0,
             last_fragment_picture_type: if tick % 2 == 0 { 3 } else { 0 },
+            // ISS-005 phase 2 cumulative diagnostics — even ticks simulate an
+            // IDR landing, so both counters track the cumulative count of
+            // even ticks observed through tick `tick`.
+            idr_nal_count_total: tick / 2 + 1,
+            picture_type_idr_count_total: tick / 2 + 1,
         };
         let _ = notifier
             .notify("replay.segmentDiagnostics", serde_json::to_value(seg_diag).unwrap())

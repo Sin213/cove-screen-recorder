@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex};
 use tracing::warn;
 
-use crate::encoder::fragment::{EncodedFragment, FragmentSink, FragmentSinkError};
+use crate::encoder::fragment::{
+    EncodedFragment, FragmentSink, FragmentSinkError, NV_ENC_PIC_TYPE_IDR,
+};
 use crate::protocol::events::{SegmentDiagnosticsEvent, SessionLostEvent};
 use crate::protocol::types::SegmentRef;
 use crate::transport::notifier::Notifier;
@@ -192,6 +194,16 @@ struct BufferInner {
     last_fragment_sei_count: u32,
     last_fragment_other_nal_count: u32,
     last_fragment_picture_type: u32,
+    // ISS-005 phase 2: cumulative counters across the session lifetime that
+    // close the H1a sampling gap. Emit-only — they MUST NOT drive the commit
+    // predicate, `seen_first_keyframe`, or any `replay.save` decision.
+    //
+    // - `idr_nal_count_total` increments per fragment whose Annex-B AU
+    //   contained at least one IDR NAL (`nal_counts.idr > 0`).
+    // - `picture_type_idr_count_total` increments per fragment whose NVENC
+    //   `pictureType` was IDR (`NV_ENC_PIC_TYPE_IDR`).
+    idr_nal_count_total: u64,
+    picture_type_idr_count_total: u64,
 }
 
 impl BufferInner {
@@ -329,6 +341,8 @@ impl BufferInner {
             last_fragment_sei_count: self.last_fragment_sei_count,
             last_fragment_other_nal_count: self.last_fragment_other_nal_count,
             last_fragment_picture_type: self.last_fragment_picture_type,
+            idr_nal_count_total: self.idr_nal_count_total,
+            picture_type_idr_count_total: self.picture_type_idr_count_total,
         };
         if let Ok(v) = serde_json::to_value(&evt) {
             let _ = self.notifier.try_notify("replay.segmentDiagnostics", v);
@@ -456,6 +470,8 @@ impl SegmentBuffer {
                 last_fragment_sei_count: 0,
                 last_fragment_other_nal_count: 0,
                 last_fragment_picture_type: 0,
+                idr_nal_count_total: 0,
+                picture_type_idr_count_total: 0,
             })),
             close_tx: Arc::new(watch::channel(false).0),
             closing: Arc::new(AtomicBool::new(false)),
@@ -664,6 +680,17 @@ impl FragmentSink for SegmentBuffer {
         inner.last_fragment_sei_count = d.nal_counts.sei;
         inner.last_fragment_other_nal_count = d.nal_counts.other;
         inner.last_fragment_picture_type = d.picture_type;
+
+        // ISS-005 phase 2: cumulative IDR observability. Diagnostic-only;
+        // these counters MUST NOT influence the commit predicate,
+        // `seen_first_keyframe`, or `replay.save` behaviour.
+        if d.nal_counts.idr > 0 {
+            inner.idr_nal_count_total = inner.idr_nal_count_total.saturating_add(1);
+        }
+        if d.picture_type == NV_ENC_PIC_TYPE_IDR {
+            inner.picture_type_idr_count_total =
+                inner.picture_type_idr_count_total.saturating_add(1);
+        }
 
         if !inner.seen_first_keyframe {
             if fragment.is_keyframe {
