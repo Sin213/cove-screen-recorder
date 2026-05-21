@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "capture.sessionReady",
+  "params": {
+    "compositor_name": "sim",
+    "format": {
+      "color_primaries": "bt709",
+      "fourcc": "NV12",
+      "fps_den": 1,
+      "fps_num": 60,
+      "height": 1080,
+      "range": "limited",
+      "transfer": "bt709",
+      "width": 1920
+    },
+    "session_id": "sim-session-0000",
+    "stream_id": "sim-stream-0000"
+  }
+}

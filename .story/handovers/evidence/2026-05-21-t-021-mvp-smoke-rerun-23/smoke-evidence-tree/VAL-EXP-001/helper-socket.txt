@@ -1,0 +1,1 @@
+/run/user/1000/cove-screen-recorder/runner-3d500741.sock
