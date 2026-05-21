@@ -310,10 +310,12 @@ pub fn build_fragment(
 
 fn compute_moof_size() -> usize {
     // mfhd: 8 (box) + 4 (ver+flags) + 4 (seq) = 16
+    // tfhd: 8 (box) + 4 (ver+flags) + 4 (track_ID) = 16
+    // tfdt: 8 (box) + 4 (ver+flags) + 8 (baseMediaDecodeTime v1 64-bit) = 20
     // trun: 8 + 4 (ver+flags) + 4 (count) + 4 (data_offset) + 4 (first_sample_flags) + 12 (dur+size+flags) = 36
-    // traf: 8 + 16 (tfhd) + 16 (tfdt) + 36 (trun) = 76
-    // moof: 8 + 16 (mfhd) + 76 (traf) = 100
-    100
+    // traf: 8 + 16 (tfhd) + 20 (tfdt) + 36 (trun) = 80
+    // moof: 8 + 16 (mfhd) + 80 (traf) = 104
+    104
 }
 
 fn build_moof(seq: u64, pts_90k: u64, duration_90k: u32, is_keyframe: bool, data_offset: i32, sample_size: u32) -> Vec<u8> {
@@ -361,12 +363,13 @@ fn build_traf(pts_90k: u64, duration_90k: u32, is_keyframe: bool, data_offset: i
     write_box(&mut p, b"tfdt", &tfdt);
 
     // trun (version 0)
-    // flags: 0x000F01 = data-offset-present + first-sample-flags-present +
-    //                   sample-duration-present + sample-size-present + sample-flags-present
+    // flags: 0x000705 = data-offset-present (0x01) + first-sample-flags-present (0x04) +
+    //                   sample-duration-present (0x100) + sample-size-present (0x200) +
+    //                   sample-flags-present (0x400)
     let trun = {
         let mut b = Vec::new();
         b.push(0u8);
-        b.extend_from_slice(&[0x0f, 0x01, 0x00]); // flags
+        b.extend_from_slice(&[0x00, 0x07, 0x05]); // flags
         b.extend_from_slice(&be32(1)); // sample_count
         b.extend_from_slice(&data_offset.to_be_bytes()); // data_offset
         // first_sample_flags: 0x02000000 = sync (keyframe), 0x01010000 = non-sync
@@ -442,5 +445,74 @@ mod tests {
         let frag = build_fragment(1, 0, 3000, true, &data);
         assert!(frag.len() > 16);
         assert_eq!(&frag[4..8], b"moof", "first box must be moof");
+    }
+
+    fn find_box(data: &[u8], target: &[u8; 4]) -> Option<(usize, usize)> {
+        let mut pos = 0;
+        while pos + 8 <= data.len() {
+            let size = u32::from_be_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+            if size < 8 || pos + size > data.len() { break; }
+            if &data[pos+4..pos+8] == target {
+                return Some((pos, size));
+            }
+            pos += size;
+        }
+        None
+    }
+
+    fn find_box_nested(data: &[u8], path: &[&[u8; 4]]) -> Option<(usize, usize)> {
+        let mut region = data;
+        let mut abs_offset = 0usize;
+        for (i, target) in path.iter().enumerate() {
+            let (rel, size) = find_box(region, target)?;
+            if i + 1 < path.len() {
+                let inner_start = rel + 8;
+                let inner_end = rel + size;
+                region = &region[inner_start..inner_end];
+                abs_offset += inner_start;
+            } else {
+                return Some((abs_offset + rel, size));
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn trun_ver_flags_is_000705() {
+        let data = [0u8, 0, 0, 1, 0x65, 0xAA, 0xBB];
+        let frag = build_fragment(1, 0, 3000, true, &data);
+        let (trun_off, _) = find_box_nested(&frag, &[b"moof", b"traf", b"trun"])
+            .expect("trun box not found");
+        let ver_flags = &frag[trun_off+8..trun_off+12];
+        assert_eq!(ver_flags, &[0x00, 0x00, 0x07, 0x05],
+            "trun ver+flags must be 00 00 07 05, got {:02x} {:02x} {:02x} {:02x}",
+            ver_flags[0], ver_flags[1], ver_flags[2], ver_flags[3]);
+    }
+
+    #[test]
+    fn trun_data_offset_equals_moof_size_plus_8() {
+        let data = [0u8, 0, 0, 1, 0x65, 0xAA, 0xBB];
+        let frag = build_fragment(1, 0, 3000, true, &data);
+        let (moof_off, moof_size) = find_box(&frag, b"moof").expect("moof not found");
+        let (trun_off, _) = find_box_nested(&frag, &[b"moof", b"traf", b"trun"])
+            .expect("trun box not found");
+        // data_offset is after ver+flags(4) + sample_count(4) = offset +8+8 = +16
+        let do_off = trun_off + 8 + 4 + 4;
+        let data_offset = i32::from_be_bytes([frag[do_off], frag[do_off+1], frag[do_off+2], frag[do_off+3]]);
+        let expected = (moof_size + 8) as i32; // moof box size + mdat header
+        assert_eq!(data_offset, expected,
+            "trun data_offset should be moof_size({}) + 8 = {}, got {}",
+            moof_size, expected, data_offset);
+        let _ = moof_off;
+    }
+
+    #[test]
+    fn compute_moof_size_matches_actual() {
+        let data = [0u8, 0, 0, 1, 0x65, 0xAA, 0xBB];
+        let frag = build_fragment(1, 0, 3000, true, &data);
+        let (_, actual_moof_size) = find_box(&frag, b"moof").expect("moof not found");
+        assert_eq!(compute_moof_size(), actual_moof_size,
+            "compute_moof_size() = {} but actual moof box is {} bytes",
+            compute_moof_size(), actual_moof_size);
     }
 }
