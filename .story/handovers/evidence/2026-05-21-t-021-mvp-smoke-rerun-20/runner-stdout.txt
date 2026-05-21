@@ -1,0 +1,20 @@
+
+Suite: smoke  |  Verdict: FAIL  |  2026-05-21T18:24:33.422Z
+  pass=5  fail=1  skip=5  error=0
+
+ID              Status    Class           Reason / Message
+--------------------------------------------------------------------------------
+VAL-PKG-001     skip      scripted-local  helper-not-available
+VAL-CAP-001     skip      manual          manual
+VAL-CAP-003     pass      scripted-local  Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+VAL-CAP-004     pass      scripted-local  Monitor capture passed drop+cadence gates (60 samples, key=1080p60-nvenc)
+VAL-CAP-006     skip      manual          manual
+VAL-UI-005      skip      manual          manual
+VAL-ENC-001     pass      scripted-local  NVENC probe confirmed available via encoder.probeResult
+VAL-ENC-006     skip      manual          manual
+VAL-SEG-001     pass      scripted-local  Segment buffer stayed within disk budget over 64 samples (max 0.01%)
+VAL-SEG-003     pass      scripted-local  replay.save completed in 1 ms (gate: 2250 ms)
+VAL-EXP-001     fail      scripted-local  Export validation failed — see thresholds
+
+Stopped early at VAL-EXP-001 (first must-pass red).
+
