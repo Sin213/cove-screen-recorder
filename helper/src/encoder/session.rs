@@ -144,6 +144,12 @@ pub struct EncoderSession<S: FragmentSink> {
     /// so any held fragments are flushed at EOF.
     pending_fragments: std::collections::VecDeque<EncodedFragment>,
     pending_fragments_cap: usize,
+    /// Set once `sink.set_init_segment` succeeds.  Retried after each
+    /// successful `drain_fragments` because NVENC extracts SPS/PPS from the
+    /// first IDR frame during drain, not during `push_frame` — so the early
+    /// `backend.init_segment()` call in `run()` returns `None` and must be
+    /// retried here.
+    init_persisted: bool,
 }
 
 /// Outcome of one [`EncoderSession::try_flush_pending`] sweep.
@@ -250,6 +256,7 @@ impl<S: FragmentSink> EncoderSession<S> {
             eof_drain_backoff: DEFAULT_EOF_DRAIN_BACKOFF,
             pending_fragments: std::collections::VecDeque::new(),
             pending_fragments_cap: DEFAULT_PENDING_FRAGMENTS_CAP,
+            init_persisted: false,
         }
     }
 
@@ -298,10 +305,7 @@ impl<S: FragmentSink> EncoderSession<S> {
     ///    `backend.teardown()` indefinitely (Codex review
     ///    2026-05-16_11-39-52 Issue #1).
     /// 3. **`teardown()`** the backend.
-    pub async fn run(
-        mut self,
-        rx: FrameReceiver,
-    ) -> SessionExit {
+    pub async fn run(mut self, rx: FrameReceiver) -> SessionExit {
         let exit = match self.backend.configure(self.config.clone()).await {
             Ok(()) => {
                 if let Some(init) = self.backend.init_segment() {
@@ -314,6 +318,7 @@ impl<S: FragmentSink> EncoderSession<S> {
                             SessionExit::RuntimeError
                         };
                     }
+                    self.init_persisted = true;
                 }
                 self.run_loop(rx).await
             }
@@ -338,10 +343,7 @@ impl<S: FragmentSink> EncoderSession<S> {
         exit
     }
 
-    async fn run_loop(
-        &mut self,
-        mut rx: FrameReceiver,
-    ) -> SessionExit {
+    async fn run_loop(&mut self, mut rx: FrameReceiver) -> SessionExit {
         let backend_name = self.backend.name().to_string();
         self.bytes_window = WindowBytes::default();
         self.backpressure = BackPressureTracker::default();
@@ -410,6 +412,24 @@ impl<S: FragmentSink> EncoderSession<S> {
                                         self.drain_remaining(rx).await;
                                         self.emit_runtime_error(&reason.code, &reason.details);
                                         return SessionExit::RuntimeError;
+                                    }
+                                    if !self.init_persisted {
+                                        if let Some(init) = self.backend.init_segment() {
+                                            match self.sink.set_init_segment(init).await {
+                                                Ok(()) => {
+                                                    self.init_persisted = true;
+                                                }
+                                                Err(FragmentSinkError::BackPressure) => {}
+                                                Err(e) => {
+                                                    self.drain_remaining(rx).await;
+                                                    self.emit_runtime_error(
+                                                        "init-segment-failed",
+                                                        &e.to_string(),
+                                                    );
+                                                    return SessionExit::RuntimeError;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 Err(EncoderError::BackPressure) => {
@@ -628,6 +648,22 @@ impl<S: FragmentSink> EncoderSession<S> {
             match self.try_flush_pending().await {
                 FlushOutcome::Complete => {
                     consecutive_stalled = 0;
+                    if !self.init_persisted {
+                        if let Some(init) = self.backend.init_segment() {
+                            match self.sink.set_init_segment(init).await {
+                                Ok(()) => {
+                                    self.init_persisted = true;
+                                }
+                                Err(FragmentSinkError::BackPressure) => {}
+                                Err(e) => {
+                                    return Some(TerminalReason::new(
+                                        "init-segment-failed",
+                                        e.to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     // Loop continues; next iter's empty check will ask
                     // backend.drain() for the final empty confirmation.
                 }
@@ -712,12 +748,7 @@ impl<S: FragmentSink> EncoderSession<S> {
     /// Non-blocking emission for `encoder.backPressure`.  Advisory event —
     /// dropped on a full transport channel so a stalled writer cannot stall
     /// the encode loop.  Codex review 2026-05-16_12-39-06 Issue #2.
-    fn emit_back_pressure(
-        &self,
-        backend_name: &str,
-        sustained_ms: u64,
-        dropped_since_last: u64,
-    ) {
+    fn emit_back_pressure(&self, backend_name: &str, sustained_ms: u64, dropped_since_last: u64) {
         let evt = EncoderBackPressureEvent {
             backend: backend_name.to_string(),
             sustained_ms,
@@ -775,7 +806,9 @@ mod tests {
         let t0 = Instant::now();
         tr.on_drop(t0);
         // Below dwell → no report.
-        assert!(tr.take_report(t0 + Duration::from_millis(10), Duration::from_millis(50)).is_none());
+        assert!(tr
+            .take_report(t0 + Duration::from_millis(10), Duration::from_millis(50))
+            .is_none());
         // Past dwell → one report.
         let report = tr
             .take_report(t0 + Duration::from_millis(60), Duration::from_millis(50))
@@ -783,7 +816,9 @@ mod tests {
         assert!(report.0 >= 50);
         assert_eq!(report.1, 1);
         // Same window must not re-report.
-        assert!(tr.take_report(t0 + Duration::from_millis(120), Duration::from_millis(50)).is_none());
+        assert!(tr
+            .take_report(t0 + Duration::from_millis(120), Duration::from_millis(50))
+            .is_none());
     }
 
     #[test]
@@ -792,7 +827,9 @@ mod tests {
         let t0 = Instant::now();
         tr.on_drop(t0);
         tr.on_progress();
-        assert!(tr.take_report(t0 + Duration::from_secs(1), Duration::from_millis(50)).is_none());
+        assert!(tr
+            .take_report(t0 + Duration::from_secs(1), Duration::from_millis(50))
+            .is_none());
         // New window can fire again.
         let t1 = t0 + Duration::from_secs(2);
         tr.on_drop(t1);

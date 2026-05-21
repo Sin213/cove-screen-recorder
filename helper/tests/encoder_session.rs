@@ -71,7 +71,9 @@ fn make_frame(seq: u64, payload_bytes: usize) -> cove_replay_engine::capture::Fr
 /// Push N frames into the FrameSender then drop it so the receiver closes.
 async fn feed_and_close(tx: FrameSender, frames: u64) {
     for seq in 0..frames {
-        tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.expect("send frame");
+        tx.send(FrameOrControl::Frame(make_frame(seq, 32)))
+            .await
+            .expect("send frame");
     }
     drop(tx);
 }
@@ -209,11 +211,17 @@ impl EncoderBackend for FakeBackend {
 
 /// Decode every notification the Notifier emitted into `(method, params)`
 /// pairs.  Closes the channel by dropping its sender side.
-fn drain_notifications(rx: &mut tokio::sync::mpsc::Receiver<Vec<u8>>) -> Vec<(String, serde_json::Value)> {
+fn drain_notifications(
+    rx: &mut tokio::sync::mpsc::Receiver<Vec<u8>>,
+) -> Vec<(String, serde_json::Value)> {
     let mut out = Vec::new();
     while let Ok(bytes) = rx.try_recv() {
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
-        let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
+        let method = v
+            .get("method")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
         let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
         out.push((method, params));
     }
@@ -242,15 +250,25 @@ async fn happy_path_runs_to_completion_and_tears_down() {
     feeder.await.unwrap();
 
     assert_eq!(exit, SessionExit::StreamEnded);
-    assert_eq!(cfg_calls.load(Ordering::Relaxed), 1, "configure called once");
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown called once on exit");
+    assert_eq!(
+        cfg_calls.load(Ordering::Relaxed),
+        1,
+        "configure called once"
+    );
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown called once on exit"
+    );
     assert_eq!(push_calls.load(Ordering::Relaxed), 3, "all frames pushed");
 
     let notifs = drain_notifications(&mut notif_rx);
     // No diagnostics fires because period is 60 s and the test finishes well
     // before then.  No runtimeError, no backPressure.
     assert!(
-        notifs.iter().all(|(m, _)| m != "encoder.runtimeError" && m != "encoder.backPressure"),
+        notifs
+            .iter()
+            .all(|(m, _)| m != "encoder.runtimeError" && m != "encoder.backPressure"),
         "unexpected events: {notifs:?}",
     );
 }
@@ -269,7 +287,9 @@ async fn diagnostics_fires_when_period_elapses() {
 
     let feeder = tokio::spawn(async move {
         for seq in 0..3u64 {
-            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32)))
+                .await
+                .unwrap();
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
         drop(tx);
@@ -283,7 +303,10 @@ async fn diagnostics_fires_when_period_elapses() {
         .iter()
         .filter(|(m, _)| m == "encoder.diagnostics")
         .collect();
-    assert!(!diags.is_empty(), "expected at least one encoder.diagnostics event");
+    assert!(
+        !diags.is_empty(),
+        "expected at least one encoder.diagnostics event"
+    );
     let last = &diags.last().unwrap().1;
     assert_eq!(last["backend"], "fake-hw");
     assert!(last["frames_in"].as_u64().unwrap() >= 1);
@@ -313,15 +336,21 @@ async fn back_pressure_fires_once_per_sustained_window() {
     let feeder = tokio::spawn(async move {
         // Push first burst: 3 BackPressure with > dwell spacing should trigger one event.
         for seq in 0..3u64 {
-            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32)))
+                .await
+                .unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
         // One Accept closes the window.
-        tx.send(FrameOrControl::Frame(make_frame(3, 32))).await.unwrap();
+        tx.send(FrameOrControl::Frame(make_frame(3, 32)))
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_millis(5)).await;
         // Second burst: 2 more BackPressure with > dwell spacing should trigger a second event.
         for seq in 4..6u64 {
-            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32)))
+                .await
+                .unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
         drop(tx);
@@ -365,14 +394,20 @@ async fn runtime_error_ends_session_emits_event_and_tears_down() {
         // Send 2 frames; the 2nd triggers Runtime.  Then send 3 more — those
         // must be drained without push to release PW buffers.
         for seq in 0..5u64 {
-            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32)))
+                .await
+                .unwrap();
         }
         drop(tx);
     });
     let exit = session.run(rx).await;
     feeder.await.unwrap();
     assert_eq!(exit, SessionExit::RuntimeError);
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown called once on runtime error");
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown called once on runtime error"
+    );
 
     let notifs = drain_notifications(&mut notif_rx);
     let rt: Vec<_> = notifs
@@ -400,7 +435,11 @@ async fn configure_failure_emits_runtime_error_and_returns_configure_failed() {
 
     assert_eq!(exit, SessionExit::ConfigureFailed);
     assert_eq!(cfg_calls.load(Ordering::Relaxed), 1);
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown still runs after configure-fail");
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown still runs after configure-fail"
+    );
     assert_eq!(push_calls.load(Ordering::Relaxed), 0, "no frames pushed");
 
     let notifs = drain_notifications(&mut notif_rx);
@@ -453,21 +492,23 @@ async fn release_token_fires_for_every_frame_consumed() {
     let feeder = tokio::spawn(async move {
         for seq in 0..4u64 {
             let counter = Arc::clone(&released_feeder);
-            tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
-                seq,
-                pts_ns: 0,
-                payload: FramePayload::Shm {
-                    data: vec![0u8; 16],
-                    width: 16,
-                    height: 16,
-                    format: 0,
-                    stride: 16,
+            tx.send(cove_replay_engine::capture::FrameOrControl::Frame(
+                cove_replay_engine::capture::FrameHandle {
+                    seq,
+                    pts_ns: 0,
+                    payload: FramePayload::Shm {
+                        data: vec![0u8; 16],
+                        width: 16,
+                        height: 16,
+                        format: 0,
+                        stride: 16,
+                    },
+                    cursor: None,
+                    release: ReleaseToken::new(move || {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }),
                 },
-                cursor: None,
-                release: ReleaseToken::new(move || {
-                    counter.fetch_add(1, Ordering::Relaxed);
-                }),
-            }))
+            ))
             .await
             .unwrap();
         }
@@ -518,21 +559,23 @@ async fn configure_failure_cleanup_completes_even_when_notifier_is_saturated() {
     let (tx, rx) = frame_channel(8);
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
-            seq,
-            pts_ns: 0,
-            payload: FramePayload::Shm {
-                data: vec![0u8; 8],
-                width: 8,
-                height: 8,
-                format: 0,
-                stride: 8,
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(
+            cove_replay_engine::capture::FrameHandle {
+                seq,
+                pts_ns: 0,
+                payload: FramePayload::Shm {
+                    data: vec![0u8; 8],
+                    width: 8,
+                    height: 8,
+                    format: 0,
+                    stride: 8,
+                },
+                cursor: None,
+                release: ReleaseToken::new(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }),
             },
-            cursor: None,
-            release: ReleaseToken::new(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-            }),
-        }))
+        ))
         .await
         .unwrap();
     }
@@ -547,7 +590,11 @@ async fn configure_failure_cleanup_completes_even_when_notifier_is_saturated() {
     assert_eq!(exit, SessionExit::ConfigureFailed);
     assert_eq!(cfg_calls.load(Ordering::Relaxed), 1);
     assert_eq!(push_calls.load(Ordering::Relaxed), 0);
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown ran after cleanup");
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown ran after cleanup"
+    );
     assert_eq!(
         released.load(Ordering::Relaxed),
         3,
@@ -574,21 +621,23 @@ async fn push_frame_runtime_cleanup_completes_even_when_notifier_is_saturated() 
     let (tx, rx) = frame_channel(8);
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
-            seq,
-            pts_ns: 0,
-            payload: FramePayload::Shm {
-                data: vec![0u8; 8],
-                width: 8,
-                height: 8,
-                format: 0,
-                stride: 8,
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(
+            cove_replay_engine::capture::FrameHandle {
+                seq,
+                pts_ns: 0,
+                payload: FramePayload::Shm {
+                    data: vec![0u8; 8],
+                    width: 8,
+                    height: 8,
+                    format: 0,
+                    stride: 8,
+                },
+                cursor: None,
+                release: ReleaseToken::new(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }),
             },
-            cursor: None,
-            release: ReleaseToken::new(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-            }),
-        }))
+        ))
         .await
         .unwrap();
     }
@@ -627,21 +676,23 @@ async fn configure_failure_closes_receiver_and_drains_buffered_frames() {
     // thing, so these frames are sitting in the buffer when cleanup starts.
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
-            seq,
-            pts_ns: 0,
-            payload: FramePayload::Shm {
-                data: vec![0u8; 8],
-                width: 8,
-                height: 8,
-                format: 0,
-                stride: 8,
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(
+            cove_replay_engine::capture::FrameHandle {
+                seq,
+                pts_ns: 0,
+                payload: FramePayload::Shm {
+                    data: vec![0u8; 8],
+                    width: 8,
+                    height: 8,
+                    format: 0,
+                    stride: 8,
+                },
+                cursor: None,
+                release: ReleaseToken::new(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }),
             },
-            cursor: None,
-            release: ReleaseToken::new(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-            }),
-        }))
+        ))
         .await
         .unwrap();
     }
@@ -656,7 +707,11 @@ async fn configure_failure_closes_receiver_and_drains_buffered_frames() {
     assert_eq!(exit, SessionExit::ConfigureFailed);
     assert_eq!(cfg_calls.load(Ordering::Relaxed), 1);
     assert_eq!(push_calls.load(Ordering::Relaxed), 0, "no frames pushed");
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown ran exactly once after drain");
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown ran exactly once after drain"
+    );
     assert_eq!(
         released.load(Ordering::Relaxed),
         3,
@@ -685,7 +740,9 @@ async fn runtime_error_returns_promptly_without_waiting_for_sender_drop() {
 
     let (tx, rx) = frame_channel(8);
     // Pre-fill the channel with one frame that will trip the Runtime error.
-    tx.send(FrameOrControl::Frame(make_frame(0, 32))).await.unwrap();
+    tx.send(FrameOrControl::Frame(make_frame(0, 32)))
+        .await
+        .unwrap();
     // Sender stays alive — mimics the PipeWire capture thread holding the
     // sender past the encoder's runtime failure.  Before the fix this test
     // would hang here.
@@ -698,7 +755,10 @@ async fn runtime_error_returns_promptly_without_waiting_for_sender_drop() {
     // exited without waiting on its drop.  Trying to send now must fail
     // because run closed the receiver.
     let err = tx.send(FrameOrControl::Frame(make_frame(1, 32))).await;
-    assert!(err.is_err(), "sender must be closed after runtime-error exit");
+    assert!(
+        err.is_err(),
+        "sender must be closed after runtime-error exit"
+    );
 }
 
 #[tokio::test]
@@ -716,21 +776,23 @@ async fn runtime_error_drains_already_buffered_frames_before_returning() {
     let (tx, rx) = frame_channel(8);
     for seq in 0..3u64 {
         let counter = Arc::clone(&released);
-        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
-            seq,
-            pts_ns: 0,
-            payload: FramePayload::Shm {
-                data: vec![0u8; 8],
-                width: 8,
-                height: 8,
-                format: 0,
-                stride: 8,
+        tx.send(cove_replay_engine::capture::FrameOrControl::Frame(
+            cove_replay_engine::capture::FrameHandle {
+                seq,
+                pts_ns: 0,
+                payload: FramePayload::Shm {
+                    data: vec![0u8; 8],
+                    width: 8,
+                    height: 8,
+                    format: 0,
+                    stride: 8,
+                },
+                cursor: None,
+                release: ReleaseToken::new(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }),
             },
-            cursor: None,
-            release: ReleaseToken::new(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-            }),
-        }))
+        ))
         .await
         .unwrap();
     }
@@ -751,10 +813,7 @@ async fn runtime_error_drains_already_buffered_frames_before_returning() {
 async fn release_token_fires_after_runtime_error_for_remaining_frames() {
     use std::sync::atomic::AtomicU32;
     let released = Arc::new(AtomicU32::new(0));
-    let backend = FakeBackend::new(
-        "fake-hw",
-        vec![FakeAction::Runtime("die-immediately")],
-    );
+    let backend = FakeBackend::new("fake-hw", vec![FakeAction::Runtime("die-immediately")]);
     let (notifier, _notif_rx) = Notifier::new();
     let sink = CountingFragmentSink::new();
     let session = EncoderSession::new(Box::new(backend), sink, notifier, cfg())
@@ -765,21 +824,23 @@ async fn release_token_fires_after_runtime_error_for_remaining_frames() {
     let feeder = tokio::spawn(async move {
         for seq in 0..5u64 {
             let counter = Arc::clone(&released_feeder);
-            tx.send(cove_replay_engine::capture::FrameOrControl::Frame(cove_replay_engine::capture::FrameHandle {
-                seq,
-                pts_ns: 0,
-                payload: FramePayload::Shm {
-                    data: vec![0u8; 8],
-                    width: 8,
-                    height: 8,
-                    format: 0,
-                    stride: 8,
+            tx.send(cove_replay_engine::capture::FrameOrControl::Frame(
+                cove_replay_engine::capture::FrameHandle {
+                    seq,
+                    pts_ns: 0,
+                    payload: FramePayload::Shm {
+                        data: vec![0u8; 8],
+                        width: 8,
+                        height: 8,
+                        format: 0,
+                        stride: 8,
+                    },
+                    cursor: None,
+                    release: ReleaseToken::new(move || {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }),
                 },
-                cursor: None,
-                release: ReleaseToken::new(move || {
-                    counter.fetch_add(1, Ordering::Relaxed);
-                }),
-            }))
+            ))
             .await
             .unwrap();
         }
@@ -804,9 +865,7 @@ struct BackPressureNTimesSink {
 }
 
 impl BackPressureNTimesSink {
-    fn new(
-        bp_count: usize,
-    ) -> (Self, Arc<std::sync::Mutex<Vec<EncodedFragment>>>) {
+    fn new(bp_count: usize) -> (Self, Arc<std::sync::Mutex<Vec<EncodedFragment>>>) {
         let accepted = Arc::new(std::sync::Mutex::new(Vec::new()));
         (
             Self {
@@ -898,8 +957,16 @@ async fn clean_stream_end_flushes_tail_fragment_from_backend() {
         .await
         .expect("session must return promptly on clean end");
     assert_eq!(exit, SessionExit::StreamEnded);
-    assert_eq!(push_calls.load(Ordering::Relaxed), 0, "no frames were pushed");
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown ran exactly once");
+    assert_eq!(
+        push_calls.load(Ordering::Relaxed),
+        0,
+        "no frames were pushed"
+    );
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown ran exactly once"
+    );
 
     let captured = captured.lock().unwrap();
     assert_eq!(
@@ -988,7 +1055,11 @@ async fn clean_stream_end_with_drain_runtime_error_emits_runtime_event() {
         .iter()
         .filter(|(m, _)| m == "encoder.runtimeError")
         .collect();
-    assert_eq!(rt.len(), 1, "exactly one runtimeError event on final-drain failure");
+    assert_eq!(
+        rt.len(),
+        1,
+        "exactly one runtimeError event on final-drain failure"
+    );
     assert_eq!(rt[0].1["reason_code"], "drain-runtime");
     assert_eq!(rt[0].1["details"], "flush-fail");
 }
@@ -1022,7 +1093,11 @@ async fn final_drain_retries_sink_back_pressure_then_succeeds_at_eof() {
     assert_eq!(exit, SessionExit::StreamEnded);
 
     let captured = accepted.lock().unwrap();
-    assert_eq!(captured.len(), 1, "tail fragment must be delivered after sink BackPressure retries");
+    assert_eq!(
+        captured.len(),
+        1,
+        "tail fragment must be delivered after sink BackPressure retries"
+    );
     assert_eq!(captured[0].seq, 7);
     assert_eq!(captured[0].bytes.len(), 1024);
 }
@@ -1054,7 +1129,11 @@ async fn final_drain_unresolved_sink_back_pressure_becomes_runtime_error() {
         .await
         .expect("final drain must give up within bounded retries");
     assert_eq!(exit, SessionExit::RuntimeError);
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "teardown ran after unresolved back-pressure");
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "teardown ran after unresolved back-pressure"
+    );
 
     let notifs = drain_notifications(&mut notif_rx);
     let rt: Vec<_> = notifs
@@ -1457,7 +1536,9 @@ async fn advisory_telemetry_does_not_stall_encode_loop_with_saturated_notifier()
     let (tx, rx) = frame_channel(8);
     let feeder = tokio::spawn(async move {
         for seq in 0..5u64 {
-            tx.send(FrameOrControl::Frame(make_frame(seq, 32))).await.unwrap();
+            tx.send(FrameOrControl::Frame(make_frame(seq, 32)))
+                .await
+                .unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
         drop(tx);
@@ -1490,20 +1571,25 @@ async fn finalize_failure_surfaces_runtime_error_on_clean_eof() {
     let backend = FakeBackend::new("fake-hw", vec![]);
     let (_, td_calls, _) = backend.counters();
     let (notifier, _notif_rx) = Notifier::new();
-    let session = EncoderSession::new(
-        Box::new(backend),
-        FinalizeFailingSink,
-        notifier,
-        cfg(),
-    );
+    let session = EncoderSession::new(Box::new(backend), FinalizeFailingSink, notifier, cfg());
 
     let (tx, rx) = frame_channel(8);
-    tx.send(FrameOrControl::Frame(make_frame(0, 32))).await.unwrap();
+    tx.send(FrameOrControl::Frame(make_frame(0, 32)))
+        .await
+        .unwrap();
     drop(tx);
 
     let exit = session.run(rx).await;
-    assert_eq!(exit, SessionExit::RuntimeError, "finalize failure must surface as RuntimeError");
-    assert_eq!(td_calls.load(Ordering::Relaxed), 1, "backend still torn down");
+    assert_eq!(
+        exit,
+        SessionExit::RuntimeError,
+        "finalize failure must surface as RuntimeError"
+    );
+    assert_eq!(
+        td_calls.load(Ordering::Relaxed),
+        1,
+        "backend still torn down"
+    );
 }
 
 // ── Real NVENC one-frame encode path ─────────────────────────────────────────
@@ -1519,8 +1605,8 @@ async fn finalize_failure_surfaces_runtime_error_on_clean_eof() {
 /// inherently hardware-gated and must not fail in CI without a GPU.
 #[tokio::test]
 async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
-    use cove_replay_engine::encoder::backends::NvencBackend;
     use cove_replay_engine::encoder::backend::{EncoderBackend, EncoderConfig, ProbeOutcome};
+    use cove_replay_engine::encoder::backends::NvencBackend;
 
     std::env::remove_var("COVE_NVENC_FORCE_UNAVAILABLE");
 
@@ -1553,7 +1639,10 @@ async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
         gop_seconds: 2.0,
     };
 
-    backend.configure(cfg).await.expect("configure must succeed when probe returned Available");
+    backend
+        .configure(cfg)
+        .await
+        .expect("configure must succeed when probe returned Available");
 
     // Provide a 320×240 NV12 frame: Y plane (240 rows × 320 bytes) + UV (120 rows × 320 bytes).
     let frame_size = 320 * 240 * 3 / 2; // NV12 = 1.5 bytes/pixel
@@ -1571,7 +1660,10 @@ async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
         release: ReleaseToken::noop(),
     };
 
-    backend.push_frame(frame).await.expect("push_frame must succeed");
+    backend
+        .push_frame(frame)
+        .await
+        .expect("push_frame must succeed");
 
     let fragments = backend.drain().await.expect("drain must succeed");
     assert!(
@@ -1606,8 +1698,15 @@ async fn nvenc_one_frame_shm_encode_produces_fmp4_fragment() {
     // init_segment() should be available after the first IDR frame was drained.
     match backend.init_segment() {
         Some(seg) => {
-            assert!(seg.len() >= 8, "init segment must contain at least a box header");
-            assert_eq!(&seg[4..8], b"ftyp", "first box in init segment must be ftyp");
+            assert!(
+                seg.len() >= 8,
+                "init segment must contain at least a box header"
+            );
+            assert_eq!(
+                &seg[4..8],
+                b"ftyp",
+                "first box in init segment must be ftyp"
+            );
         }
         None => {
             eprintln!("init_segment() returned None — SPS/PPS not extracted yet (acceptable if IDR was not in first fragment)");
@@ -1663,9 +1762,7 @@ async fn nvenc_periodic_idr_at_gop_boundary() {
     let probe_backend = NvencBackend::new();
     match probe_backend.probe(&fmt).await {
         ProbeOutcome::Unavailable { reason, .. } => {
-            eprintln!(
-                "NVENC unavailable ({reason}); skipping periodic-IDR GOP-boundary test"
-            );
+            eprintln!("NVENC unavailable ({reason}); skipping periodic-IDR GOP-boundary test");
             return;
         }
         ProbeOutcome::Available { .. } => {}
@@ -1677,7 +1774,10 @@ async fn nvenc_periodic_idr_at_gop_boundary() {
         target_bitrate_bps: 2_000_000,
         gop_seconds,
     };
-    backend.configure(cfg).await.expect("configure must succeed");
+    backend
+        .configure(cfg)
+        .await
+        .expect("configure must succeed");
 
     // 320x240 NV12 = w*h + w*h/2 = 115_200 bytes.
     let frame_size = (fmt.width * fmt.height * 3 / 2) as usize;
@@ -1750,4 +1850,130 @@ async fn nvenc_periodic_idr_at_gop_boundary() {
     }
 
     backend.teardown().await.expect("teardown must succeed");
+}
+
+#[tokio::test]
+async fn init_segment_retried_and_persisted_after_first_drain() {
+    // VAL-EXP-001: NVENC returns None from init_segment() until SPS/PPS are
+    // extracted from the first drained IDR frame.  The early init_segment()
+    // call in run() sees None and skips set_init_segment; the session must
+    // retry after drain_fragments() succeeds and call set_init_segment exactly
+    // once — not on every subsequent frame.
+    use std::sync::atomic::AtomicBool;
+
+    struct DelayedInitBackend {
+        drained_once: Arc<AtomicBool>,
+        push_calls: Arc<AtomicUsize>,
+        pending: std::sync::Mutex<Vec<EncodedFragment>>,
+    }
+
+    #[async_trait]
+    impl EncoderBackend for DelayedInitBackend {
+        fn name(&self) -> &'static str {
+            "fake-delayed-init"
+        }
+        fn codec(&self) -> &'static str {
+            "h264"
+        }
+        async fn probe(&self, _: &CaptureFormat) -> ProbeOutcome {
+            ProbeOutcome::Available {
+                capabilities: cove_replay_engine::encoder::backend::EncoderCapabilities {
+                    accepts_dmabuf: true,
+                    accepts_shm: true,
+                    supported_codecs: vec!["h264".into()],
+                },
+                details: serde_json::json!({}),
+            }
+        }
+        #[cfg(unix)]
+        async fn configure(&mut self, _: EncoderConfig) -> Result<(), EncoderError> {
+            Ok(())
+        }
+        #[cfg(unix)]
+        async fn push_frame(
+            &mut self,
+            _: cove_replay_engine::capture::FrameHandle,
+        ) -> Result<(), EncoderError> {
+            self.push_calls.fetch_add(1, Ordering::Relaxed);
+            self.pending.lock().unwrap().push(EncodedFragment {
+                seq: self.push_calls.load(Ordering::Relaxed) as u64 - 1,
+                pts_90k: 0,
+                duration_90k: 1500,
+                is_keyframe: false,
+                bytes: vec![0u8; 64],
+                diagnostics: Default::default(),
+            });
+            Ok(())
+        }
+        #[cfg(unix)]
+        async fn drain(&mut self) -> Result<Vec<EncodedFragment>, EncoderError> {
+            self.drained_once.store(true, Ordering::Relaxed);
+            Ok(std::mem::take(&mut *self.pending.lock().unwrap()))
+        }
+        fn init_segment(&self) -> Option<Vec<u8>> {
+            if self.drained_once.load(Ordering::Relaxed) {
+                Some(b"ftyp-fake-init".to_vec())
+            } else {
+                None
+            }
+        }
+        async fn teardown(&mut self) -> Result<(), EncoderError> {
+            Ok(())
+        }
+    }
+
+    struct InitCaptureSink {
+        init_calls: Arc<AtomicUsize>,
+        init_data: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+    }
+
+    #[async_trait]
+    impl FragmentSink for InitCaptureSink {
+        async fn push(&mut self, _: EncodedFragment) -> Result<(), FragmentSinkError> {
+            Ok(())
+        }
+        async fn set_init_segment(&mut self, data: Vec<u8>) -> Result<(), FragmentSinkError> {
+            self.init_calls.fetch_add(1, Ordering::Relaxed);
+            *self.init_data.lock().unwrap() = Some(data);
+            Ok(())
+        }
+    }
+
+    let drained_once = Arc::new(AtomicBool::new(false));
+    let push_calls = Arc::new(AtomicUsize::new(0));
+    let backend = DelayedInitBackend {
+        drained_once: Arc::clone(&drained_once),
+        push_calls: Arc::clone(&push_calls),
+        pending: std::sync::Mutex::new(Vec::new()),
+    };
+
+    let init_calls = Arc::new(AtomicUsize::new(0));
+    let init_data = Arc::new(std::sync::Mutex::new(None::<Vec<u8>>));
+    let sink = InitCaptureSink {
+        init_calls: Arc::clone(&init_calls),
+        init_data: Arc::clone(&init_data),
+    };
+
+    let (notifier, _notif_rx) = Notifier::new();
+    let session = EncoderSession::new(Box::new(backend), sink, notifier, cfg())
+        .with_diagnostics_period(Duration::from_secs(60));
+
+    let (tx, rx) = frame_channel(8);
+    // Feed 3 frames: init_segment is None on the early path; becomes Some after
+    // the first drain; must NOT be called again on frames 2 and 3.
+    let feeder = tokio::spawn(feed_and_close(tx, 3));
+    let exit = tokio::time::timeout(Duration::from_secs(2), session.run(rx))
+        .await
+        .expect("session must complete");
+    feeder.await.unwrap();
+
+    assert_eq!(exit, SessionExit::StreamEnded);
+    assert_eq!(push_calls.load(Ordering::Relaxed), 3, "all 3 frames pushed");
+    assert_eq!(
+        init_calls.load(Ordering::Relaxed),
+        1,
+        "set_init_segment called exactly once — not on every frame after it succeeds",
+    );
+    let data = init_data.lock().unwrap();
+    assert_eq!(data.as_deref().unwrap(), b"ftyp-fake-init");
 }

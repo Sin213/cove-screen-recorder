@@ -120,10 +120,7 @@ fn rename_no_replace_sync(old: &std::path::Path, new: &std::path::Path) -> std::
 /// Non-Unix stub. Returns `Unsupported` so `run_export` surfaces a clear error
 /// rather than failing to compile.
 #[cfg(not(unix))]
-fn rename_no_replace_sync(
-    _old: &std::path::Path,
-    _new: &std::path::Path,
-) -> std::io::Result<()> {
+fn rename_no_replace_sync(_old: &std::path::Path, _new: &std::path::Path) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "atomic no-clobber rename is not supported on this platform",
@@ -147,21 +144,13 @@ fn is_exdev(e: &std::io::Error) -> bool {
 // ── public API ────────────────────────────────────────────────────────────────
 
 /// Route all `replay.*` RPC methods.
-pub async fn dispatch_replay(
-    req: Request,
-    state: &SharedState,
-    notifier: &Notifier,
-) -> Response {
+pub async fn dispatch_replay(req: Request, state: &SharedState, notifier: &Notifier) -> Response {
     let id = req.id.clone();
     match req.method.as_str() {
         "replay.save" => handle_replay_save(id, req.params, state, notifier).await,
-        "replay.snapshot_release" => {
-            handle_snapshot_release(id, req.params, state, notifier).await
-        }
+        "replay.snapshot_release" => handle_snapshot_release(id, req.params, state, notifier).await,
         "replay.recoverable_sessions" => handle_recoverable_sessions(id, state).await,
-        "replay.discard_recovered_session" => {
-            handle_discard_recovered(id, req.params, state).await
-        }
+        "replay.discard_recovered_session" => handle_discard_recovered(id, req.params, state).await,
         "replay.restore_recovered_session" => {
             handle_restore_recovered(id, req.params, state, notifier).await
         }
@@ -234,7 +223,10 @@ pub fn resolve_export_staging_dir() -> PathBuf {
             .join("exports");
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".cache").join("cove-screen-recorder").join("exports")
+    PathBuf::from(home)
+        .join(".cache")
+        .join("cove-screen-recorder")
+        .join("exports")
 }
 
 // ── private helpers ───────────────────────────────────────────────────────────
@@ -242,8 +234,16 @@ pub fn resolve_export_staging_dir() -> PathBuf {
 fn new_id(prefix: &str) -> String {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    format!("{}-{}{:09}-{:04}", prefix, dur.as_secs(), dur.subsec_nanos(), seq)
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    format!(
+        "{}-{}{:09}-{:04}",
+        prefix,
+        dur.as_secs(),
+        dur.subsec_nanos(),
+        seq
+    )
 }
 
 /// Compute hex-encoded SHA-256 of the file at `path`, streaming in 64 KiB chunks.
@@ -282,7 +282,10 @@ async fn emit_export_failed(
         diagnostics_path: diagnostics_path.to_string(),
     };
     let _ = notifier
-        .notify("export.failed", serde_json::to_value(evt).unwrap_or(json!(null)))
+        .notify(
+            "export.failed",
+            serde_json::to_value(evt).unwrap_or(json!(null)),
+        )
         .await;
 }
 
@@ -321,7 +324,9 @@ async fn handle_replay_save(
                 info.fps_num,
                 info.fps_den,
             ),
-            None => return Response::error(id, RpcError::invalid_request("no active capture session")),
+            None => {
+                return Response::error(id, RpcError::invalid_request("no active capture session"))
+            }
         }
     };
 
@@ -395,7 +400,11 @@ async fn handle_replay_save(
 
     state.active_snapshots.lock().await.insert(
         snapshot_id.clone(),
-        PinnedSnapshot { snapshot: snapshot.clone(), buffer: Some(buffer_clone), recovered_session: None },
+        PinnedSnapshot {
+            snapshot: snapshot.clone(),
+            buffer: Some(buffer_clone),
+            recovered_session: None,
+        },
     );
 
     let pinned_evt = SnapshotPinnedEvent {
@@ -446,9 +455,7 @@ async fn handle_snapshot_release(
 
     let pinned = match pinned {
         Some(p) => p,
-        None => {
-            return Response::error(id, RpcError::invalid_request("snapshot_id not found"))
-        }
+        None => return Response::error(id, RpcError::invalid_request("snapshot_id not found")),
     };
 
     // Attempt recovered-session cleanup first while pinned is fully intact.
@@ -456,7 +463,11 @@ async fn handle_snapshot_release(
     if let Some(ref recovered) = pinned.recovered_session {
         if let Err(e) = discard_recovered_session(&recovered.session_dir) {
             warn!(error = %e, "failed to clean up recovered session files on snapshot release");
-            state.active_snapshots.lock().await.insert(snapshot_id.clone(), pinned);
+            state
+                .active_snapshots
+                .lock()
+                .await
+                .insert(snapshot_id.clone(), pinned);
             return Response::error(
                 id,
                 RpcError::invalid_request(format!("cleanup failed: {e}")),
@@ -470,9 +481,15 @@ async fn handle_snapshot_release(
         buf.release_snapshot(&indices).await;
     }
 
-    let evt = SnapshotReleasedEvent { snapshot_id: snapshot_id.clone(), age_ms: 0 };
+    let evt = SnapshotReleasedEvent {
+        snapshot_id: snapshot_id.clone(),
+        age_ms: 0,
+    };
     let _ = notifier
-        .notify("replay.snapshotReleased", serde_json::to_value(evt).unwrap_or(json!(null)))
+        .notify(
+            "replay.snapshotReleased",
+            serde_json::to_value(evt).unwrap_or(json!(null)),
+        )
         .await;
 
     Response::result(id, json!({ "ok": true }))
@@ -627,7 +644,11 @@ async fn handle_restore_recovered(
     // Store info so snapshot_release can clean up the recovered session dir.
     state.active_snapshots.lock().await.insert(
         snapshot_id.clone(),
-        PinnedSnapshot { snapshot: snapshot.clone(), buffer: None, recovered_session: Some(info) },
+        PinnedSnapshot {
+            snapshot: snapshot.clone(),
+            buffer: None,
+            recovered_session: Some(info),
+        },
     );
 
     let pinned_evt = SnapshotPinnedEvent {
@@ -703,7 +724,11 @@ async fn handle_export_start(
     // existence check and the export task starting to read it.
     state.active_exports.lock().await.insert(
         export_id.clone(),
-        ExportHandle { cancel_tx, in_muxing: Arc::clone(&in_muxing), snapshot_id: snapshot_id.clone() },
+        ExportHandle {
+            cancel_tx,
+            in_muxing: Arc::clone(&in_muxing),
+            snapshot_id: snapshot_id.clone(),
+        },
     );
 
     let snapshot = {
@@ -728,7 +753,10 @@ async fn handle_export_start(
         requested_duration_s,
     };
     let _ = notifier
-        .notify("export.queued", serde_json::to_value(queued).unwrap_or(json!(null)))
+        .notify(
+            "export.queued",
+            serde_json::to_value(queued).unwrap_or(json!(null)),
+        )
         .await;
 
     let staging_dir = resolve_export_staging_dir();
@@ -777,10 +805,7 @@ async fn handle_export_cancel(
     };
 
     if handle.in_muxing.load(Ordering::SeqCst) {
-        return Response::result(
-            id,
-            json!({ "ok": false, "reason": "past-cancel-boundary" }),
-        );
+        return Response::result(id, json!({ "ok": false, "reason": "past-cancel-boundary" }));
     }
 
     let _ = handle.cancel_tx.send(true);
@@ -830,10 +855,39 @@ async fn run_export(
         return;
     }
 
+    // Fail fast if the init segment was never written: ffmpeg would produce an
+    // unplayable file from a concat input whose first element is missing or
+    // empty.  Re-stat the file at export time rather than trusting the byte
+    // count captured at snapshot-pin time — init persistence can race with pin
+    // in the window between the first committed segment and the first IDR drain.
+    let current_init_bytes = std::fs::metadata(&snapshot.init_segment_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    if current_init_bytes == 0 {
+        let details = format!(
+            "init segment missing: path={}, snapshot_bytes={}, current_bytes={}",
+            snapshot.init_segment_path, snapshot.init_segment_bytes, current_init_bytes
+        );
+        emit_export_failed(
+            &notifier,
+            &export_id,
+            "copy",
+            "init-segment-missing",
+            &details,
+            "",
+            &terminal_fired,
+        )
+        .await;
+        return;
+    }
+
     // Temporary file always lives in staging_dir so reap_orphaned_exports finds it.
     let tmp_path = staging_dir.join(format!("{}.tmp", export_id));
     let final_path = output_path.unwrap_or_else(|| {
-        staging_dir.join(format!("{}.mp4", export_id)).to_string_lossy().into_owned()
+        staging_dir
+            .join(format!("{}.mp4", export_id))
+            .to_string_lossy()
+            .into_owned()
     });
 
     // Build the fMP4 concat input: init segment followed by media segments.
@@ -902,7 +956,10 @@ async fn run_export(
         est_output_bytes: est_bytes,
     };
     let _ = notifier
-        .notify("export.started", serde_json::to_value(started).unwrap_or(json!(null)))
+        .notify(
+            "export.started",
+            serde_json::to_value(started).unwrap_or(json!(null)),
+        )
         .await;
 
     // Spawn ffmpeg: `-progress pipe:1` writes structured key=value progress to
@@ -1093,7 +1150,10 @@ async fn run_export(
 
     // Now honour any cancel that arrived before the store above.
     if *cancel_rx.borrow() {
-        let partial_bytes = tokio::fs::metadata(&tmp_path).await.map(|m| m.len()).unwrap_or(0);
+        let partial_bytes = tokio::fs::metadata(&tmp_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
         let _ = tokio::fs::remove_file(&tmp_path).await;
         let _ = tokio::fs::remove_file(&diag_path).await;
         if terminal_fired.swap(true, Ordering::SeqCst) {
@@ -1105,7 +1165,10 @@ async fn run_export(
             partial_bytes,
         };
         let _ = notifier
-            .notify("export.cancelled", serde_json::to_value(evt).unwrap_or(json!(null)))
+            .notify(
+                "export.cancelled",
+                serde_json::to_value(evt).unwrap_or(json!(null)),
+            )
             .await;
         return;
     }
@@ -1122,15 +1185,29 @@ async fn run_export(
             Ok(Err(e)) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-failed", &e.to_string(), &diag_path_str, &terminal_fired,
-                ).await;
+                    &notifier,
+                    &export_id,
+                    "mux",
+                    "fsync-failed",
+                    &e.to_string(),
+                    &diag_path_str,
+                    &terminal_fired,
+                )
+                .await;
                 return;
             }
             Err(e) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-task-panicked", &e.to_string(), &diag_path_str, &terminal_fired,
-                ).await;
+                    &notifier,
+                    &export_id,
+                    "mux",
+                    "fsync-task-panicked",
+                    &e.to_string(),
+                    &diag_path_str,
+                    &terminal_fired,
+                )
+                .await;
                 return;
             }
         }
@@ -1150,15 +1227,27 @@ async fn run_export(
         let fp = final_path.clone();
         tokio::task::spawn_blocking(move || rename_no_replace_sync(&tp, std::path::Path::new(&fp)))
             .await
-            .unwrap_or_else(|e| Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+            .unwrap_or_else(|e| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            })
     };
     match rename_err {
         Ok(()) => {} // same-device success — proceed to fsync dest dir
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             emit_export_failed(
-                &notifier, &export_id, "mux", "output-path-exists", &final_path, &diag_path_str, &terminal_fired,
-            ).await;
+                &notifier,
+                &export_id,
+                "mux",
+                "output-path-exists",
+                &final_path,
+                &diag_path_str,
+                &terminal_fired,
+            )
+            .await;
             return;
         }
         Err(ref e) if is_exdev(e) => {
@@ -1185,14 +1274,25 @@ async fn run_export(
                     r
                 })
                 .await
-                .unwrap_or_else(|e| Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())));
+                .unwrap_or_else(|e| {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    ))
+                });
                 if let Err(e) = probe_result {
                     let _ = tokio::fs::remove_file(&tmp_path).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "destination-filesystem-not-supported",
-                        &e.to_string(), &diag_path_str, &terminal_fired,
-                    ).await;
+                        &notifier,
+                        &export_id,
+                        "mux",
+                        "destination-filesystem-not-supported",
+                        &e.to_string(),
+                        &diag_path_str,
+                        &terminal_fired,
+                    )
+                    .await;
                     return;
                 }
             }
@@ -1219,8 +1319,15 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&tmp_path).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "cross-device-temp-exists", &e.to_string(), &diag_path_str, &terminal_fired,
-                    ).await;
+                        &notifier,
+                        &export_id,
+                        "mux",
+                        "cross-device-temp-exists",
+                        &e.to_string(),
+                        &diag_path_str,
+                        &terminal_fired,
+                    )
+                    .await;
                     return;
                 }
                 Ok(Err(e)) => {
@@ -1228,8 +1335,15 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "cross-device-copy-failed", &e.to_string(), &diag_path_str, &terminal_fired,
-                    ).await;
+                        &notifier,
+                        &export_id,
+                        "mux",
+                        "cross-device-copy-failed",
+                        &e.to_string(),
+                        &diag_path_str,
+                        &terminal_fired,
+                    )
+                    .await;
                     return;
                 }
                 Err(e) => {
@@ -1237,8 +1351,15 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "fsync-task-panicked", &e.to_string(), &diag_path_str, &terminal_fired,
-                    ).await;
+                        &notifier,
+                        &export_id,
+                        "mux",
+                        "fsync-task-panicked",
+                        &e.to_string(),
+                        &diag_path_str,
+                        &terminal_fired,
+                    )
+                    .await;
                     return;
                 }
             }
@@ -1248,7 +1369,14 @@ async fn run_export(
             let fp = final_path.clone();
             let xd_rename = tokio::task::spawn_blocking(move || {
                 rename_no_replace_sync(&dt, std::path::Path::new(&fp))
-            }).await.unwrap_or_else(|e| Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())));
+            })
+            .await
+            .unwrap_or_else(|e| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            });
             match xd_rename {
                 Ok(()) => {
                     let _ = tokio::fs::remove_file(&hint_path).await;
@@ -1257,16 +1385,30 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "output-path-exists", &final_path, &diag_path_str, &terminal_fired,
-                    ).await;
+                        &notifier,
+                        &export_id,
+                        "mux",
+                        "output-path-exists",
+                        &final_path,
+                        &diag_path_str,
+                        &terminal_fired,
+                    )
+                    .await;
                     return;
                 }
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "cross-device-rename-failed", &e.to_string(), &diag_path_str, &terminal_fired,
-                    ).await;
+                        &notifier,
+                        &export_id,
+                        "mux",
+                        "cross-device-rename-failed",
+                        &e.to_string(),
+                        &diag_path_str,
+                        &terminal_fired,
+                    )
+                    .await;
                     return;
                 }
             }
@@ -1274,8 +1416,15 @@ async fn run_export(
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             emit_export_failed(
-                &notifier, &export_id, "mux", "rename-failed", &e.to_string(), &diag_path_str, &terminal_fired,
-            ).await;
+                &notifier,
+                &export_id,
+                "mux",
+                "rename-failed",
+                &e.to_string(),
+                &diag_path_str,
+                &terminal_fired,
+            )
+            .await;
             return;
         }
     }
@@ -1283,22 +1432,34 @@ async fn run_export(
     // Fsync destination directory so the rename is durably visible.
     {
         let dir = dest_dir_for_fsync.clone();
-        let fsync_result = tokio::task::spawn_blocking(move || {
-            crate::segment::writer::fsync_dir(&dir)
-        })
-        .await;
+        let fsync_result =
+            tokio::task::spawn_blocking(move || crate::segment::writer::fsync_dir(&dir)).await;
         match fsync_result {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-dir-failed", &e.to_string(), &diag_path_str, &terminal_fired,
-                ).await;
+                    &notifier,
+                    &export_id,
+                    "mux",
+                    "fsync-dir-failed",
+                    &e.to_string(),
+                    &diag_path_str,
+                    &terminal_fired,
+                )
+                .await;
                 return;
             }
             Err(e) => {
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-dir-task-panicked", &e.to_string(), &diag_path_str, &terminal_fired,
-                ).await;
+                    &notifier,
+                    &export_id,
+                    "mux",
+                    "fsync-dir-task-panicked",
+                    &e.to_string(),
+                    &diag_path_str,
+                    &terminal_fired,
+                )
+                .await;
                 return;
             }
         }
@@ -1359,7 +1520,10 @@ async fn run_export(
         fps_observed_out: snapshot.framerate_hint as f64,
     };
     let _ = notifier
-        .notify("export.completed", serde_json::to_value(completed).unwrap_or(json!(null)))
+        .notify(
+            "export.completed",
+            serde_json::to_value(completed).unwrap_or(json!(null)),
+        )
         .await;
 }
 
@@ -1391,7 +1555,10 @@ mod tests {
         std::fs::write(staging.join("exp-123.tmp"), b"orphan").unwrap();
         std::fs::write(staging.join("exp-456.mp4"), b"final").unwrap();
         reap_orphaned_exports(staging);
-        assert!(!staging.join("exp-123.tmp").exists(), ".tmp must be removed");
+        assert!(
+            !staging.join("exp-123.tmp").exists(),
+            ".tmp must be removed"
+        );
         assert!(staging.join("exp-456.mp4").exists(), ".mp4 must survive");
     }
 
@@ -1402,6 +1569,69 @@ mod tests {
         std::fs::write(&path, b"hello world").unwrap();
         let hex = compute_sha256_file(&path).unwrap();
         assert_eq!(hex.len(), 64, "sha256 must be 64 hex chars");
-        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()), "must be valid hex");
+        assert!(
+            hex.chars().all(|c| c.is_ascii_hexdigit()),
+            "must be valid hex"
+        );
+    }
+
+    #[tokio::test]
+    async fn export_fails_fast_when_init_segment_missing() {
+        // VAL-EXP-001: run_export must emit export.failed with
+        // reason_code="init-segment-missing" before spawning ffmpeg when the
+        // init segment path does not exist or its byte count is zero.
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().to_owned();
+        let (notifier, mut notif_rx) = crate::transport::notifier::Notifier::new();
+        let terminal_fired = Arc::new(AtomicBool::new(false));
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let in_muxing = Arc::new(AtomicBool::new(false));
+
+        let snapshot = crate::protocol::types::ReplaySnapshot {
+            snapshot_id: "test-snap".into(),
+            session_id: "test-session".into(),
+            init_segment_path: "/nonexistent/init.mp4".into(),
+            init_segment_bytes: 0,
+            segments: vec![],
+            trim_start_pts_90k: 0,
+            trim_end_pts_90k: 90_000,
+            codec: crate::protocol::types::VideoCodec::H264,
+            timescale: 90_000,
+            width: 1920,
+            height: 1080,
+            framerate_hint: 60,
+            has_discontinuity: false,
+            discontinuity_at_pts_90k: vec![],
+        };
+
+        run_export(
+            "exp-preflight-test".into(),
+            snapshot,
+            None,
+            staging,
+            notifier,
+            cancel_rx,
+            in_muxing,
+            terminal_fired,
+        )
+        .await;
+
+        let mut events: Vec<serde_json::Value> = vec![];
+        while let Ok(bytes) = notif_rx.try_recv() {
+            events.push(serde_json::from_slice(&bytes).unwrap());
+        }
+        let failed = events
+            .iter()
+            .find(|e| e["method"] == "export.failed")
+            .expect("export.failed must be emitted when init segment is missing");
+        assert_eq!(failed["params"]["reason_code"], "init-segment-missing");
+        assert_eq!(failed["params"]["stage"], "copy");
+        assert_eq!(
+            failed["params"]["diagnostics_path"], "",
+            "diagnostics_path must be empty string at pre-diag-file failure sites",
+        );
     }
 }
