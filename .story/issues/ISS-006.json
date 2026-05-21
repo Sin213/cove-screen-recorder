@@ -1,0 +1,23 @@
+{
+  "components": [
+    "export",
+    "validation"
+  ],
+  "discoveredDate": "2026-05-20",
+  "id": "ISS-006",
+  "impact": "export.failed emitted with reason_code=ffmpeg-nonzero-exit, stage=copy, exit code=254, but diagnostics_path is empty and ffmpeg stderr is discarded. Cannot determine root cause of ffmpeg failure without stderr. Blocks export pipeline investigation.",
+  "location": [
+    "helper/src/export/mod.rs",
+    "validation/drivers.ts"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-019",
+    "T-021"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-EXP-001: ffmpeg copy stage exits 254 without diagnostics"
+}

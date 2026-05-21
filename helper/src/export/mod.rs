@@ -184,7 +184,7 @@ pub fn reap_orphaned_exports(staging_dir: &Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name_s = name.to_string_lossy();
-        if name_s.ends_with(".tmp") {
+        if name_s.ends_with(".tmp") || name_s.ends_with(".diagnostics.txt") {
             match std::fs::remove_file(entry.path()) {
                 Ok(()) => {
                     info!(path = %entry.path().display(), "reaped orphaned export tmp file");
@@ -268,6 +268,7 @@ async fn emit_export_failed(
     stage: &str,
     reason_code: &str,
     details: &str,
+    diagnostics_path: &str,
     terminal_fired: &Arc<AtomicBool>,
 ) {
     if terminal_fired.swap(true, Ordering::SeqCst) {
@@ -278,7 +279,7 @@ async fn emit_export_failed(
         stage: stage.to_string(),
         reason_code: reason_code.to_string(),
         details: details.to_string(),
-        diagnostics_path: String::new(),
+        diagnostics_path: diagnostics_path.to_string(),
     };
     let _ = notifier
         .notify("export.failed", serde_json::to_value(evt).unwrap_or(json!(null)))
@@ -807,6 +808,7 @@ async fn run_export(
             "copy",
             "stream-copy-requires-reencode",
             "snapshot contains a format-change discontinuity; re-encode not yet implemented",
+            "",
             &terminal_fired,
         )
         .await;
@@ -821,6 +823,7 @@ async fn run_export(
             "copy",
             "staging-dir-unwritable",
             &e.to_string(),
+            "",
             &terminal_fired,
         )
         .await;
@@ -839,6 +842,40 @@ async fn run_export(
         concat_parts.push(seg.path.clone());
     }
     let concat_input = format!("concat:{}", concat_parts.join("|"));
+
+    // Create diagnostics file: argv, input file existence/sizes, ffmpeg stderr.
+    let diag_path = staging_dir.join(format!("{}.diagnostics.txt", export_id));
+    let diag_path_str = diag_path.to_string_lossy().into_owned();
+    {
+        let argv_str = format!(
+            "ffmpeg -y -i {} -c copy -movflags +faststart -progress pipe:1 {}",
+            concat_input,
+            tmp_path.to_str().unwrap_or("<tmp>"),
+        );
+        let mut preamble = format!("argv: {argv_str}\n");
+        for (i, p) in concat_parts.iter().enumerate() {
+            let exists = std::path::Path::new(p).exists();
+            let size_str = std::fs::metadata(p)
+                .map(|m| m.len().to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            preamble.push_str(&format!(
+                "input {i}: {p} | exists={exists} | size_bytes={size_str}\n"
+            ));
+        }
+        preamble.push_str("--- ffmpeg stderr ---\n");
+        if let Err(e) = tokio::fs::write(&diag_path, preamble.as_bytes()).await {
+            warn!(path = %diag_path.display(), error = %e, "failed to write ffmpeg diagnostics preamble");
+        }
+    }
+    // Open the diagnostics file for appending to redirect ffmpeg stderr into it.
+    let stderr_stdio = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&diag_path)
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(|e| {
+            warn!(path = %diag_path.display(), error = %e, "failed to open diagnostics file for stderr; discarding stderr");
+            std::process::Stdio::null()
+        });
 
     let est_bytes: u64 =
         snapshot.init_segment_bytes + snapshot.segments.iter().map(|s| s.byte_size).sum::<u64>();
@@ -869,7 +906,7 @@ async fn run_export(
         .await;
 
     // Spawn ffmpeg: `-progress pipe:1` writes structured key=value progress to
-    // stdout; stderr is suppressed to keep the notifier channel clean.
+    // stdout; stderr is captured to the diagnostics file.
     let mut cmd = tokio::process::Command::new("ffmpeg");
     cmd.args([
         "-y",
@@ -884,7 +921,7 @@ async fn run_export(
     ])
     .arg(tmp_path.to_str().unwrap_or("/dev/null"))
     .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::null())
+    .stderr(stderr_stdio)
     .kill_on_drop(true);
 
     let mut child = match cmd.spawn() {
@@ -896,6 +933,7 @@ async fn run_export(
                 "copy",
                 "ffmpeg-spawn-failed",
                 &e.to_string(),
+                &diag_path_str,
                 &terminal_fired,
             )
             .await;
@@ -979,6 +1017,7 @@ async fn run_export(
                                 "copy",
                                 "ffmpeg-wait-error",
                                 &e.to_string(),
+                                &diag_path_str,
                                 &terminal_fired,
                             )
                             .await;
@@ -998,6 +1037,7 @@ async fn run_export(
                             "copy",
                             "ffmpeg-wait-error",
                             &e.to_string(),
+                            &diag_path_str,
                             &terminal_fired,
                         )
                         .await;
@@ -1011,6 +1051,7 @@ async fn run_export(
                 let partial_bytes =
                     tokio::fs::metadata(&tmp_path).await.map(|m| m.len()).unwrap_or(0);
                 let _ = tokio::fs::remove_file(&tmp_path).await;
+                let _ = tokio::fs::remove_file(&diag_path).await;
                 if terminal_fired.swap(true, Ordering::SeqCst) {
                     return;
                 }
@@ -1038,6 +1079,7 @@ async fn run_export(
             "copy",
             "ffmpeg-nonzero-exit",
             &format!("exit code: {:?}", exit_status.code()),
+            &diag_path_str,
             &terminal_fired,
         )
         .await;
@@ -1053,6 +1095,7 @@ async fn run_export(
     if *cancel_rx.borrow() {
         let partial_bytes = tokio::fs::metadata(&tmp_path).await.map(|m| m.len()).unwrap_or(0);
         let _ = tokio::fs::remove_file(&tmp_path).await;
+        let _ = tokio::fs::remove_file(&diag_path).await;
         if terminal_fired.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -1079,14 +1122,14 @@ async fn run_export(
             Ok(Err(e)) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-failed", &e.to_string(), &terminal_fired,
+                    &notifier, &export_id, "mux", "fsync-failed", &e.to_string(), &diag_path_str, &terminal_fired,
                 ).await;
                 return;
             }
             Err(e) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-task-panicked", &e.to_string(), &terminal_fired,
+                    &notifier, &export_id, "mux", "fsync-task-panicked", &e.to_string(), &diag_path_str, &terminal_fired,
                 ).await;
                 return;
             }
@@ -1114,7 +1157,7 @@ async fn run_export(
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             emit_export_failed(
-                &notifier, &export_id, "mux", "output-path-exists", &final_path, &terminal_fired,
+                &notifier, &export_id, "mux", "output-path-exists", &final_path, &diag_path_str, &terminal_fired,
             ).await;
             return;
         }
@@ -1148,7 +1191,7 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
                         &notifier, &export_id, "mux", "destination-filesystem-not-supported",
-                        &e.to_string(), &terminal_fired,
+                        &e.to_string(), &diag_path_str, &terminal_fired,
                     ).await;
                     return;
                 }
@@ -1176,7 +1219,7 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&tmp_path).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "cross-device-temp-exists", &e.to_string(), &terminal_fired,
+                        &notifier, &export_id, "mux", "cross-device-temp-exists", &e.to_string(), &diag_path_str, &terminal_fired,
                     ).await;
                     return;
                 }
@@ -1185,7 +1228,7 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "cross-device-copy-failed", &e.to_string(), &terminal_fired,
+                        &notifier, &export_id, "mux", "cross-device-copy-failed", &e.to_string(), &diag_path_str, &terminal_fired,
                     ).await;
                     return;
                 }
@@ -1194,7 +1237,7 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "fsync-task-panicked", &e.to_string(), &terminal_fired,
+                        &notifier, &export_id, "mux", "fsync-task-panicked", &e.to_string(), &diag_path_str, &terminal_fired,
                     ).await;
                     return;
                 }
@@ -1214,7 +1257,7 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "output-path-exists", &final_path, &terminal_fired,
+                        &notifier, &export_id, "mux", "output-path-exists", &final_path, &diag_path_str, &terminal_fired,
                     ).await;
                     return;
                 }
@@ -1222,7 +1265,7 @@ async fn run_export(
                     let _ = tokio::fs::remove_file(&dest_tmp).await;
                     let _ = tokio::fs::remove_file(&hint_path).await;
                     emit_export_failed(
-                        &notifier, &export_id, "mux", "cross-device-rename-failed", &e.to_string(), &terminal_fired,
+                        &notifier, &export_id, "mux", "cross-device-rename-failed", &e.to_string(), &diag_path_str, &terminal_fired,
                     ).await;
                     return;
                 }
@@ -1231,7 +1274,7 @@ async fn run_export(
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             emit_export_failed(
-                &notifier, &export_id, "mux", "rename-failed", &e.to_string(), &terminal_fired,
+                &notifier, &export_id, "mux", "rename-failed", &e.to_string(), &diag_path_str, &terminal_fired,
             ).await;
             return;
         }
@@ -1248,13 +1291,13 @@ async fn run_export(
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-dir-failed", &e.to_string(), &terminal_fired,
+                    &notifier, &export_id, "mux", "fsync-dir-failed", &e.to_string(), &diag_path_str, &terminal_fired,
                 ).await;
                 return;
             }
             Err(e) => {
                 emit_export_failed(
-                    &notifier, &export_id, "mux", "fsync-dir-task-panicked", &e.to_string(), &terminal_fired,
+                    &notifier, &export_id, "mux", "fsync-dir-task-panicked", &e.to_string(), &diag_path_str, &terminal_fired,
                 ).await;
                 return;
             }
@@ -1278,6 +1321,7 @@ async fn run_export(
                 "mux",
                 "sha256-io-error",
                 &e.to_string(),
+                &diag_path_str,
                 &terminal_fired,
             )
             .await;
@@ -1290,6 +1334,7 @@ async fn run_export(
                 "mux",
                 "sha256-task-panicked",
                 &e.to_string(),
+                &diag_path_str,
                 &terminal_fired,
             )
             .await;
@@ -1300,6 +1345,9 @@ async fn run_export(
     if terminal_fired.swap(true, Ordering::SeqCst) {
         return;
     }
+
+    // Export succeeded; clean up the diagnostics file (only needed on failure).
+    let _ = tokio::fs::remove_file(&diag_path).await;
 
     let completed = ExportCompletedEvent {
         export_id: export_id.clone(),

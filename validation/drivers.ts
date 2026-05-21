@@ -2660,6 +2660,23 @@ export async function driveValExp001(
       params: terminalParams,
     });
 
+    // Copy ffmpeg diagnostics file into evidence dir when export failed.
+    if (
+      terminalMethod === "export.failed" &&
+      typeof terminalParams?.diagnostics_path === "string" &&
+      terminalParams.diagnostics_path.length > 0
+    ) {
+      try {
+        const diagSrc = terminalParams.diagnostics_path as string;
+        if (fs.existsSync(diagSrc)) {
+          const diagDest = path.join(evidenceDir, "ffmpeg-diagnostics.txt");
+          fs.copyFileSync(diagSrc, diagDest);
+        }
+      } catch {
+        // best-effort; missing/unreadable diagnostics must not crash or change verdict
+      }
+    }
+
     // Export has terminated; clear exportId so the finally block does not attempt cancel.
     exportId = null;
 
