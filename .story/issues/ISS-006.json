@@ -15,9 +15,9 @@
     "T-019",
     "T-021"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "VAL-EXP-001 stream-copy export green in reruns 25/26/27; SHA256 verified; no process leak. trun flags/data_offset, init persistence, and ffmpeg muxer fixes validated end-to-end.",
+  "resolvedDate": "2026-05-21",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-EXP-001: malformed fMP4 trun flags and data_offset cause ffmpeg failure"
 }

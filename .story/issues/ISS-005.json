@@ -19,9 +19,9 @@
     "T-018",
     "T-019"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "VAL-SEG-003 green in reruns 16–27. NVENC FORCEIDR, bitstream-derived is_keyframe, and cumulative IDR diagnostics/integration coverage validated.",
+  "resolvedDate": "2026-05-21",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-SEG-003: rolling buffer never commits a segment"
 }
