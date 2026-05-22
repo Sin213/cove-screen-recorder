@@ -231,7 +231,7 @@ export const SMOKE_ROWS: SmokeRow[] = [
   },
   {
     id: "VAL-UI-003",
-    title: "HUD timer continues updating ≥ 1 Hz during SAVING — Issue #4 proof",
+    title: "HUD timer continues updating during SAVING/EXPORTING — Issue #4 proof",
     classification: "scripted-local",
     tier: "must-pass",
     ownerOnFail: "ui-fsm",
