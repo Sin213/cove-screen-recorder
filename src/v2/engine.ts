@@ -121,6 +121,7 @@ export function initV2Engine(): Unsub {
     const ev = raw as { sessions: unknown[] };
     const sessions = ev.sessions as never[];
     gs().setV2RecoverableSessions(sessions);
+    if (gs().v2RecoveryIgnoredForSession) return;
     if (sessions.length > 0 && gs().v2State === "IDLE") {
       gs().setV2State("RECOVERY_AVAILABLE");
     }
@@ -365,6 +366,17 @@ async function _refreshRecoverableSessions(): Promise<void> {
     gs().setV2RecoverableSessions(sessions.length > 0 ? sessions : null);
     if (sessions.length > 0) {
       const cur = gs().v2State;
+      // Operator opted out of the recovery prompt for this renderer session.
+      // Keep the recoverable list visible to other surfaces but don't gate
+      // the Start replay buffer button by entering RECOVERY_AVAILABLE — still
+      // normalize boot / down / unavailable / saving back to IDLE so a helper
+      // restart after an in-session Ignore doesn't leave Start disabled.
+      if (gs().v2RecoveryIgnoredForSession) {
+        if (cur === "SAVING" || cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
+          gs().setV2State("IDLE");
+        }
+        return;
+      }
       if (cur === "IDLE" || cur === "SAVING" || cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
         gs().setV2State("RECOVERY_AVAILABLE");
       }
@@ -383,4 +395,30 @@ async function _refreshRecoverableSessions(): Promise<void> {
       gs().setV2State("IDLE");
     }
   }
+}
+
+// Operator opted out of the recovery prompt for this renderer session only.
+// Does NOT touch helper recovery data; the banner reappears on next app start
+// while sessions still exist on disk.
+export function ignoreRecoveryForSession(): void {
+  const count = gs().v2RecoverableSessions?.length ?? 0;
+  gs().setV2RecoveryIgnoredForSession(true);
+  gs().setV2State("IDLE");
+  gs().log("info", `recovery.ignored count=${count}`);
+}
+
+// Discard every recoverable session via the existing per-session discardRecovery
+// path. Two-click confirmation is the caller's responsibility (RecoveryBanner).
+export async function discardAllRecoverable(): Promise<void> {
+  if (gs().v2State !== "RECOVERY_AVAILABLE") return;
+  const sessions = (gs().v2RecoverableSessions ?? []).slice();
+  gs().log("info", `recovery.discardedAll count=${sessions.length}`);
+  for (const s of sessions) {
+    try {
+      await discardRecovery(s.session_id);
+    } catch (err) {
+      gs().log("warn", `recovery.discardedAll: discard failed for ${s.session_id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  await _refreshRecoverableSessions();
 }

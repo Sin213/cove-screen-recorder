@@ -186,6 +186,11 @@ interface State {
   v2ExportProgress: number | null;
   v2ExportOutputPath: string | null;
   v2RecoverableSessions: V2RecoverableSession[] | null;
+  // Renderer-session-only flag: when true, recovery sessions are kept visible
+  // in v2RecoverableSessions but must NOT drive a transition to
+  // RECOVERY_AVAILABLE. Not persisted — resets on every renderer load so the
+  // banner reappears on app restart while sessions still exist.
+  v2RecoveryIgnoredForSession: boolean;
 
   setV2State: (s: V2State) => void;
   setV2EngineInfo: (info: V2EngineInfo | null) => void;
@@ -197,6 +202,7 @@ interface State {
   setV2ExportProgress: (pct: number | null) => void;
   setV2ExportOutputPath: (p: string | null) => void;
   setV2RecoverableSessions: (sessions: V2RecoverableSession[] | null) => void;
+  setV2RecoveryIgnoredForSession: (v: boolean) => void;
 
   setAppInfo: (info: AppInfo) => void;
   setMode: (m: CaptureMode) => void;
@@ -259,6 +265,7 @@ export const useStore = create<State>((set, get) => ({
   v2ExportProgress: null,
   v2ExportOutputPath: null,
   v2RecoverableSessions: null,
+  v2RecoveryIgnoredForSession: false,
 
   setAppInfo: (info) => set({ appInfo: info }),
   setMode: (mode) => { writeString(KEY_MODE, mode); set({ mode }); },
@@ -300,4 +307,5 @@ export const useStore = create<State>((set, get) => ({
   setV2ExportProgress: (v2ExportProgress) => set({ v2ExportProgress }),
   setV2ExportOutputPath: (v2ExportOutputPath) => set({ v2ExportOutputPath }),
   setV2RecoverableSessions: (v2RecoverableSessions) => set({ v2RecoverableSessions }),
+  setV2RecoveryIgnoredForSession: (v2RecoveryIgnoredForSession) => set({ v2RecoveryIgnoredForSession }),
 }));

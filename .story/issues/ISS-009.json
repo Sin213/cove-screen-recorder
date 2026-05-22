@@ -22,6 +22,6 @@
   "resolution": null,
   "resolvedDate": null,
   "severity": "high",
-  "status": "open",
+  "status": "inprogress",
   "title": "v2 UI gate disables Start replay buffer whenever helper has recoverable sessions; RECOVERY_AVAILABLE has no skip/clear-all path so all five §22 manual rows are reblocked"
 }

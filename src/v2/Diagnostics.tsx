@@ -1,7 +1,13 @@
 // V2 diagnostics surface — engine status, restart, bundle, recovery.
+import { useState } from "react";
 import { useStore } from "../store";
 import type { V2RecoverableSession } from "./fsm";
-import { discardRecovery, restoreRecovery } from "./engine";
+import {
+  discardAllRecoverable,
+  discardRecovery,
+  ignoreRecoveryForSession,
+  restoreRecovery,
+} from "./engine";
 
 function formatBytes(b: number): string {
 
@@ -17,6 +23,7 @@ function formatDuration(s: number): string {
 }
 
 function RecoveryBanner({ sessions }: { sessions: V2RecoverableSession[] }) {
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
   return (
     <div className="v2-recovery-banner">
       <div className="v2-recovery-title">Unsaved recordings found</div>
@@ -39,6 +46,43 @@ function RecoveryBanner({ sessions }: { sessions: V2RecoverableSession[] }) {
           </button>
         </div>
       ))}
+      <div className="v2-recovery-footer">
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => ignoreRecoveryForSession()}
+        >
+          Ignore for this session
+        </button>
+        {confirmDiscardAll ? (
+          <div className="v2-recovery-confirm">
+            <span className="v2-recovery-meta">
+              Discard {sessions.length} unsaved recording{sessions.length === 1 ? "" : "s"}?
+            </span>
+            <button
+              className="btn btn-record btn-sm"
+              onClick={() => {
+                void discardAllRecoverable();
+                setConfirmDiscardAll(false);
+              }}
+            >
+              Confirm discard all
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setConfirmDiscardAll(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setConfirmDiscardAll(true)}
+          >
+            Discard all ({sessions.length})
+          </button>
+        )}
+      </div>
     </div>
   );
 }
