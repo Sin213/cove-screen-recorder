@@ -1,0 +1,4 @@
+{
+  "hasRequestAnimationFrame": true,
+  "matchedSnippet": "requestAnimationFrame(tick);\n    };\n    rafRef.current = requestAnimationFrame(tick);\n    return () => cancelAnimationFrame(rafRef.current);\n  }, [sessionReadyMs]);\n\n  return elapsed;\n}\n"
+}

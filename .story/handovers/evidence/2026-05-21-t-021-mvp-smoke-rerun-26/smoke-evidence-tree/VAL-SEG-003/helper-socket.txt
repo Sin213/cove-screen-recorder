@@ -1,0 +1,1 @@
+/run/user/1000/cove-screen-recorder/runner-2a927a07.sock

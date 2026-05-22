@@ -1,0 +1,32 @@
+[
+  {
+    "name": "export completed successfully (not failed or cancelled)",
+    "observed": "export.completed",
+    "required": "export.completed",
+    "passed": true
+  },
+  {
+    "name": "EXPORTING window >= 3 seconds",
+    "observed": 0,
+    "required": ">= 3",
+    "passed": false
+  },
+  {
+    "name": "HUD diagnostics at >= 1 Hz during EXPORTING window",
+    "observed": "passed (0 samples over 0s)",
+    "required": ">= 1 capture.diagnostics event per second",
+    "passed": true
+  },
+  {
+    "name": "App.tsx: v2 clock active for RECORDING/SAVING/EXPORTING with v2SessionReadyMs guard",
+    "observed": "assertion matched",
+    "required": "v2 active-state array includes RECORDING/SAVING/EXPORTING AND v2SessionReadyMs null check present",
+    "passed": true
+  },
+  {
+    "name": "src/v2/clocks.ts: useV2ElapsedMs is rAF-driven",
+    "observed": "requestAnimationFrame found",
+    "required": "useV2ElapsedMs uses requestAnimationFrame",
+    "passed": true
+  }
+]

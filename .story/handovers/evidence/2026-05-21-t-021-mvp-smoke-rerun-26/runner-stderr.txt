@@ -1,0 +1,17 @@
+[runner] Helper socket not found — all scripted-local rows will skip.
+[runner] VAL-PKG-001: skip (helper-not-available)
+[runner] VAL-CAP-001: skip (manual)
+[runner] VAL-CAP-003: pass — Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+[runner] VAL-CAP-004: skip (helper-not-available)
+[runner] VAL-CAP-006: skip (manual)
+[runner] VAL-UI-005: skip (manual)
+[runner] VAL-ENC-001: skip (helper-not-available)
+[runner] VAL-ENC-006: skip (manual)
+[runner] VAL-SEG-001: skip (helper-not-available)
+[runner] VAL-SEG-003: pass — replay.save completed in 1 ms (gate: 2250 ms)
+[runner] VAL-EXP-001: pass — Export completed: 7933968 bytes, SHA256 verified, 60 s window (28.76 s actual)
+[runner] VAL-EXP-010: pass — No dup PTS; cadence within variable-rate policy; 1560 frames in 28.8 s (nominal=60.00 fps source=row-config)
+[runner] VAL-EXP-012: pass — Concurrent export OK: during-export drops=0, export=export.completed
+[runner] VAL-UI-003: fail — EXPORTING window >= 3 seconds
+[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779409319233.json
+[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-22T00-13-32-873Z/report.json

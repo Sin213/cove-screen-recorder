@@ -1,0 +1,6 @@
+{
+  "hasAllActiveStates": true,
+  "hasReadyMsCheck": true,
+  "clockConditionFound": true,
+  "matchedSnippet": "v2SessionReadyMs !== null &&\n    [\"RECORDING\", \"SAVING\", \"EXPORTING"
+}

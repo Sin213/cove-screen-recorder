@@ -1,0 +1,23 @@
+
+Suite: smoke  |  Verdict: FAIL  |  2026-05-22T00:13:32.873Z
+  pass=5  fail=1  skip=8  error=0
+
+ID              Status    Class           Reason / Message
+--------------------------------------------------------------------------------
+VAL-PKG-001     skip      scripted-local  helper-not-available
+VAL-CAP-001     skip      manual          manual
+VAL-CAP-003     pass      scripted-local  Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+VAL-CAP-004     skip      scripted-local  helper-not-available
+VAL-CAP-006     skip      manual          manual
+VAL-UI-005      skip      manual          manual
+VAL-ENC-001     skip      scripted-local  helper-not-available
+VAL-ENC-006     skip      manual          manual
+VAL-SEG-001     skip      scripted-local  helper-not-available
+VAL-SEG-003     pass      scripted-local  replay.save completed in 1 ms (gate: 2250 ms)
+VAL-EXP-001     pass      scripted-local  Export completed: 7933968 bytes, SHA256 verified, 60 s window (28.76 s actual)
+VAL-EXP-010     pass      scripted-local  No dup PTS; cadence within variable-rate policy; 1560 frames in 28.8 s (nominal=60.00 fps source=row-config)
+VAL-EXP-012     pass      scripted-local  Concurrent export OK: during-export drops=0, export=export.completed
+VAL-UI-003      fail      scripted-local  EXPORTING window >= 3 seconds
+
+Stopped early at VAL-UI-003 (first must-pass red).
+
