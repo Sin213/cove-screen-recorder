@@ -1,0 +1,27 @@
+{
+  "components": [
+    "ui",
+    "renderer"
+  ],
+  "discoveredDate": "2026-05-22",
+  "id": "ISS-009",
+  "impact": "Under `VITE_COVE_V2_UI=1` (the gate added in commit 6a4c1b1 specifically to unblock the ISS-008 manual rows), the renderer transitions `v2State` from BOOTING to RECOVERY_AVAILABLE on every cold start where the helper's segments directory holds any leftover `pw-session-0000-*` directories. The §22 smoke machine currently has 51 such sessions (64 segment dirs in `$XDG_RUNTIME_DIR/cove-screen-recorder/segments/`), and the helper's boot-time `scan_recoverable_sessions` (helper/src/segment/recovery.rs:36,198) emits `replay.recoveryAvailable`; the renderer's `engine.onReady` handler (src/v2/engine.ts:46,52) polls `_refreshRecoverableSessions` (src/v2/engine.ts:361-376) and sets `v2State = \"RECOVERY_AVAILABLE\"`. The v2 gate's `startBufferDisabled` derivation (src/App.tsx:521-523) is `v2StartPending || v2State !== \"IDLE\" || status !== \"idle\"`, so RECOVERY_AVAILABLE hard-disables the Start replay buffer `<button>` at src/App.tsx:755. The only escape paths from RECOVERY_AVAILABLE are per-session `restoreRecovery` (transitions through SAVING → EXPORTING via the full export pipeline, src/v2/engine.ts:242-257) and per-session `discardRecovery` (src/v2/engine.ts:236-240). `RecoveryBanner` (src/v2/Diagnostics.tsx:19-44) renders only per-row Save/Discard buttons — there is no bulk-discard, no \"skip recovery / ignore and start fresh\" affordance, and the gate does not exempt RECOVERY_AVAILABLE. There is also a derivation mismatch: `v2Busy` (src/App.tsx:118-120) excludes RECOVERY_AVAILABLE so the Record button remains enabled, but `startBufferDisabled` includes RECOVERY_AVAILABLE so Start replay buffer is disabled — exactly the asymmetry the operator observed (\"Record button enabled; Start replay buffer disabled with blocked cursor; Unsaved recordings recovery panel visible with multiple Save/Discard entries\"). Result: all five §22 manual rows that ISS-008 was supposed to unblock under the new gate (VAL-CAP-001, VAL-CAP-006, VAL-UI-005, VAL-ENC-006, VAL-UI-012) remain unreachable from the visible operator UI. Owner-on-fail layer: ui (the v2 gate did not account for RECOVERY_AVAILABLE; the recovery banner is missing a bulk-clear/skip affordance). Helper, supervisor, engine handshake, JSON-RPC transport, and the v2 capture wrappers themselves are healthy — once RECOVERY_AVAILABLE is exempted from the Start gate or a skip-recovery path is wired, the same v2 capture path is ready to drive the rows. Evidence: .story/handovers/evidence/2026-05-22-t-010c-slice-3-m1-smoke-completion-retry/blocker-VAL-CAP-001/{analysis.md,code-refs.txt,helper-recovery-scan.txt,segments-dir-listing.txt} and the helper log at `~/.config/Cove Screen Recorder/logs/engine.log` (15:17:35Z `discovered recoverable sessions from prior crash count=51`). Distinct from but downstream of ISS-008 — ISS-008 remains inprogress and unresolved pending this fix.",
+  "location": [
+    "src/App.tsx:521-523",
+    "src/App.tsx:755",
+    "src/App.tsx:118-120",
+    "src/v2/engine.ts:120-127",
+    "src/v2/engine.ts:361-386",
+    "src/v2/Diagnostics.tsx:19-44"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-010c",
+    "T-020"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "v2 UI gate disables Start replay buffer whenever helper has recoverable sessions; RECOVERY_AVAILABLE has no skip/clear-all path so all five §22 manual rows are reblocked"
+}

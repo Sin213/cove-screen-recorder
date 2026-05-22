@@ -23,6 +23,6 @@
   "resolution": null,
   "resolvedDate": null,
   "severity": "high",
-  "status": "open",
+  "status": "inprogress",
   "title": "T-020 renderer migration not landed: v2 capture/replay RPCs have zero callers in src/; visible UI still routes through v1 MediaRecorder path"
 }
