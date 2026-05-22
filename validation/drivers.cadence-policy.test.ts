@@ -24,6 +24,13 @@ import { test } from "node:test";
 import * as assert from "node:assert/strict";
 import { evaluateCadenceThresholds, buildCadenceFpsStats } from "./drivers";
 import type { CadenceEvalContext } from "./drivers";
+import {
+  analyzePtsCadence,
+  checkFrameCount,
+  checkFrameCountVariableRate,
+  THRESHOLDS,
+  VARIABLE_RATE_CADENCE,
+} from "./assertions";
 
 function gatePassed(results: ReturnType<typeof evaluateCadenceThresholds>): boolean {
   return results.every((t) => t.gating === false || t.passed);
@@ -235,4 +242,132 @@ test("buildCadenceFpsStats: informational strict cadence uses the same effective
     parseFloat(String(infoResult!.observed)) < 54.95,
     `informational observed ${infoResult!.observed} should reflect post-warmup mean (< 54.95)`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// VAL-EXP-010 variable-rate export cadence policy: PTS-shaped gate tests.
+//
+// driveValExp010 builds the same predicates inline from analyzePtsCadence +
+// checkFrameCountVariableRate + checkFrameCount + the VARIABLE_RATE_CADENCE
+// constants. These tests exercise the predicates against PTS streams that
+// approximate real rerun evidence so the gate envelopes are protected from
+// regressions in either direction (loosening to silent-pass, or tightening
+// past honest variable-rate variance).
+// ---------------------------------------------------------------------------
+
+function buildEvenPts(frameCount: number, durationS: number): number[] {
+  // First PTS at 0, last PTS at durationS, evenly spaced — keeps meanIntervalS
+  // exactly durationS/(frameCount-1).
+  const out: number[] = [];
+  if (frameCount < 2) return out;
+  for (let i = 0; i < frameCount; i++) {
+    out.push((i * durationS) / (frameCount - 1));
+  }
+  return out;
+}
+
+test("VAL-EXP-010 variable-rate: rerun-25-shaped fps_num=0 passes variable-rate envelope", () => {
+  // Rerun 25 evidence basis: frameCount=1560, durationS≈28.5, mean ≈ 54.7 fps.
+  // captureFormat.fps_num=0 → cadencePolicy=variable-rate, nominalFps=60, source=row-config.
+  const frameCount = 1560;
+  const durationS = 28.5;
+  const nominalFps = 60;
+  const pts = buildEvenPts(frameCount, durationS);
+  const cadence = analyzePtsCadence(pts, nominalFps);
+  const meanFps = 1 / cadence.meanIntervalS;
+
+  const minFps = nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMinFracOfNominal;
+  const maxFps = nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMaxFracOfNominal;
+  // Mean fps envelope: 54.7 ∈ [51, 61.2] → passes the gating threshold.
+  assert.ok(meanFps >= minFps && meanFps <= maxFps,
+    `meanFps=${meanFps} should be in [${minFps}, ${maxFps}]`);
+
+  // Frame-count envelope: 1560 ∈ [floor(28.5*60*0.85), ceil(28.5*60*1.02)] = [1453, 1745].
+  const fc = checkFrameCountVariableRate(cadence.frameCount, durationS, nominalFps);
+  assert.equal(fc.passed, true);
+  assert.equal(fc.lowExpected, 1453);
+  assert.equal(fc.highExpected, 1745);
+  assert.equal(fc.actualCount, 1560);
+
+  // duplicatedPtsCount remains strict — evenly spaced PTS produce zero dup.
+  assert.equal(cadence.duplicatedPtsCount, 0);
+});
+
+test("VAL-EXP-010 variable-rate: degenerate 5 fps mean fails variable-rate mean range", () => {
+  // 5 fps mean: 30 s capture at 0.2 s intervals → 150 frames, meanFps = 5.
+  // captureFormat.fps_num=0, nominalFps=60 → cadencePolicy=variable-rate.
+  const frameCount = 150;
+  const durationS = (frameCount - 1) * 0.2;
+  const nominalFps = 60;
+  const pts = buildEvenPts(frameCount, durationS);
+  const cadence = analyzePtsCadence(pts, nominalFps);
+  const meanFps = 1 / cadence.meanIntervalS;
+
+  const minFps = nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMinFracOfNominal;
+  const maxFps = nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMaxFracOfNominal;
+  // 5 fps is well below 0.85·60=51 fps → variable-rate mean range fails.
+  assert.ok(meanFps < minFps, `meanFps=${meanFps} should be below ${minFps}`);
+  assert.equal(meanFps < minFps || meanFps > maxFps, true);
+
+  // Frame-count envelope also fails: 150 below floor(durationS*60*0.85).
+  const fc = checkFrameCountVariableRate(cadence.frameCount, durationS, nominalFps);
+  assert.equal(fc.passed, false);
+});
+
+test("VAL-EXP-010 strict: fps_num>0 + rerun-25-shaped numbers fails strict path", () => {
+  // captureFormat with fps_num>0 → nominalSource="negotiated", cadencePolicy=strict.
+  // Rerun-25 mean ≈ 54.7 fps is FAR outside ±0.5% of nominal — strict path fails.
+  const frameCount = 1560;
+  const durationS = 28.5;
+  const nominalFps = 60;
+  const pts = buildEvenPts(frameCount, durationS);
+  const cadence = analyzePtsCadence(pts, nominalFps);
+
+  const nominalIntervalS = 1 / nominalFps;
+  const meanTolS = nominalIntervalS * THRESHOLDS.cadenceMeanToleranceFrac;
+  const meanPassed =
+    Math.abs(cadence.meanIntervalS - nominalIntervalS) <= meanTolS;
+  assert.equal(meanPassed, false,
+    `strict mean ±${THRESHOLDS.cadenceMeanToleranceFrac * 100}% gate should fail at mean ≈ 54.7 fps under nominal=60`);
+
+  // Strict frame-count gate: |1560 − round(28.5×60)=1710| = 150 ≫ 1.
+  const fc = checkFrameCount(cadence.frameCount, durationS, nominalFps);
+  assert.equal(fc.passed, false);
+  assert.equal(fc.expected, 1710);
+});
+
+test("VAL-EXP-010 variable-rate: duplicatedPtsCount above allowance fails", () => {
+  // 30 s of mostly-good cadence at ~55 fps, but enough consecutive PTS pairs
+  // closer than half a nominal frame (1/120 s = 8.33 ms) to exceed the dup
+  // allowance. The duplicatedPtsCount gate stays strict on the variable-rate
+  // path: zero tolerance beyond `ceil(durationS/60) × duplicatedPtsPerMinute`.
+  const nominalFps = 60;
+  const durationS = 30;
+  const halfFrameS = 1 / (2 * nominalFps);
+  const goodIntervalS = 1 / 55; // ~18.18 ms — well above halfFrame
+  const dupIntervalS = halfFrameS * 0.5; // ~4.17 ms — registers as a duplicate
+
+  // Allowance for a 30 s clip: ceil(30/60 × 1) = 1. We inject 10 dup pairs.
+  const dupAllowance = Math.ceil(
+    (durationS / 60) * THRESHOLDS.duplicatedPtsPerMinute,
+  );
+  const dupCount = 10;
+
+  const pts: number[] = [];
+  let t = 0;
+  pts.push(t);
+  for (let i = 0; i < dupCount; i++) {
+    t += dupIntervalS;
+    pts.push(t);
+  }
+  while (t < durationS) {
+    t += goodIntervalS;
+    pts.push(t);
+  }
+  const cadence = analyzePtsCadence(pts, nominalFps);
+
+  assert.ok(cadence.duplicatedPtsCount >= dupCount,
+    `expected ≥ ${dupCount} duplicated PTS, got ${cadence.duplicatedPtsCount}`);
+  assert.ok(cadence.duplicatedPtsCount > dupAllowance,
+    `dup ${cadence.duplicatedPtsCount} should exceed allowance ${dupAllowance}`);
 });

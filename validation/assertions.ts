@@ -161,6 +161,45 @@ export function checkFrameCount(
 }
 
 /**
+ * VAL-EXP-010 variable-rate frame-count gate. Mirrors the VAL-CAP-004
+ * variable-rate cadence envelope so exports that faithfully preserve a
+ * sub-nominal PipeWire variable-rate capture cadence (fps_num=0) are not
+ * failed by the strict ±1 frame-count gate that assumes fixed 60 fps.
+ *
+ * Bounds are inclusive: actualCount must satisfy
+ *   floor(durationS × nominalFps × MIN_FRAC) ≤ actualCount ≤
+ *   ceil (durationS × nominalFps × MAX_FRAC)
+ * where MIN_FRAC / MAX_FRAC come from VARIABLE_RATE_CADENCE.
+ */
+export function checkFrameCountVariableRate(
+  actualCount: number,
+  durationS: number,
+  nominalFps: number,
+): {
+  passed: boolean;
+  lowExpected: number;
+  highExpected: number;
+  actualCount: number;
+  durationS: number;
+  nominalFps: number;
+} {
+  const lowExpected = Math.floor(
+    durationS * nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMinFracOfNominal,
+  );
+  const highExpected = Math.ceil(
+    durationS * nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMaxFracOfNominal,
+  );
+  return {
+    passed: actualCount >= lowExpected && actualCount <= highExpected,
+    lowExpected,
+    highExpected,
+    actualCount,
+    durationS,
+    nominalFps,
+  };
+}
+
+/**
  * §6.1 — counts consecutive identical pkt_dts values within ½ frame duration.
  * pts is an array of numeric packet timestamps (same unit as frame duration).
  */

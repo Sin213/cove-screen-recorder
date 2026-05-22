@@ -27,6 +27,7 @@ import {
   extractVideoPts,
   analyzePtsCadence,
   checkFrameCount,
+  checkFrameCountVariableRate,
   checkHudHz,
 } from "./assertions";
 import { probeEnvironment, hasDisplayServer } from "./env-probe";
@@ -2913,6 +2914,16 @@ export async function driveValExp001(
 // non-skip/non-error terminal path.
 // ---------------------------------------------------------------------------
 
+// VAL-EXP-010 variable-rate export cadence policy: same payload shape used by
+// VAL-CAP-004's negotiated `sessionReady.format`. fps_num=0 marks the KDE
+// PipeWire variable-rate capture path; downstream export gates branch on it.
+export interface CaptureFormat {
+  width: number;
+  height: number;
+  fps_num: number;
+  fps_den: number;
+}
+
 type ProduceResult =
   | {
       kind: "ok";
@@ -2922,6 +2933,10 @@ type ProduceResult =
       durationS: number | null;
       cleanup: () => void;
       evidencePaths: Record<string, string>;
+      // VAL-EXP-010 variable-rate policy: negotiated capture format from
+      // `capture.sessionReady`. null when the notification omitted `format`
+      // (variable-rate detection then falls back to row-config nominal).
+      captureFormat: CaptureFormat | null;
     }
   | { kind: "skip"; skipReason: SkipReason; message: string }
   | { kind: "fail"; message: string; durationMs: number }
@@ -3086,6 +3101,33 @@ async function produceStreamCopyMp4(
       "sessionReady-notification.json",
       sessionReadyNotif,
     );
+
+    // VAL-EXP-010 variable-rate policy: pull the negotiated capture format
+    // from sessionReady so the export-side driver can mirror VAL-CAP-004's
+    // nominalFps + isVariableRate derivation. Missing/malformed payloads
+    // collapse to null and the caller falls back to row-config nominal.
+    const srParams = sessionReadyNotif.params as
+      | Record<string, unknown>
+      | undefined;
+    const rawFormat = srParams?.format as
+      | Partial<CaptureFormat>
+      | undefined
+      | null;
+    let producedCaptureFormat: CaptureFormat | null = null;
+    if (
+      rawFormat &&
+      typeof rawFormat.width === "number" &&
+      typeof rawFormat.height === "number" &&
+      typeof rawFormat.fps_num === "number" &&
+      typeof rawFormat.fps_den === "number"
+    ) {
+      producedCaptureFormat = {
+        width: rawFormat.width,
+        height: rawFormat.height,
+        fps_num: rawFormat.fps_num,
+        fps_den: rawFormat.fps_den,
+      };
+    }
 
     {
       let encProbeNotif: RpcNotification | null = null;
@@ -3372,6 +3414,7 @@ async function produceStreamCopyMp4(
         "export-terminal-event": evidenceDir + "/export-terminal-event.json",
         "sha256-check": evidenceDir + "/sha256-check.json",
       },
+      captureFormat: producedCaptureFormat,
     };
   } catch (err) {
     return {
@@ -3438,7 +3481,7 @@ export async function driveValExp010(
     });
   }
 
-  const { finalPath, cleanup, durationS, evidencePaths } = produced;
+  const { finalPath, cleanup, durationS, evidencePaths, captureFormat } = produced;
 
   try {
     let framesJson: unknown;
@@ -3487,7 +3530,32 @@ export async function driveValExp010(
       lastPts: ptsSeconds[ptsSeconds.length - 1],
     });
 
-    const nominalFps = 60;
+    // VAL-EXP-010 variable-rate export cadence policy. Mirrors VAL-CAP-004:
+    // nominal fps comes from the negotiated capture format when fps_num/fps_den
+    // are both > 0; otherwise (fps_num=0 KDE PipeWire variable-rate path, or no
+    // sessionReady format) it falls back to the row-config 60 fps target.
+    // isVariableRate is true only when the helper actually delivered
+    // captureFormat with fps_num=0 — missing captureFormat is NOT treated as
+    // variable-rate, so old smoke runs (no produced.captureFormat) keep the
+    // strict path.
+    let nominalFps: number;
+    let nominalSource: CadenceNominalSource;
+    if (
+      captureFormat &&
+      captureFormat.fps_num > 0 &&
+      captureFormat.fps_den > 0
+    ) {
+      nominalFps = captureFormat.fps_num / captureFormat.fps_den;
+      nominalSource = "negotiated";
+    } else {
+      nominalFps = 60;
+      nominalSource = "row-config";
+    }
+    const isVariableRate =
+      captureFormat !== null && captureFormat.fps_num === 0;
+    const cadencePolicy: "variable-rate" | "strict" =
+      isVariableRate && nominalSource === "row-config" ? "variable-rate" : "strict";
+
     const cadence = analyzePtsCadence(ptsSeconds, nominalFps);
     writeJsonEvidence(evidenceDir, "cadence-analysis.json", cadence);
 
@@ -3501,6 +3569,8 @@ export async function driveValExp010(
       (fileDurationS / 60) * THRESHOLDS.duplicatedPtsPerMinute,
     );
 
+    // duplicatedPtsCount remains a strict gate on both paths — the fake-60fps
+    // regression invariant is independent of capture cadence policy.
     thresholds.push({
       name: `duplicated PTS ≤ ${dupAllowance} (≤ ${THRESHOLDS.duplicatedPtsPerMinute}/min)`,
       observed: String(cadence.duplicatedPtsCount),
@@ -3509,39 +3579,119 @@ export async function driveValExp010(
     });
 
     const nominalIntervalS = cadence.nominalIntervalS;
-    const meanTolS = nominalIntervalS * THRESHOLDS.cadenceMeanToleranceFrac;
-    thresholds.push({
-      name: `cadence mean ±${(THRESHOLDS.cadenceMeanToleranceFrac * 100).toFixed(1)}% of nominal`,
-      observed: `${(cadence.meanIntervalS * 1000).toFixed(3)} ms`,
-      required: `${((nominalIntervalS - meanTolS) * 1000).toFixed(3)}–${((nominalIntervalS + meanTolS) * 1000).toFixed(3)} ms`,
-      passed: Math.abs(cadence.meanIntervalS - nominalIntervalS) <= meanTolS,
+    const meanFps = cadence.meanIntervalS > 0 ? 1 / cadence.meanIntervalS : 0;
+
+    if (cadencePolicy === "variable-rate") {
+      // Variable-rate path: gate on mean fps + frame-count envelopes that
+      // match the VAL-CAP-004 variable-rate constants. Strict mean/p95/p99
+      // and strict frame-count remain in the evidence bundle but never gate.
+      const minFps = nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMinFracOfNominal;
+      const maxFps = nominalFps * VARIABLE_RATE_CADENCE.variableRateCadenceMaxFracOfNominal;
+      thresholds.push({
+        name: `cadence mean in variable-rate range [${minFps.toFixed(2)}..${maxFps.toFixed(2)}] fps (nominal source=${nominalSource})`,
+        observed: meanFps.toFixed(3),
+        required: `${minFps.toFixed(2)}..${maxFps.toFixed(2)}`,
+        passed: meanFps >= minFps && meanFps <= maxFps,
+      });
+
+      const fcVar = checkFrameCountVariableRate(
+        cadence.frameCount,
+        fileDurationS,
+        nominalFps,
+      );
+      thresholds.push({
+        name: `frame count in variable-rate envelope [${fcVar.lowExpected}..${fcVar.highExpected}] (durationS=${fileDurationS.toFixed(3)} × ${nominalFps.toFixed(2)} fps × [${VARIABLE_RATE_CADENCE.variableRateCadenceMinFracOfNominal}..${VARIABLE_RATE_CADENCE.variableRateCadenceMaxFracOfNominal}])`,
+        observed: String(fcVar.actualCount),
+        required: `${fcVar.lowExpected}..${fcVar.highExpected}`,
+        passed: fcVar.passed,
+      });
+
+      const meanTolS = nominalIntervalS * THRESHOLDS.cadenceMeanToleranceFrac;
+      thresholds.push({
+        name: `cadence mean ±${(THRESHOLDS.cadenceMeanToleranceFrac * 100).toFixed(1)}% of nominal (variable-rate informational)`,
+        observed: `${(cadence.meanIntervalS * 1000).toFixed(3)} ms`,
+        required: `${((nominalIntervalS - meanTolS) * 1000).toFixed(3)}–${((nominalIntervalS + meanTolS) * 1000).toFixed(3)} ms`,
+        passed: Math.abs(cadence.meanIntervalS - nominalIntervalS) <= meanTolS,
+        gating: false,
+      });
+
+      const p95TolS = nominalIntervalS * THRESHOLDS.cadenceP95ToleranceFrac;
+      thresholds.push({
+        name: `cadence p95 ±${(THRESHOLDS.cadenceP95ToleranceFrac * 100).toFixed(1)}% of nominal (variable-rate informational)`,
+        observed: `${(cadence.p95IntervalS * 1000).toFixed(3)} ms`,
+        required: `${((nominalIntervalS - p95TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p95TolS) * 1000).toFixed(3)} ms`,
+        passed: Math.abs(cadence.p95IntervalS - nominalIntervalS) <= p95TolS,
+        gating: false,
+      });
+
+      const p99TolS = nominalIntervalS * THRESHOLDS.cadenceP99ToleranceFrac;
+      thresholds.push({
+        name: `cadence p99 ±${(THRESHOLDS.cadenceP99ToleranceFrac * 100).toFixed(1)}% of nominal (variable-rate informational)`,
+        observed: `${(cadence.p99IntervalS * 1000).toFixed(3)} ms`,
+        required: `${((nominalIntervalS - p99TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p99TolS) * 1000).toFixed(3)} ms`,
+        passed: Math.abs(cadence.p99IntervalS - nominalIntervalS) <= p99TolS,
+        gating: false,
+      });
+
+      const fcStrict = checkFrameCount(cadence.frameCount, fileDurationS, nominalFps);
+      thresholds.push({
+        name: "frame count within ±1 of round(duration × fps) (variable-rate informational)",
+        observed: String(cadence.frameCount),
+        required: `${fcStrict.expected} ± 1`,
+        passed: fcStrict.passed,
+        gating: false,
+      });
+    } else {
+      // Strict path: behaviour identical to the pre-policy code, just keyed
+      // off the (now possibly negotiated) nominalFps instead of a hardcoded 60.
+      const meanTolS = nominalIntervalS * THRESHOLDS.cadenceMeanToleranceFrac;
+      thresholds.push({
+        name: `cadence mean ±${(THRESHOLDS.cadenceMeanToleranceFrac * 100).toFixed(1)}% of nominal`,
+        observed: `${(cadence.meanIntervalS * 1000).toFixed(3)} ms`,
+        required: `${((nominalIntervalS - meanTolS) * 1000).toFixed(3)}–${((nominalIntervalS + meanTolS) * 1000).toFixed(3)} ms`,
+        passed: Math.abs(cadence.meanIntervalS - nominalIntervalS) <= meanTolS,
+      });
+
+      const p95TolS = nominalIntervalS * THRESHOLDS.cadenceP95ToleranceFrac;
+      thresholds.push({
+        name: `cadence p95 ±${(THRESHOLDS.cadenceP95ToleranceFrac * 100).toFixed(1)}% of nominal`,
+        observed: `${(cadence.p95IntervalS * 1000).toFixed(3)} ms`,
+        required: `${((nominalIntervalS - p95TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p95TolS) * 1000).toFixed(3)} ms`,
+        passed: Math.abs(cadence.p95IntervalS - nominalIntervalS) <= p95TolS,
+      });
+
+      const p99TolS = nominalIntervalS * THRESHOLDS.cadenceP99ToleranceFrac;
+      thresholds.push({
+        name: `cadence p99 ±${(THRESHOLDS.cadenceP99ToleranceFrac * 100).toFixed(1)}% of nominal`,
+        observed: `${(cadence.p99IntervalS * 1000).toFixed(3)} ms`,
+        required: `${((nominalIntervalS - p99TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p99TolS) * 1000).toFixed(3)} ms`,
+        passed: Math.abs(cadence.p99IntervalS - nominalIntervalS) <= p99TolS,
+      });
+
+      const fcResult = checkFrameCount(cadence.frameCount, fileDurationS, nominalFps);
+      thresholds.push({
+        name: "frame count within ±1 of round(duration × fps)",
+        observed: String(cadence.frameCount),
+        required: `${fcResult.expected} ± 1`,
+        passed: fcResult.passed,
+      });
+    }
+
+    writeJsonEvidence(evidenceDir, "exp-cadence-policy.json", {
+      captureFormat: captureFormat ?? null,
+      nominalFps,
+      nominalSource,
+      isVariableRate,
+      cadencePolicy,
+      meanFps,
+      frameCount: cadence.frameCount,
+      durationS: fileDurationS,
+      ...(cadencePolicy === "variable-rate"
+        ? { variableRateCadenceConstants: VARIABLE_RATE_CADENCE }
+        : {}),
     });
 
-    const p95TolS = nominalIntervalS * THRESHOLDS.cadenceP95ToleranceFrac;
-    thresholds.push({
-      name: `cadence p95 ±${(THRESHOLDS.cadenceP95ToleranceFrac * 100).toFixed(1)}% of nominal`,
-      observed: `${(cadence.p95IntervalS * 1000).toFixed(3)} ms`,
-      required: `${((nominalIntervalS - p95TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p95TolS) * 1000).toFixed(3)} ms`,
-      passed: Math.abs(cadence.p95IntervalS - nominalIntervalS) <= p95TolS,
-    });
-
-    const p99TolS = nominalIntervalS * THRESHOLDS.cadenceP99ToleranceFrac;
-    thresholds.push({
-      name: `cadence p99 ±${(THRESHOLDS.cadenceP99ToleranceFrac * 100).toFixed(1)}% of nominal`,
-      observed: `${(cadence.p99IntervalS * 1000).toFixed(3)} ms`,
-      required: `${((nominalIntervalS - p99TolS) * 1000).toFixed(3)}–${((nominalIntervalS + p99TolS) * 1000).toFixed(3)} ms`,
-      passed: Math.abs(cadence.p99IntervalS - nominalIntervalS) <= p99TolS,
-    });
-
-    const fcResult = checkFrameCount(cadence.frameCount, fileDurationS, nominalFps);
-    thresholds.push({
-      name: "frame count within ±1 of round(duration × fps)",
-      observed: String(cadence.frameCount),
-      required: `${fcResult.expected} ± 1`,
-      passed: fcResult.passed,
-    });
-
-    const allPassed = thresholds.every((t) => t.passed);
+    const allPassed = thresholds.every((t) => t.gating === false || t.passed);
 
     if (!allPassed && cadence.duplicatedPtsCount > dupAllowance) {
       writeEvidence(
@@ -3561,10 +3711,11 @@ export async function driveValExp010(
         ...evidencePaths,
         "ffprobe-frames": evidenceDir + "/ffprobe-frames.json",
         "cadence-analysis": evidenceDir + "/cadence-analysis.json",
+        "exp-cadence-policy": evidenceDir + "/exp-cadence-policy.json",
       },
       message: allPassed
-        ? `No dup PTS; cadence mean/p95/p99 within tolerance; ${cadence.frameCount} frames in ${fileDurationS.toFixed(1)} s`
-        : `PTS/cadence assertion failed — ${thresholds.filter((t) => !t.passed).map((t) => t.name).join("; ")}`,
+        ? `No dup PTS; cadence within ${cadencePolicy} policy; ${cadence.frameCount} frames in ${fileDurationS.toFixed(1)} s (nominal=${nominalFps.toFixed(2)} fps source=${nominalSource})`
+        : `PTS/cadence assertion failed (policy=${cadencePolicy}, nominal source=${nominalSource}) — ${thresholds.filter((t) => t.gating !== false && !t.passed).map((t) => t.name).join("; ")}`,
     });
   } finally {
     cleanup();
