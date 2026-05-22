@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SourceModal } from "./components/SourceModal";
 import { HotkeysDialog } from "./components/HotkeysDialog";
 import { useStore } from "./store";
-import { initV2Engine, saveReplay as v2SaveReplay } from "./v2/engine";
+import {
+  initV2Engine,
+  saveReplay as v2SaveReplay,
+  startCapture as v2StartCapture,
+  stopCapture as v2StopCapture,
+} from "./v2/engine";
 import { useV2ElapsedMs } from "./v2/clocks";
 import { Diagnostics } from "./v2/Diagnostics";
 import type { AppInfo, CaptureSource, CropRect, PresetId } from "./types";
@@ -99,6 +104,23 @@ export function App() {
   const [replayHandle, setReplayHandle] = useState<ReplayBufferHandle | null>(null);
   const [replayBuffered, setReplayBuffered] = useState(0);
   const [replaySaving, setReplaySaving] = useState(false);
+  // ISS-008: in-flight latch for the v2 helper start handshake. Keeps the
+  // Start button disabled between requestSession dispatch and the wrapper's
+  // resolution so a second click cannot kick off a parallel negotiation.
+  const [v2StartPending, setV2StartPending] = useState(false);
+
+  // ISS-008 remediation: gate the visible Start/Stop replay buffer UI behind
+  // VITE_COVE_V2_UI so smoke can drive the v2 helper capture path. When OFF,
+  // existing v1 recorder-client behavior is preserved verbatim.
+  // Derived early so the hotkey useEffect below can close over `v2Busy`.
+  const v2UiEnabled = import.meta.env.VITE_COVE_V2_UI === "1";
+  const v2BufferActive =
+    v2State === "RECORDING" || v2State === "SAVING" || v2State === "EXPORTING";
+  // Single "v2 capture busy" condition shared across every v1↔v2 mutual-
+  // exclusion site: the Start replay button, the main Record button, and the
+  // global toggle/gif hotkey handlers. Covers both the async handshake
+  // (v2StartPending) and the live capture (v2BufferActive).
+  const v2Busy = v2UiEnabled && (v2StartPending || v2BufferActive);
   const replayHandleRef = useRef<ReplayBufferHandle | null>(null);
   useEffect(() => { replayHandleRef.current = replayHandle; }, [replayHandle]);
   const [livePreview, setLivePreview] = useState<MediaStream | null>(null);
@@ -445,9 +467,9 @@ export function App() {
     const off = window.cove.onHotkey((action) => {
       if (action === "toggle") {
         if (status === "recording") void stopFlow(true);
-        else if (status === "idle") beginDefault();
+        else if (status === "idle" && !v2Busy) beginDefault();
       } else if (action === "gif") {
-        if (status === "idle") void beginCrop("gif");
+        if (status === "idle" && !v2Busy) void beginCrop("gif");
       } else if (action === "replay") {
         if (v2State === "RECORDING") {
           void v2SaveReplay(replay.lengthSeconds);
@@ -458,7 +480,7 @@ export function App() {
       }
     });
     return off;
-  }, [status, beginDefault, beginCrop, stopFlow, saveReplay, v2State, replay.lengthSeconds]);
+  }, [status, beginDefault, beginCrop, stopFlow, saveReplay, v2State, v2Busy, replay.lengthSeconds]);
 
   useEffect(() => {
     if (status !== "recording") return;
@@ -496,7 +518,12 @@ export function App() {
             ? "Error"
             : "Ready";
 
-  const bigButtonDisabled = status !== "idle" && !isRecording;
+  const bufferRunning = v2UiEnabled ? v2BufferActive : !!replayHandle;
+  const startBufferDisabled = v2UiEnabled
+    ? v2StartPending || v2State !== "IDLE" || status !== "idle"
+    : status !== "idle";
+
+  const bigButtonDisabled = (status !== "idle" && !isRecording) || v2Busy;
   const triggerDefault = () => {
     if (isRecording) void stopFlow(true);
     else if (status === "idle") beginDefault();
@@ -725,11 +752,19 @@ export function App() {
               </select>
             </div>
             <div className="replay-actions">
-              {!replayHandle ? (
+              {!bufferRunning ? (
                 <button
                   className="btn btn-outline btn-sm"
-                  disabled={status !== "idle"}
-                  onClick={() => void startReplay()}
+                  disabled={startBufferDisabled}
+                  onClick={() => {
+                    if (!v2UiEnabled) {
+                      void startReplay();
+                      return;
+                    }
+                    if (v2StartPending) return;
+                    setV2StartPending(true);
+                    void v2StartCapture().finally(() => setV2StartPending(false));
+                  }}
                 >
                   Start replay buffer
                 </button>
@@ -750,7 +785,7 @@ export function App() {
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
-                    onClick={() => void stopReplay()}
+                    onClick={() => (v2UiEnabled ? void v2StopCapture() : void stopReplay())}
                     disabled={replaySaving}
                   >
                     Stop buffer

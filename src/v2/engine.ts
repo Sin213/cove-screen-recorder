@@ -256,6 +256,106 @@ export async function restoreRecovery(sessionId: string): Promise<void> {
   }
 }
 
+// Default helper capture options used when the operator clicks Start replay
+// buffer without overriding parameters. Mirrors the smoke matrix baseline.
+const DEFAULT_REQUEST_SESSION_OPTS = {
+  mode: "monitor",
+  cursor_mode: "embedded",
+  framerate_hint: 60,
+  persist: "transient",
+} as const;
+
+// Module-level in-flight guard against concurrent helper start RPCs (e.g.
+// double-click on the Start button while requestSession/startStream are still
+// negotiating, or while the helper has accepted the stream but hasn't yet
+// emitted capture.sessionReady). Belt-and-suspenders alongside any caller-side
+// latch.
+let _captureStartInFlight = false;
+
+// Safety cap on how long startCapture's post-startStream wait may block
+// before the in-flight latch self-releases. Matches the validation contract's
+// 30 s sessionReady budget so a slow-but-still-valid helper startup doesn't
+// re-enable the Start button mid-handshake. Bounded so a stuck helper can't
+// permanently disable the Start button either.
+const _CAPTURE_START_READY_TIMEOUT_MS = 30_000;
+
+// Block until the v2 FSM transitions away from IDLE (driven by the existing
+// capture.onSessionReady subscriber → _enterRecording) or the safety timeout
+// fires. Returns true if the helper became ready in time, false if the
+// timeout elapsed first. Resolves immediately with true if v2State is
+// already non-IDLE on entry.
+async function _waitForCaptureStateLeavesIdle(): Promise<boolean> {
+  if (gs().v2State !== "IDLE") return true;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (becameReady: boolean) => {
+      if (settled) return;
+      settled = true;
+      unsub();
+      clearTimeout(timer);
+      resolve(becameReady);
+    };
+    const unsub = useStore.subscribe((s, prev) => {
+      if (s.v2State !== prev.v2State && s.v2State !== "IDLE") finish(true);
+    });
+    const timer = setTimeout(() => finish(false), _CAPTURE_START_READY_TIMEOUT_MS);
+  });
+}
+
+// Operator-facing wrapper for the v2 helper capture path. Never sets v2State
+// directly — RECORDING is reached only when capture.onSessionReady fires and
+// the existing subscriber calls _enterRecording().
+export async function startCapture(opts?: Record<string, unknown>): Promise<void> {
+  if (_captureStartInFlight) return;
+  _captureStartInFlight = true;
+  try {
+    const api = window.coveApi;
+    const sessionOpts = opts ?? DEFAULT_REQUEST_SESSION_OPTS;
+    try {
+      await api.capture.requestSession(sessionOpts);
+    } catch (err) {
+      gs().log("error", `v2 capture: requestSession failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    try {
+      await api.capture.startStream({});
+    } catch (err) {
+      gs().log("error", `v2 capture: startStream failed: ${err instanceof Error ? err.message : String(err)}`);
+      try {
+        await api.capture.stopSession({});
+      } catch {
+        // Defensive: helper may have already torn down the session.
+      }
+      return;
+    }
+    // Hold the in-flight latch through the post-startStream → onSessionReady
+    // gap so a fast second click cannot dispatch a duplicate requestSession
+    // against an already-active helper session. The safety timeout matches
+    // the validation contract's sessionReady budget — if it fires, treat the
+    // start as a terminal failure and defensively tear down the helper
+    // session before releasing the latch so we don't leak an orphan session.
+    const becameReady = await _waitForCaptureStateLeavesIdle();
+    if (!becameReady) {
+      gs().log("error", `v2 capture: sessionReady not received within ${_CAPTURE_START_READY_TIMEOUT_MS}ms; tearing down helper session.`);
+      try {
+        await window.coveApi.capture.stopSession({});
+      } catch {
+        // Defensive: helper may already have torn down.
+      }
+    }
+  } finally {
+    _captureStartInFlight = false;
+  }
+}
+
+export async function stopCapture(): Promise<void> {
+  try {
+    await window.coveApi.capture.stopSession({});
+  } catch (err) {
+    gs().log("warn", `v2 capture: stopSession failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // Refresh the recoverable sessions list from the helper and update FSM state.
 // Falls back to IDLE when no sessions remain; onSnapshotPinned drives further transitions.
 async function _refreshRecoverableSessions(): Promise<void> {
