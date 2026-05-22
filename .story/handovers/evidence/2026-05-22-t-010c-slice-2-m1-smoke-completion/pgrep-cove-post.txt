@@ -1,0 +1,23 @@
+# pgrep -a -- name-only match (15-char limit) at 2026-05-22T07:05:29-07:00
+## cove-replay-eng (truncated name):
+959140 /home/sin/Projects/cove-screen-recorder/target/debug/cove-replay-engine --ipc-socket /run/user/1000/cove-screen-recorder/engine.sock --log-dir /home/sin/.config/Cove Screen Recorder/logs --log-level info
+## electron:
+959087 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron .
+959090 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=zygote --no-zygote-sandbox
+959091 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=zygote
+959093 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=zygote
+959121 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=gpu-process --enable-crash-reporter=942c4b49-f71f-4152-a6e6-cdefb5b8a221,no_channel --user-data-dir=/home/sin/.config/Cove Screen Recorder --gpu-preferences=UAAAAAAAAAAgAAAEAAAAAAAAAAAAAAAAAABgAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAABAAAAAAAAAAEAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAA --shared-files --field-trial-handle=3,i,5145533092553634415,8670150547757807835,262144 --enable-features=WebRTCPipeWireCapturer --disable-features=SpareRendererForSitePerProcess --variations-seed-version
+959125 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --enable-crash-reporter=942c4b49-f71f-4152-a6e6-cdefb5b8a221,no_channel --user-data-dir=/home/sin/.config/Cove Screen Recorder --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,5145533092553634415,8670150547757807835,262144 --enable-features=WebRTCPipeWireCapturer --disable-features=SpareRendererForSitePerProcess --variations-seed-version
+959138 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=renderer --enable-crash-reporter=942c4b49-f71f-4152-a6e6-cdefb5b8a221,no_channel --user-data-dir=/home/sin/.config/Cove Screen Recorder --app-path=/home/sin/Projects/cove-screen-recorder --no-sandbox --no-zygote --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=4 --time-ticks-at-unix-epoch=-1779207077746210 --launch-time-ticks=251133968726 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,5145533092553634415,8670150547757807835,262144 --enable-features=WebRTCPipeWireCapturer --disable-features=SpareRendererForSitePerProcess --variations-seed-version
+959139 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=renderer --enable-crash-reporter=942c4b49-f71f-4152-a6e6-cdefb5b8a221,no_channel --user-data-dir=/home/sin/.config/Cove Screen Recorder --app-path=/home/sin/Projects/cove-screen-recorder --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1779207077746210 --launch-time-ticks=251133975619 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,5145533092553634415,8670150547757807835,262144 --enable-features=WebRTCPipeWireCapturer --disable-features=SpareRendererForSitePerProcess --variations-seed-version
+959187 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=broker
+959383 /home/sin/Projects/cove-screen-recorder/node_modules/electron/dist/electron --type=utility --utility-sub-type=audio.mojom.AudioService --lang=en-US --service-sandbox-type=none --enable-crash-reporter=942c4b49-f71f-4152-a6e6-cdefb5b8a221,no_channel --user-data-dir=/home/sin/.config/Cove Screen Recorder --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,5145533092553634415,8670150547757807835,262144 --enable-features=WebRTCPipeWireCapturer --disable-features=SpareRendererForSitePerProcess --variations-seed-version
+## node (dev:renderer / dev:electron):
+958992 node /home/sin/Projects/cove-screen-recorder/node_modules/.bin/concurrently -k -s first -n VITE,ELECTRON npm:dev:renderer npm:dev:electron
+959021 node /home/sin/Projects/cove-screen-recorder/node_modules/.bin/cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .
+959023 node /home/sin/Projects/cove-screen-recorder/node_modules/.bin/vite
+959079 node /home/sin/Projects/cove-screen-recorder/node_modules/.bin/electron .
+## ffmpeg:
+960212 /usr/bin/ffmpeg -y -hide_banner -loglevel info -f pulse -ac 2 -ar 48000 -i alsa_output.usb-Feixiang_USB_HIFI_Audio-01.analog-stereo.monitor -c:a flac -compression_level 0 /home/sin/.config/Cove Screen Recorder/recordings/rec_mpgzli7v_gz2gwx.audio.flac
+## socket present?
+srwxr-xr-x 1 sin sin 0 May 22 06:56 /run/user/1000/cove-screen-recorder/engine.sock

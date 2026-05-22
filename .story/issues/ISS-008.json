@@ -1,0 +1,28 @@
+{
+  "components": [
+    "ui",
+    "renderer",
+    "supervision"
+  ],
+  "discoveredDate": "2026-05-22",
+  "id": "ISS-008",
+  "impact": "Five §22 manual smoke rows (VAL-CAP-001, VAL-CAP-006, VAL-UI-005, VAL-ENC-006, VAL-UI-012) are unreachable through the visible operator UI. The v2 helper (cove-replay-engine) boots cleanly and listens on the XDG socket, but the renderer never issues capture.requestSession / capture.startStream over JSON-RPC, so capture.sessionReady is never emitted and the rows cannot be observed manually. T-020 was marked complete on 2026-05-18 yet its binding scope is not in code: src/App.tsx's \"Start replay buffer\" / Start Recording paths still call startReplayBuffer / window.cove.* from src/recorder-client.ts (v1 MediaRecorder + ffmpeg-direct + libx264 / VP8 path); grep -rn \"capture.startStream|capture.requestSession\" src/ returns zero matches; preload.ts:76-77 still carries the comment \"v1.1.0 renderer code is untouched until T-020 migrates App.tsx to use window.coveApi.\" The escape clause from T-020's failure-handling section (\"gate the v2 flow behind a COVE_V2_UI=1 env var\") is also unimplemented — grep -rn \"COVE_V2|v2Enabled|enableV2|legacyMode|useV2\" src/ electron/ surfaces only the unrelated useV2ElapsedMs clock hook. T-010c Slice 2 (M1 §22 evidence completion for the six target rows) cannot close the five manual-row evidence gaps until either App.tsx is migrated to coveApi.capture.requestSession → startStream + coveApi.replay.save → exportStart per T-020 scope, or a COVE_V2_UI=1 gate is added. VAL-PKG-001 is unaffected (it drives the helper directly via dist-validation/runner.js and passed in Slice 2). Evidence: .story/handovers/evidence/2026-05-22-t-010c-slice-2-m1-smoke-completion/VAL-PKG-001/ (helper-readiness pass), .story/handovers/2026-05-22-t-010c-slice-2-m1-smoke-completion.md (root-cause analysis). Code references: src/App.tsx:5,12,397-406,732; src/v2/engine.ts (subscribers + save/export only, no capture-start caller); src/recorder-client.ts:711 startReplayBuffer (v1 path); electron/preload.ts:76-77,113-116; electron/engine-rpc.ts:219,223 (RPC wrappers exist); electron/main.ts:931-940 (ipcMain handlers exist).",
+  "location": [
+    "src/App.tsx",
+    "src/v2/engine.ts",
+    "src/recorder-client.ts",
+    "electron/preload.ts",
+    "electron/main.ts",
+    "electron/engine-rpc.ts"
+  ],
+  "phase": "p4-release",
+  "relatedTickets": [
+    "T-020",
+    "T-010c"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "T-020 renderer migration not landed: v2 capture/replay RPCs have zero callers in src/; visible UI still routes through v1 MediaRecorder path"
+}

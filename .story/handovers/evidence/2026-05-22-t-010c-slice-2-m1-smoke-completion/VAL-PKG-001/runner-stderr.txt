@@ -1,0 +1,4 @@
+[runner] Connected to helper at /run/user/1000/cove-screen-recorder/engine.sock
+[runner] VAL-PKG-001: pass — Helper readiness confirmed via engine.health + engine.version
+[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779431280098.json
+[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-22T06-28-00-081Z/report.json

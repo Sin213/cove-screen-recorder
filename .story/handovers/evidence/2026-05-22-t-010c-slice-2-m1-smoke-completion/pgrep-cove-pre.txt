@@ -1,0 +1,8 @@
+# pgrep -a -- name-only match for cove-replay-engine / cove-screen-recorder / electron at 2026-05-21T23:26:23-07:00
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+[no cove-replay-engine]
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+[no cove-screen-recorder]
+[no electron]

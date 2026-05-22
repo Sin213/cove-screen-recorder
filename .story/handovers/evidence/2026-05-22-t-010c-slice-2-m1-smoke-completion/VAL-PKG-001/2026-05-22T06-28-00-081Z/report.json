@@ -1,0 +1,56 @@
+{
+  "schema": "cove-validation-report/v1",
+  "suite": "smoke",
+  "startedAt": "2026-05-22T06:28:00.081Z",
+  "completedAt": "2026-05-22T06:28:00.098Z",
+  "rows": [
+    {
+      "id": "VAL-PKG-001",
+      "title": "coveApi.env.probe() returns clean result within 5 s",
+      "classification": "scripted-local",
+      "tier": "must-pass",
+      "ownerOnFail": "packaging",
+      "linkedSourceCase": "N-007",
+      "status": "pass",
+      "message": "Helper readiness confirmed via engine.health + engine.version",
+      "durationMs": 14,
+      "evidencePaths": {
+        "extra": {
+          "engine-health": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-22T06-28-00-081Z/VAL-PKG-001/engine-health.json",
+          "engine-version": "/home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-22T06-28-00-081Z/VAL-PKG-001/engine-version.json"
+        }
+      },
+      "thresholds": [
+        {
+          "name": "engine.health responds without error",
+          "observed": "ok",
+          "required": "no error",
+          "passed": true
+        },
+        {
+          "name": "engine.version responds without error",
+          "observed": "ok",
+          "required": "no error",
+          "passed": true
+        },
+        {
+          "name": "response within budget",
+          "observed": 14,
+          "required": "<= 5000 ms",
+          "passed": true
+        },
+        {
+          "name": "engine state is ready",
+          "observed": "ready",
+          "required": "ready",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "totalPass": 1,
+  "totalFail": 0,
+  "totalSkip": 0,
+  "totalError": 0,
+  "verdict": "pass"
+}
