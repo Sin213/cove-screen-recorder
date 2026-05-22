@@ -1,0 +1,11 @@
+# Sanitized pgrep output (redacted to remove unrelated shell command lines and session metadata)
+# Original command: pgrep -af cove-replay-engine
+# Captured: 2026-05-21 pre-run
+
+matchCount: 1
+realCoveReplayEngineProcesses: 0
+falsePositiveGrepMatches: 1   # bash command line containing the literal "cove-replay-engine" string
+notes: |
+  pgrep -af matched only the bash command line that invoked pgrep itself
+  (it contained the literal substring "cove-replay-engine" as part of the
+  output file path argument). No actual cove-replay-engine binary was running.

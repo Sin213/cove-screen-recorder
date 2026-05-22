@@ -1,0 +1,20 @@
+{
+  "captureFormat": {
+    "width": 1920,
+    "height": 1080,
+    "fps_num": 0,
+    "fps_den": 1
+  },
+  "nominalFps": 60,
+  "nominalSource": "row-config",
+  "isVariableRate": true,
+  "cadencePolicy": "variable-rate",
+  "meanFps": 54.16266106747275,
+  "frameCount": 1560,
+  "durationS": 28.800333333333334,
+  "variableRateCadenceConstants": {
+    "variableRateCadenceMinFracOfNominal": 0.85,
+    "variableRateCadenceMaxFracOfNominal": 1.02,
+    "variableRateCadenceMaxSpreadFps": 20
+  }
+}

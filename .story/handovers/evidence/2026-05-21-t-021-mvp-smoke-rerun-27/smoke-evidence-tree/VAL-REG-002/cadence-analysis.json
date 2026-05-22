@@ -1,0 +1,8 @@
+{
+  "frameCount": 1560,
+  "meanIntervalS": 0.01840398396407954,
+  "p95IntervalS": 0.01963399999999993,
+  "p99IntervalS": 0.020044999999999646,
+  "duplicatedPtsCount": 0,
+  "nominalIntervalS": 0.016666666666666666
+}

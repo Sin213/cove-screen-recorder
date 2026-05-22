@@ -1,0 +1,23 @@
+[runner] Helper socket not found — all scripted-local rows will skip.
+[runner] VAL-PKG-001: skip (helper-not-available)
+[runner] VAL-CAP-001: skip (manual)
+[runner] VAL-CAP-003: pass — Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
+[runner] VAL-CAP-004: pass — Monitor capture passed drop+cadence gates (60 samples, key=1080p60-nvenc)
+[runner] VAL-CAP-006: skip (manual)
+[runner] VAL-UI-005: skip (manual)
+[runner] VAL-ENC-001: pass — NVENC probe confirmed available via encoder.probeResult
+[runner] VAL-ENC-006: skip (manual)
+[runner] VAL-SEG-001: pass — Segment buffer stayed within disk budget over 64 samples (max 0.19%)
+[runner] VAL-SEG-003: pass — replay.save completed in 0 ms (gate: 2250 ms)
+[runner] VAL-EXP-001: pass — Export completed: 7846176 bytes, SHA256 verified, 60 s window (28.72 s actual)
+[runner] VAL-EXP-010: pass — No dup PTS; cadence within variable-rate policy; 1560 frames in 28.8 s (nominal=60.00 fps source=row-config)
+[runner] VAL-EXP-012: pass — Concurrent export OK: during-export drops=0, export=export.completed
+[runner] VAL-UI-003: pass — HUD Hz validated (policy=fast-export): 0 diagnostics over 0s export window; static assertions passed
+[runner] VAL-UI-012: skip (manual)
+[runner] VAL-PROC-001: pass — All processes cleaned up within 5s after engine.shutdown
+[runner] VAL-PROC-002: pass — All processes cleaned up within 5s after stopSession+shutdown
+[runner] VAL-PROC-003: pass — All processes cleaned up within 5s after SIGTERM (no explicit stopSession)
+[runner] VAL-PROC-007: pass — No pactl found in helper process tree during idle
+[runner] VAL-REG-002: pass — No fake-60fps duplication: 0 dup PTS in 28.7 s
+[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779417047419.json
+[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-22T02-21-35-097Z/report.json

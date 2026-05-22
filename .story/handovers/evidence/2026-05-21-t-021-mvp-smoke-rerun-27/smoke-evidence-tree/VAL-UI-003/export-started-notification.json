@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "method": "export.started",
+  "params": {
+    "est_duration_s": 10.968533333333333,
+    "est_output_bytes": 2908960,
+    "export_id": "exp-1779416939842562491-0001",
+    "mode": "stream-copy",
+    "plan": {
+      "copy_ranges": [
+        {
+          "end_pts_90k": 1203622,
+          "start_pts_90k": 216454
+        }
+      ],
+      "est_duration_s": 10.968533333333333,
+      "est_output_bytes": 2908960,
+      "expected_fps": 0,
+      "mode": "fast",
+      "reencode_ranges": []
+    }
+  }
+}

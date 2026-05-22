@@ -1,0 +1,19 @@
+# Sanitized pgrep output (redacted to remove unrelated shell command lines, filenames, and session metadata)
+# Original command: pgrep -af ffmpeg
+# Captured: 2026-05-21 pre-run
+
+matchCount: 2
+realFfmpegProcesses: 1
+runnerOwnedFfmpegProcesses: 0
+falsePositiveGrepMatches: 1   # bash command line containing the literal "ffmpeg" string
+realFfmpegProcessDetail:
+  - pid: 750038
+    relationship: unrelated user-space process (not under cove-replay-engine parentage)
+    status: finished before the smoke run completed; absent from post-run pgrep
+notes: |
+  pgrep -af also matched the bash command line that invoked pgrep itself.
+  One unrelated user-space ffmpeg process was running on the system; it
+  was not owned by, spawned by, or otherwise associated with the
+  cove-replay-engine helper, and it terminated before the smoke run
+  completed. Combined with VAL-PROC-001/002/003 evidence, no runner-owned
+  ffmpeg was present pre-run.

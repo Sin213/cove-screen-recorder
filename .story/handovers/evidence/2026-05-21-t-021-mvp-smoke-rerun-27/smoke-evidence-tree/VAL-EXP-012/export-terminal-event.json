@@ -1,0 +1,12 @@
+{
+  "method": "export.completed",
+  "params": {
+    "bytes": 7718675,
+    "duration_s": 28.81898888888889,
+    "export_id": "exp-1779416919671247289-0001",
+    "final_path": "/tmp/cove-val-exp012-1779416919670-ffa28d0044f40497/export.mp4",
+    "fps_observed_out": 0,
+    "mode": "stream-copy",
+    "sha256": "616d6609942fe0baaeea684e19a24af8fce9a2e8b41cab41643b9d62a01154c0"
+  }
+}
