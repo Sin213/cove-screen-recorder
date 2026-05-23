@@ -6,11 +6,17 @@
   ],
   "discoveredDate": "2026-05-23",
   "id": "ISS-014",
-  "impact": "Replay exports complete successfully (FSM healthy per T-029/ISS-012 diagnostics), but replay artifacts show deterministic vertical striping with preserved scene geometry. Corruption screenshot strongly suggests stride/pixel-format mismatch. Observed on NVIDIA GPU, KDE Plasma 6, Wayland, SHM fallback likely active, logs showed codec=vp8.",
-  "location": [],
+  "impact": "V2 helper/NVENC path confirmed as source. PipeWire delivers XR24 (BGRx, 4 bytes/pixel) via SHM on this system (DMA-BUF hard-fails every session). NVENC buffer is declared NV12 with locked_pitch=4096, but SHM frame_stride=15360. No BGRx→NV12 conversion exists in the helper. Raw XR24 bytes are pushed to an NV12-typed buffer — encoder misreads data producing deterministic striping with preserved geometry. Visual corruption is content-dependent (high horizontal color contrast makes it visible). Evidence: .story/handovers/evidence/2026-05-23-iss-014-dual-path-repro/v2/encode-boundary.log",
+  "location": [
+    "helper/src/encoder/backends/nvenc/mod.rs",
+    "helper/src/capture/pipewire.rs"
+  ],
   "phase": null,
   "relatedTickets": [
-    "T-029"
+    "T-029",
+    "T-030",
+    "T-031",
+    "T-032"
   ],
   "resolution": null,
   "resolvedDate": null,
