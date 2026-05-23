@@ -42,6 +42,14 @@ async function _releaseWithRetry(id: string): Promise<void> {
   gs().log("warn", `[export lifecycle] snapshot release exhausted: id=${id}`);
 }
 
+async function _applyEngineReady(info: { helperVersion: string; protocolVersion: number }): Promise<void> {
+  gs().setV2EngineInfo(info);
+  const cur = gs().v2State;
+  if (cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
+    await _refreshRecoverableSessions();
+  }
+}
+
 export function initV2Engine(): Unsub {
   const api = window.coveApi;
   const subs: Unsub[] = [];
@@ -49,13 +57,7 @@ export function initV2Engine(): Unsub {
   // ── Engine lifecycle ──────────────────────────────────────────────────────
 
   subs.push(api.engine.onReady(async (info) => {
-    gs().setV2EngineInfo(info as { helperVersion: string; protocolVersion: number });
-    const cur = gs().v2State;
-    if (cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
-      // Query helper for recoverable sessions — the push notification may have
-      // fired before initV2Engine() subscribed, so we poll on every ready event.
-      await _refreshRecoverableSessions();
-    }
+    await _applyEngineReady(info as { helperVersion: string; protocolVersion: number });
   }));
 
   subs.push(api.engine.onCrashed(() => {
@@ -200,6 +202,12 @@ export function initV2Engine(): Unsub {
     }
     gs().log("info", `[export lifecycle] export.cancelled post-transition: v2State=${gs().v2State}`);
   }));
+
+  // ── Reconcile: catch ready replay that fired before subscriptions ───────
+  void api.engine.version().then(
+    (info) => _applyEngineReady(info),
+    () => {},
+  );
 
   return () => subs.forEach((u) => u());
 }
