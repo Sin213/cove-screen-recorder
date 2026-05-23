@@ -19,9 +19,9 @@
     "T-010c",
     "T-020"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Recovery skip/discard affordances landed (ff67f98). App reached IDLE with Start replay buffer enabled despite 17 recovery sessions on disk. Operator used discardAll (count=1) and Ignore for this session in prior interactions. v2 capture sessions started successfully after recovery dismissal. Confirmed by T-010c Slice 4 execution 2026-05-23.",
+  "resolvedDate": "2026-05-23",
   "severity": "high",
-  "status": "inprogress",
+  "status": "resolved",
   "title": "v2 UI gate disables Start replay buffer whenever helper has recoverable sessions; RECOVERY_AVAILABLE has no skip/clear-all path so all five §22 manual rows are reblocked"
 }

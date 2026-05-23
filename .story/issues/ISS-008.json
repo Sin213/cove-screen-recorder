@@ -20,9 +20,9 @@
     "T-020",
     "T-010c"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "v2 UI gate landed (6a4c1b1). VITE_COVE_V2_UI=1 activates the v2 capture path. All 3 executable §22 rows (VAL-CAP-001, VAL-CAP-006a) reached the v2 capture path successfully — sessionReady in 33-56ms, exports produced valid MP4s. Confirmed by T-010c Slice 4 manual row execution 2026-05-23.",
+  "resolvedDate": "2026-05-23",
   "severity": "high",
-  "status": "inprogress",
+  "status": "resolved",
   "title": "T-020 renderer migration not landed: v2 capture/replay RPCs have zero callers in src/; visible UI still routes through v1 MediaRecorder path"
 }

@@ -1,0 +1,35 @@
+{"timestamp":"2026-05-23T17:05:41.456635Z","level":"DEBUG","fields":{"message":"incoming message","method":"capture.requestSession"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:05:41.469385Z","level":"INFO","fields":{"message":"portal session established","session_id":"pw-session-0000-1374276-1779555941469","node_id":114},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.469952Z","level":"DEBUG","fields":{"message":"incoming message","method":"capture.startStream"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:05:41.471293Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Unconnected","new":"Connecting"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.471975Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Connecting","new":"Paused"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.480518Z","level":"WARN","fields":{"message":"PW stream errored during DMA-BUF-only negotiation: no more input formats; triggering SHM-only fallback retry"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.480558Z","level":"INFO","fields":{"message":"PW: DMA-BUF negotiation hard-failed; reconnecting with SHM-only fallback"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.480584Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Paused","new":"Unconnected"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.482327Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Unconnected","new":"Connecting"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.483079Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Connecting","new":"Paused"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.489314Z","level":"DEBUG","fields":{"message":"Issue #1 buffer constraint: SHM-only (MemFd|MemPtr) — DMA-BUF fallback","data_type_mask":6,"phase":"ShmAttempted"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.489799Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Paused","new":"Streaming"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.489854Z","level":"INFO","fields":{"message":"PW stream ready","session_id":"pw-session-0000-1374276-1779555941469","stream_id":"pw-stream-0000","width":3840,"height":2160,"fourcc":"XR24"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.529263Z","level":"DEBUG","fields":{"message":"Issue #2: SHM-fallback settled (usable payload built)"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:05:41.644989Z","level":"DEBUG","fields":{"message":"nvenc probe: session creation succeeded"},"target":"cove_replay_engine::encoder::backends::nvenc"}
+{"timestamp":"2026-05-23T17:05:46.248393Z","level":"DEBUG","fields":{"message":"incoming message","method":"engine.health"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:05:51.248476Z","level":"DEBUG","fields":{"message":"incoming message","method":"engine.health"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:06:03.577668Z","level":"DEBUG","fields":{"message":"incoming message","method":"capture.requestSession"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:06:03.589869Z","level":"INFO","fields":{"message":"portal session established","session_id":"pw-session-0000-1374276-1779555963589","node_id":267},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.590421Z","level":"DEBUG","fields":{"message":"incoming message","method":"capture.startStream"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:06:03.591742Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Unconnected","new":"Connecting"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.592390Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Connecting","new":"Paused"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.601496Z","level":"WARN","fields":{"message":"PW stream errored during DMA-BUF-only negotiation: no more input formats; triggering SHM-only fallback retry"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.601552Z","level":"INFO","fields":{"message":"PW: DMA-BUF negotiation hard-failed; reconnecting with SHM-only fallback"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.601591Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Paused","new":"Unconnected"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.612650Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Unconnected","new":"Connecting"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.613452Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Connecting","new":"Paused"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.619992Z","level":"DEBUG","fields":{"message":"Issue #1 buffer constraint: SHM-only (MemFd|MemPtr) — DMA-BUF fallback","data_type_mask":6,"phase":"ShmAttempted"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.620501Z","level":"DEBUG","fields":{"message":"PW stream state change","old":"Paused","new":"Streaming"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.620583Z","level":"INFO","fields":{"message":"PW stream ready","session_id":"pw-session-0000-1374276-1779555963589","stream_id":"pw-stream-0000","width":3840,"height":2160,"fourcc":"XR24"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.665149Z","level":"DEBUG","fields":{"message":"Issue #2: SHM-fallback settled (usable payload built)"},"target":"cove_replay_engine::capture::pipewire"}
+{"timestamp":"2026-05-23T17:06:03.774628Z","level":"DEBUG","fields":{"message":"nvenc probe: session creation succeeded"},"target":"cove_replay_engine::encoder::backends::nvenc"}
+{"timestamp":"2026-05-23T17:06:06.248293Z","level":"DEBUG","fields":{"message":"incoming message","method":"engine.health"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:06:11.248358Z","level":"DEBUG","fields":{"message":"incoming message","method":"engine.health"},"target":"cove_replay_engine::transport::server"}
+{"timestamp":"2026-05-23T17:06:16.248098Z","level":"DEBUG","fields":{"message":"incoming message","method":"engine.health"},"target":"cove_replay_engine::transport::server"}

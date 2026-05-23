@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-23",
   "createdDate": "2026-05-23",
   "description": "Evidence-only diagnostics for ISS-012 (v2 export FSM can remain stuck in EXPORTING after valid output). T-026 instruments the v2 export FSM (src/v2/engine.ts), but the visible stuck/disabled UI also depends on App.tsx local/derived inputs (replaySaving, computed disabled/HUD booleans) that are currently blind. This ticket adds [export lifecycle][render] logging in src/App.tsx (additive only) and makes electron/main.ts [export lifecycle] cove/export/* forwarding logs reliably visible via a file sink (no IPC channel/payload changes), so the next stuck-EXPORTING occurrence can be classified to one owning input. NO runtime behavior change except diagnostics; no FSM rewrite; no fix-by-timeout; does NOT fix ISS-012. Allowed surfaces: src/App.tsx, electron/main.ts, .story/tickets/T-029.json, evidence dir, handover. Classification buckets: not received / stale-rejected / received+v2State transitioned but replaySaving/selector held UI / handler threw / duplicate re-entry / inconclusive.",
   "id": "T-029",
   "order": 100,
   "phase": "p4-release",
-  "status": "open",
+  "status": "complete",
   "title": "ISS-012 renderer render/derived-state export diagnostics + main forwarding observability",
   "type": "task"
 }

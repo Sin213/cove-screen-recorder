@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-23",
   "createdDate": "2026-05-22",
   "description": "Add diagnostics-only export lifecycle instrumentation across helper (export/mod.rs), Electron main (main.ts), and renderer (engine.ts) so the next stuck-EXPORTING repro becomes self-diagnosing. No behavior changes — additive info!/warn! logging only. Addresses ISS-012 diagnostics gap.",
   "id": "T-026",
   "order": 70,
   "phase": "p4-release",
-  "status": "open",
+  "status": "complete",
   "title": "ISS-012 export lifecycle diagnostics instrumentation",
   "type": "task"
 }
