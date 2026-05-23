@@ -239,6 +239,16 @@ body {
   border-radius: inherit;
 }
 @keyframes recBorder { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.hotkey-toast {
+  position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%);
+  background: var(--surface-2); color: var(--accent);
+  border: 1px solid var(--accent-ring); border-radius: var(--radius-sm);
+  padding: 8px 18px; font-size: 13px; font-family: 'Geist Mono', monospace;
+  backdrop-filter: blur(12px); pointer-events: none; z-index: 50;
+  animation: toast-in 0.2s ease-out;
+  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.5);
+}
 .rec-time {
   position: absolute; bottom: 12px; left: 12px;
   font-family: 'Geist Mono', monospace; font-size: 12px;

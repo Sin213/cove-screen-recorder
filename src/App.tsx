@@ -116,6 +116,12 @@ export function App() {
   // Start button disabled between requestSession dispatch and the wrapper's
   // resolution so a second click cannot kick off a parallel negotiation.
   const [v2StartPending, setV2StartPending] = useState(false);
+  const [hotkeyToast, setHotkeyToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hotkeyToast) return;
+    const t = setTimeout(() => setHotkeyToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [hotkeyToast]);
 
   // ISS-008 remediation: gate the visible Start/Stop replay buffer UI behind
   // VITE_COVE_V2_UI so smoke can drive the v2 helper capture path. When OFF,
@@ -488,6 +494,8 @@ export function App() {
         if (status === "idle" && !v2Busy) void beginCrop("gif");
       } else if (action === "replay") {
         if (v2State === "RECORDING") {
+          const replayKey = useStore.getState().hotkeyBindings.replay.toUpperCase();
+          setHotkeyToast(`${replayKey} · Saving replay…`);
           log(
             "info",
             `[export lifecycle][render] v2SaveReplay start (hotkey): v2State=${v2State} v2SnapshotId=${useStore.getState().v2SnapshotId ?? "null"} v2ExportId=${useStore.getState().v2ExportId ?? "null"}`,
@@ -1031,6 +1039,8 @@ export function App() {
           </details>
         </div>
       </div>
+
+      {hotkeyToast && <div className="hotkey-toast">{hotkeyToast}</div>}
 
       {/* Existing X11/Windows source picker — restyled by the new CSS */}
       {pendingStart && (
