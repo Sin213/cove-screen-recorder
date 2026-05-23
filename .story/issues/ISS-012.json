@@ -1,0 +1,20 @@
+{
+  "components": [
+    "export",
+    "helper",
+    "renderer"
+  ],
+  "discoveredDate": "2026-05-22",
+  "id": "ISS-012",
+  "impact": "During ISS-011 VAL-CAP-006 standalone retry-2, replay save reached 100%, a valid MP4 landed on disk and ffprobed cleanly, but renderer remained stuck in EXPORTING and controls stayed disabled. Evidence path: .story/handovers/evidence/2026-05-22-iss-011-val-cap-006-standalone-retry-2/",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [
+    "T-010c"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "v2 export FSM can remain stuck in EXPORTING after valid output"
+}

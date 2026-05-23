@@ -1,0 +1,19 @@
+{
+  "components": [
+    "renderer",
+    "supervision"
+  ],
+  "discoveredDate": "2026-05-22",
+  "id": "ISS-013",
+  "impact": "Renderer subscribes to cove/engine/ready after main has already replayed lastReadyPayload, leaving v2State stuck in BOOTING until an explicit engine.restart() forces a new ready event. Evidence path: .story/handovers/evidence/2026-05-22-t-010c-slice-3-m1-smoke-completion-retry-2/blocker-initial-ready-race/",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [
+    "T-010c"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "Renderer can miss initial engine.ready and remain in BOOTING"
+}
