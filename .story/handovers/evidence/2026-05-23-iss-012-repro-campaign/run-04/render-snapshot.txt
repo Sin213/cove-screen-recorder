@@ -1,0 +1,6 @@
+Two saves in one session, both clean:
+
+Save 4a (09:08:40, F8): v2State=RECORDING saveControlsDisabled=false after export.completed
+Save 4b (09:08:43, button, 3s later): v2State=RECORDING saveControlsDisabled=false after export.completed
+
+No hang observed. FSM transitioned cleanly both times.

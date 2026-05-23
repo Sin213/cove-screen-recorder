@@ -1,0 +1,19 @@
+09:11:01    info    [export lifecycle][render] snapshot: v2State=BOOTING
+09:11:02    info    [export lifecycle][render] snapshot: v2State=RECOVERY_AVAILABLE
+09:11:07    info    recovery.discardedAll count=1
+09:11:07    info    [export lifecycle][render] snapshot: v2State=IDLE saveControlsDisabled=false
+09:11:47    info    [export lifecycle][render] snapshot: v2State=IDLE startBufferDisabled=true
+09:11:48    info    [export lifecycle][render] snapshot: v2State=RECORDING v2SessionId=pw-session-0000-1372894-1779552708541
+09:13:48    info    [export lifecycle][render] v2SaveReplay start (hotkey): v2State=RECORDING
+09:13:48    info    [export lifecycle][render] snapshot: v2State=SAVING saveControlsDisabled=true
+09:13:49    info    [export lifecycle] _startExport RPC call: snapshotId=snap-1779552828840186107-0000 v2State=EXPORTING
+09:13:49    info    [export lifecycle][render] snapshot: v2State=EXPORTING v2ExportId=null
+09:13:49    info    [export lifecycle][render] v2SaveReplay finally (hotkey): v2State=EXPORTING
+09:13:49    info    [export lifecycle] _startExport RPC result: export_id=exp-1779552829005647984-0001
+09:13:49    info    [export lifecycle][render] snapshot: v2State=EXPORTING v2ExportId=exp-1779552829005647984-0001 v2ExportProgress=null
+09:13:50    info    [export lifecycle][render] snapshot: v2State=EXPORTING v2ExportId=exp-1779552829005647984-0001 v2ExportProgress=100
+09:13:53    info    [export lifecycle] export.completed received: export_id=exp-1779552829005647984-0001 final_path=...exp-1779552829005647984-0001.mp4
+09:13:53    info    [export lifecycle] export.completed post-transition: v2State=RECORDING
+09:13:53    info    [export lifecycle][render] snapshot: v2State=RECORDING saveControlsDisabled=false
+09:13:53    info    [export lifecycle] snapshot release success: id=snap-1779552828840186107-0000 attempt=0
+09:13:55    info    [export lifecycle][render] snapshot: v2State=IDLE saveControlsDisabled=false

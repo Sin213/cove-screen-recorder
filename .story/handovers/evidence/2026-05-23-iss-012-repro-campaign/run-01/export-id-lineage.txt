@@ -1,0 +1,6 @@
+snapshotId: snap-1779550085612579549-0000
+exportId:   exp-1779550086634403769-0001
+sessionId:  pw-session-0000-1363428-1779550043702
+
+RPC call → RPC result (exportId assigned) → progress 99.99% → export.completed (matching exportId) → post-transition RECORDING → snapshot release success
+No stale-guard, no rejection, no duplicate. Clean lineage.

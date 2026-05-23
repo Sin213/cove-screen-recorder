@@ -1,0 +1,5 @@
+Single save, clean:
+
+Save 6 (09:18:08, F8): v2State=RECORDING saveControlsDisabled=false after export.completed
+Progress=100 at 09:18:10, export.completed at 09:18:12 (2s gap).
+No hang. FSM transitioned EXPORTING→RECORDING cleanly.

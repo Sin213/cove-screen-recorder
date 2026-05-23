@@ -1,0 +1,8 @@
+Session 1: pw-session-0000-1369730-1779551880693
+  snap-1779551942004864928-0000 → exp-1779551942008671632-0001 → completed (match) → RECORDING
+
+Session 2: pw-session-0000-1369730-1779552097111
+  snap-1779552179502054143-0002 → exp-1779552179507434510-0003 → completed (match) → RECORDING
+  snap-1779552181897200885-0004 → exp-1779552181901379111-0005 → completed (match) → RECORDING → IDLE
+
+All clean lineage. No stale-guard, no rejection, no duplicate.

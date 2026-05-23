@@ -1,0 +1,3 @@
+/run/user/1000/cove-screen-recorder/exports/exp-1779551942008671632-0001.mp4
+/run/user/1000/cove-screen-recorder/exports/exp-1779552179507434510-0003.mp4
+/run/user/1000/cove-screen-recorder/exports/exp-1779552181901379111-0005.mp4

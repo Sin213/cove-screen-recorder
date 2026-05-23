@@ -1,0 +1,39 @@
+08:57:46    info    [export lifecycle][render] snapshot: v2State=BOOTING
+08:57:46    info    [export lifecycle][render] snapshot: v2State=RECOVERY_AVAILABLE
+08:57:49    info    recovery.discardedAll count=2
+08:57:49    info    [export lifecycle][render] snapshot: v2State=IDLE saveControlsDisabled=false
+08:57:50    info    [export lifecycle][render] snapshot: v2State=IDLE startBufferDisabled=true
+08:58:00    info    [export lifecycle][render] snapshot: v2State=RECORDING v2SessionId=pw-session-0000-1369730-1779551880693
+08:59:02    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING
+08:59:02    info    [export lifecycle][render] snapshot: v2State=SAVING saveControlsDisabled=true
+08:59:02    info    [export lifecycle] _startExport RPC call: snapshotId=snap-1779551942004864928-0000 v2State=EXPORTING
+08:59:02    info    [export lifecycle][render] v2SaveReplay finally (button): v2State=EXPORTING
+08:59:02    info    [export lifecycle] _startExport RPC result: export_id=exp-1779551942008671632-0001
+08:59:02    info    [export lifecycle][render] snapshot: v2State=EXPORTING v2ExportId=exp-1779551942008671632-0001 v2ExportProgress=99.99954
+08:59:02    info    [export lifecycle] export.completed received: export_id=exp-1779551942008671632-0001 final_path=...exp-1779551942008671632-0001.mp4
+08:59:02    info    [export lifecycle] export.completed post-transition: v2State=RECORDING
+08:59:02    info    [export lifecycle][render] snapshot: v2State=RECORDING saveControlsDisabled=false
+08:59:02    info    [export lifecycle] snapshot release success: id=snap-1779551942004864928-0000 attempt=0
+09:00:28    info    [export lifecycle][render] snapshot: v2State=IDLE
+09:01:37    info    [export lifecycle][render] snapshot: v2State=RECORDING v2SessionId=pw-session-0000-1369730-1779552097111
+09:02:59    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING
+09:02:59    info    [export lifecycle][render] snapshot: v2State=SAVING saveControlsDisabled=true
+09:02:59    info    [export lifecycle] _startExport RPC call: snapshotId=snap-1779552179502054143-0002 v2State=EXPORTING
+09:02:59    info    [export lifecycle][render] v2SaveReplay finally (button): v2State=EXPORTING
+09:02:59    info    [export lifecycle] _startExport RPC result: export_id=exp-1779552179507434510-0003
+09:02:59    info    [export lifecycle][render] snapshot: v2State=EXPORTING v2ExportId=exp-1779552179507434510-0003 v2ExportProgress=99.99993
+09:02:59    info    [export lifecycle] export.completed received: export_id=exp-1779552179507434510-0003 final_path=...exp-1779552179507434510-0003.mp4
+09:02:59    info    [export lifecycle] export.completed post-transition: v2State=RECORDING
+09:02:59    info    [export lifecycle][render] snapshot: v2State=RECORDING saveControlsDisabled=false
+09:02:59    info    [export lifecycle] snapshot release success: id=snap-1779552179502054143-0002 attempt=0
+09:03:01    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING
+09:03:01    info    [export lifecycle][render] snapshot: v2State=SAVING saveControlsDisabled=true
+09:03:01    info    [export lifecycle] _startExport RPC call: snapshotId=snap-1779552181897200885-0004 v2State=EXPORTING
+09:03:01    info    [export lifecycle][render] v2SaveReplay finally (button): v2State=EXPORTING
+09:03:01    info    [export lifecycle] _startExport RPC result: export_id=exp-1779552181901379111-0005
+09:03:02    info    [export lifecycle][render] snapshot: v2State=EXPORTING v2ExportId=exp-1779552181901379111-0005 v2ExportProgress=99.99993
+09:03:02    info    [export lifecycle] export.completed received: export_id=exp-1779552181901379111-0005 final_path=...exp-1779552181901379111-0005.mp4
+09:03:02    info    [export lifecycle] export.completed post-transition: v2State=RECORDING
+09:03:02    info    [export lifecycle][render] snapshot: v2State=RECORDING saveControlsDisabled=false
+09:03:02    info    [export lifecycle] snapshot release success: id=snap-1779552181897200885-0004 attempt=0
+09:03:02    info    [export lifecycle][render] snapshot: v2State=IDLE

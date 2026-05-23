@@ -1,0 +1,3 @@
+2026-05-23T15:28:06.649Z [export lifecycle] export.queued export_id=exp-1779550086634403769-0001 snapshot_id=snap-1779550085612579549-0000
+2026-05-23T15:28:06.650Z [export lifecycle] export.started export_id=exp-1779550086634403769-0001 mode=stream-copy
+2026-05-23T15:28:10.698Z [export lifecycle] export.completed export_id=exp-1779550086634403769-0001 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779550086634403769-0001.mp4 bytes=126033374
