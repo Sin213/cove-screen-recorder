@@ -64,6 +64,26 @@ async function rpcEnv<T>(fn: () => Promise<T>): Promise<RpcEnvelope<T>> {
   }
 }
 
+// T-029 / ISS-012: tee the existing [export lifecycle] forwarding logs to a
+// file sink so the main-process forwarding record survives past a stuck-
+// EXPORTING occurrence. Plain console.log goes to stdout only, which is lost in
+// packaged/headless runs and cannot be correlated after the fact. This is
+// additive observability only — it does NOT change IPC channel names or any
+// forwarded payload (every send(...) below is untouched). The sink is best-
+// effort: any write failure is swallowed so it can never disrupt forwarding.
+let exportLogPath: string | null = null;
+function exportLog(line: string): void {
+  console.log(line);
+  try {
+    if (!exportLogPath) {
+      exportLogPath = path.join(app.getPath("logs"), "export-lifecycle.log");
+    }
+    fs.appendFileSync(exportLogPath, `${new Date().toISOString()} ${line}\n`);
+  } catch {
+    // Best-effort diagnostics; never let a log-sink failure disrupt forwarding.
+  }
+}
+
 // Attaches helper RPC notification → webContents.send forwarding.
 // Called on every supervisor "ready" so it re-wires after a crash/restart.
 function wireHelperNotifications(rpc: EngineRpc): void {
@@ -92,32 +112,36 @@ function wireHelperNotifications(rpc: EngineRpc): void {
   // export notifications
   rpc.onNotification("export.queued", (p) => {
     const ev = p as Record<string, unknown> | undefined;
-    console.log(`[export lifecycle] export.queued export_id=${ev?.export_id ?? "?"} snapshot_id=${ev?.snapshot_id ?? "?"}`);
+    exportLog(`[export lifecycle] export.queued export_id=${ev?.export_id ?? "?"} snapshot_id=${ev?.snapshot_id ?? "?"}`);
     send("cove/export/queued", p);
   });
   rpc.onNotification("export.started", (p) => {
     const ev = p as Record<string, unknown> | undefined;
-    console.log(`[export lifecycle] export.started export_id=${ev?.export_id ?? "?"} mode=${ev?.mode ?? "?"}`);
+    exportLog(`[export lifecycle] export.started export_id=${ev?.export_id ?? "?"} mode=${ev?.mode ?? "?"}`);
     send("cove/export/started", p);
   });
   rpc.onNotification("export.progress", (p) => send("cove/export/progress", p));
   rpc.onNotification("export.stalled", (p) => send("cove/export/stalled", p));
   rpc.onNotification("export.completed", (p) => {
     const ev = p as Record<string, unknown> | undefined;
-    console.log(`[export lifecycle] export.completed export_id=${ev?.export_id ?? "?"} final_path=${ev?.final_path ?? "?"} bytes=${ev?.bytes ?? "?"}`);
+    exportLog(`[export lifecycle] export.completed export_id=${ev?.export_id ?? "?"} final_path=${ev?.final_path ?? "?"} bytes=${ev?.bytes ?? "?"}`);
     send("cove/export/completed", p);
   });
   rpc.onNotification("export.failed", (p) => {
     const ev = p as Record<string, unknown> | undefined;
-    console.log(`[export lifecycle] export.failed export_id=${ev?.export_id ?? "?"} stage=${ev?.stage ?? "?"} reason_code=${ev?.reason_code ?? "?"}`);
+    exportLog(`[export lifecycle] export.failed export_id=${ev?.export_id ?? "?"} stage=${ev?.stage ?? "?"} reason_code=${ev?.reason_code ?? "?"}`);
     send("cove/export/failed", p);
   });
   rpc.onNotification("export.cancelled", (p) => {
     const ev = p as Record<string, unknown> | undefined;
-    console.log(`[export lifecycle] export.cancelled export_id=${ev?.export_id ?? "?"} stage=${ev?.stage ?? "?"} partial_bytes=${ev?.partial_bytes ?? "?"}`);
+    exportLog(`[export lifecycle] export.cancelled export_id=${ev?.export_id ?? "?"} stage=${ev?.stage ?? "?"} partial_bytes=${ev?.partial_bytes ?? "?"}`);
     send("cove/export/cancelled", p);
   });
-  rpc.onNotification("export.rejected", (p) => send("cove/export/rejected", p));
+  rpc.onNotification("export.rejected", (p) => {
+    const ev = p as Record<string, unknown> | undefined;
+    exportLog(`[export lifecycle] export.rejected export_id=${ev?.export_id ?? "?"} reason_code=${ev?.reason_code ?? "?"} snapshot_id=${ev?.snapshot_id ?? "?"}`);
+    send("cove/export/rejected", p);
+  });
   // engine log
   rpc.onNotification("engine.logLine", (p) => send("cove/engine/logLine", p));
 }

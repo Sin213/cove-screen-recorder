@@ -92,6 +92,14 @@ export function App() {
   const setLogCollapsed = useStore((s) => s.setLogCollapsed);
 
   const v2State = useStore((s) => s.v2State);
+  // T-029 / ISS-012: render-layer diagnostics read these v2 export selectors
+  // (also surfaced by the FSM via T-026) so a stuck-EXPORTING occurrence can be
+  // correlated against the renderer's local/derived UI inputs further below.
+  const v2ExportId = useStore((s) => s.v2ExportId);
+  const v2SnapshotId = useStore((s) => s.v2SnapshotId);
+  const v2SessionId = useStore((s) => s.v2SessionId);
+  const v2ExportProgress = useStore((s) => s.v2ExportProgress);
+  const v2ExportOutputPath = useStore((s) => s.v2ExportOutputPath);
   const v2SessionReadyMs = useStore((s) => s.v2SessionReadyMs);
   const v2ElapsedMs = useV2ElapsedMs(v2SessionReadyMs);
 
@@ -447,6 +455,10 @@ export function App() {
       return;
     }
     log("info", "Saving replay…");
+    log(
+      "info",
+      `[export lifecycle][render] saveReplay start (v1): status=${useStore.getState().status} v2State=${useStore.getState().v2State}`,
+    );
     setReplaySaving(true);
     try {
       const result = await h.save();
@@ -459,6 +471,10 @@ export function App() {
       }
     } finally {
       setReplaySaving(false);
+      log(
+        "info",
+        `[export lifecycle][render] saveReplay finally (v1): replaySaving cleared status=${useStore.getState().status} v2State=${useStore.getState().v2State}`,
+      );
     }
   }, [log, setLastOutput, setLastError, replaySaving]);
 
@@ -472,7 +488,16 @@ export function App() {
         if (status === "idle" && !v2Busy) void beginCrop("gif");
       } else if (action === "replay") {
         if (v2State === "RECORDING") {
-          void v2SaveReplay(replay.lengthSeconds);
+          log(
+            "info",
+            `[export lifecycle][render] v2SaveReplay start (hotkey): v2State=${v2State} v2SnapshotId=${useStore.getState().v2SnapshotId ?? "null"} v2ExportId=${useStore.getState().v2ExportId ?? "null"}`,
+          );
+          void v2SaveReplay(replay.lengthSeconds).finally(() => {
+            log(
+              "info",
+              `[export lifecycle][render] v2SaveReplay finally (hotkey): v2State=${useStore.getState().v2State} v2ExportId=${useStore.getState().v2ExportId ?? "null"} v2SnapshotId=${useStore.getState().v2SnapshotId ?? "null"}`,
+            );
+          });
         } else if (v2State !== "SAVING" && v2State !== "EXPORTING") {
           void saveReplay();
         }
@@ -480,7 +505,7 @@ export function App() {
       }
     });
     return off;
-  }, [status, beginDefault, beginCrop, stopFlow, saveReplay, v2State, v2Busy, replay.lengthSeconds]);
+  }, [log, status, beginDefault, beginCrop, stopFlow, saveReplay, v2State, v2Busy, replay.lengthSeconds]);
 
   useEffect(() => {
     if (status !== "recording") return;
@@ -524,6 +549,44 @@ export function App() {
     : status !== "idle";
 
   const bigButtonDisabled = (status !== "idle" && !isRecording) || v2Busy;
+
+  // T-029 / ISS-012: emit a render-layer snapshot whenever any export-relevant
+  // local/derived input changes. The v2 FSM instrumentation (T-026) only sees
+  // v2State; the visible stuck/disabled UI also depends on replaySaving and the
+  // computed disabled/HUD booleans below. saveControlsDisabled mirrors the
+  // Save-replay button's disabled prop (JSX further down) — additive only, it
+  // drives no behavior. Lets a stuck-EXPORTING occurrence be classified to one
+  // owning input (FSM state vs render/derived selector holding the UI).
+  const saveControlsDisabled =
+    replaySaving || v2State === "SAVING" || v2State === "EXPORTING";
+  useEffect(() => {
+    log(
+      "info",
+      `[export lifecycle][render] snapshot: v2State=${v2State} ` +
+        `v2ExportId=${v2ExportId ?? "null"} v2SnapshotId=${v2SnapshotId ?? "null"} ` +
+        `v2SessionId=${v2SessionId ?? "null"} v2ExportProgress=${v2ExportProgress ?? "null"} ` +
+        `v2ExportOutputPath=${v2ExportOutputPath ?? "null"} replaySaving=${replaySaving} ` +
+        `status=${status} saveControlsDisabled=${saveControlsDisabled} ` +
+        `startBufferDisabled=${startBufferDisabled} bigButtonDisabled=${bigButtonDisabled} ` +
+        `recordingState=${recordingState} recordingLabel="${recordingLabel}"`,
+    );
+  }, [
+    log,
+    v2State,
+    v2ExportId,
+    v2SnapshotId,
+    v2SessionId,
+    v2ExportProgress,
+    v2ExportOutputPath,
+    replaySaving,
+    status,
+    saveControlsDisabled,
+    startBufferDisabled,
+    bigButtonDisabled,
+    recordingState,
+    recordingLabel,
+  ]);
+
   const triggerDefault = () => {
     if (isRecording) void stopFlow(true);
     else if (status === "idle") beginDefault();
@@ -773,8 +836,18 @@ export function App() {
                   <button
                     className="btn btn-record btn-sm"
                     onClick={() => {
-                      if (v2State === "RECORDING") void v2SaveReplay(replay.lengthSeconds);
-                      else if (v2State !== "SAVING" && v2State !== "EXPORTING") void saveReplay();
+                      if (v2State === "RECORDING") {
+                        log(
+                          "info",
+                          `[export lifecycle][render] v2SaveReplay start (button): v2State=${v2State} v2SnapshotId=${useStore.getState().v2SnapshotId ?? "null"} v2ExportId=${useStore.getState().v2ExportId ?? "null"}`,
+                        );
+                        void v2SaveReplay(replay.lengthSeconds).finally(() => {
+                          log(
+                            "info",
+                            `[export lifecycle][render] v2SaveReplay finally (button): v2State=${useStore.getState().v2State} v2ExportId=${useStore.getState().v2ExportId ?? "null"} v2SnapshotId=${useStore.getState().v2SnapshotId ?? "null"}`,
+                          );
+                        });
+                      } else if (v2State !== "SAVING" && v2State !== "EXPORTING") void saveReplay();
                     }}
                     disabled={replaySaving || v2State === "SAVING" || v2State === "EXPORTING"}
                     aria-busy={replaySaving}
