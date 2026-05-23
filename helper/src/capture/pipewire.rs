@@ -129,6 +129,17 @@ const fn drm_fourcc(a: u8, b: u8, c: u8, d: u8) -> u32 {
     (a as u32) | ((b as u32) << 8) | ((c as u32) << 16) | ((d as u32) << 24)
 }
 
+fn drm_fourcc_to_str(v: u32) -> String {
+    String::from_utf8_lossy(&[
+        (v & 0xff) as u8,
+        ((v >> 8) & 0xff) as u8,
+        ((v >> 16) & 0xff) as u8,
+        ((v >> 24) & 0xff) as u8,
+    ])
+    .trim_end_matches('\0')
+    .to_string()
+}
+
 fn spa_to_drm_fourcc(raw: u32) -> u32 {
     use pipewire::spa::param::video::VideoFormat;
     let f = VideoFormat::from_raw(raw);
@@ -1643,6 +1654,31 @@ fn pw_thread_run(
             };
             ud.consecutive_frame_failures = 0;
             ud.dmabuf_attempt_failures = 0;
+
+            let capture_stride = datas_slice[0].chunk().stride();
+            if ud.seq == 0 {
+                info!(
+                    seq = ud.seq + 1,
+                    fourcc = %drm_fourcc_to_str(drm_format),
+                    width,
+                    height,
+                    modifier,
+                    capture_stride,
+                    buffer_type = if is_dmabuf { "DmaBuf" } else { "Shm" },
+                    "[iss-014][encode-boundary] capture frame",
+                );
+            } else if (ud.seq + 1) % 300 == 0 {
+                debug!(
+                    seq = ud.seq + 1,
+                    fourcc = %drm_fourcc_to_str(drm_format),
+                    width,
+                    height,
+                    modifier,
+                    capture_stride,
+                    buffer_type = if is_dmabuf { "DmaBuf" } else { "Shm" },
+                    "[iss-014][encode-boundary] capture frame",
+                );
+            }
 
             // Issue #2: with a usable payload in hand, settle the negotiation phase if
             // we hadn't already. Diagnostics' `buffers.buffer_type` flips from Unknown

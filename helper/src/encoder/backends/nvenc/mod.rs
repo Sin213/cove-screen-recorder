@@ -15,7 +15,7 @@ use std::ptr;
 
 use async_trait::async_trait;
 use libloading::{Library, Symbol};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::capture::FrameHandle;
 use crate::encoder::backend::{
@@ -53,6 +53,17 @@ fn ns_to_pts_90k(pts_ns: i64) -> u64 {
 /// otherwise returns `last + 1` (saturating) so muxed fragments never repeat or regress.
 fn next_monotonic_pts(candidate: u64, last: u64) -> u64 {
     if candidate > last { candidate } else { last.saturating_add(1) }
+}
+
+fn drm_fourcc_to_str(v: u32) -> String {
+    String::from_utf8_lossy(&[
+        (v & 0xff) as u8,
+        ((v >> 8) & 0xff) as u8,
+        ((v >> 16) & 0xff) as u8,
+        ((v >> 24) & 0xff) as u8,
+    ])
+    .trim_end_matches('\0')
+    .to_string()
 }
 
 // ── Active encode session state ───────────────────────────────────────────────
@@ -680,9 +691,9 @@ impl EncoderBackend for NvencBackend {
         let sess = self.session.as_mut()
             .ok_or_else(|| EncoderError::Runtime("push_frame before configure".into()))?;
 
-        let (shm_ptr, shm_size, stride) = match &frame.payload {
-            crate::capture::FramePayload::Shm { data, width: _, height: _, format: _, stride } => {
-                (data.as_ptr(), data.len(), *stride)
+        let (shm_ptr, shm_size, stride, incoming_width, incoming_height, incoming_format) = match &frame.payload {
+            crate::capture::FramePayload::Shm { data, width, height, format, stride } => {
+                (data.as_ptr(), data.len(), *stride, *width, *height, *format)
             }
             crate::capture::FramePayload::DmaBuf { .. } => {
                 return Err(EncoderError::Runtime("DMA-BUF not implemented in NVENC backend yet".into()));
@@ -735,6 +746,46 @@ impl EncoderBackend for NvencBackend {
         let w = sess.enc_width as usize;
         let pitch = locked_pitch as usize;
         let frame_stride = stride as usize;
+
+        if sess.frame_count == 0 {
+            info!(
+                seq = frame.seq,
+                frame_count = sess.frame_count,
+                incoming_fourcc = %drm_fourcc_to_str(incoming_format),
+                configured_fourcc = %sess.cfg.format.fourcc,
+                nvenc_buffer_fmt = "NV12",
+                src_width = incoming_width,
+                src_height = incoming_height,
+                enc_width = sess.enc_width,
+                enc_height = sess.enc_height,
+                frame_stride,
+                locked_pitch,
+                shm_size,
+                expected_nv12_bytes = frame_stride * (incoming_height as usize) * 3 / 2,
+                expected_packed_bytes = frame_stride * (incoming_height as usize),
+                stride_per_px_x1000 = (frame_stride * 1000) / (incoming_width as usize).max(1),
+                "[iss-014][encode-boundary] shm frame",
+            );
+        } else if sess.frame_count % sess.gop_size as u64 == 0 {
+            debug!(
+                seq = frame.seq,
+                frame_count = sess.frame_count,
+                incoming_fourcc = %drm_fourcc_to_str(incoming_format),
+                configured_fourcc = %sess.cfg.format.fourcc,
+                nvenc_buffer_fmt = "NV12",
+                src_width = incoming_width,
+                src_height = incoming_height,
+                enc_width = sess.enc_width,
+                enc_height = sess.enc_height,
+                frame_stride,
+                locked_pitch,
+                shm_size,
+                expected_nv12_bytes = frame_stride * (incoming_height as usize) * 3 / 2,
+                expected_packed_bytes = frame_stride * (incoming_height as usize),
+                stride_per_px_x1000 = (frame_stride * 1000) / (incoming_width as usize).max(1),
+                "[iss-014][encode-boundary] shm frame",
+            );
+        }
 
         // Copy luma rows.
         for row in 0..h {
