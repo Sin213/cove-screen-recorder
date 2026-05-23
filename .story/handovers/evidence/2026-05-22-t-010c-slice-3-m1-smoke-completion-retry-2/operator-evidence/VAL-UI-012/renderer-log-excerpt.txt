@@ -1,0 +1,25 @@
+# Per-row renderer audit probe — not collected this row.
+# Operator's in-app log panel reads "LOG · 28" in toast.png (28 total entries
+# at the moment of the screenshot, panel collapsed), but no DevTools probe was
+# rerun for this row to extract the recovery/v2/capture/encoder/engine/hotkeys
+# filtered slice. The criterion's leg 1 (saveReplay fires) is independently
+# confirmed by:
+#  (a) helper engine.log slice in helper-log-excerpt.txt
+#      (portal session + PW stream ready at 23:28:57Z; second portal at
+#       23:30:33Z parallels the VAL-CAP-006 anomaly).
+#  (b) the new export file at $XDG_RUNTIME_DIR/cove-screen-recorder/exports/
+#      exp-1779492543377201773-0005.mp4 (9.5 MB; mtime 16:29:03 PDT =
+#      23:29:03Z, ~6 s after the F8 keypress).
+#  (c) operator observation: "pressing F8 triggered the same save/export
+#      behavior as clicking Save last 0.5 min".
+#
+# Leg 2 (hotkeys.triggered toast) is confirmed UNREACHABLE by:
+#  (a) operator visual: no toast appeared on F8 (only the persistent "SAVED"
+#      indicator was visible in toast.png, and that indicator's path
+#      "/home/sin/Videos/Cove Recordings/Cove_Gaming_2026-05-2…" points at
+#      the prior v1 attempt — see VAL-CAP-006 Caveat 5 — not the F8-triggered
+#      v2 save, so it cannot be interpreted as a hotkeys-triggered toast).
+#  (b) static grep: 0 matches for /toast|Toast|hotkey.*triggered/ in src/.
+#  (c) static grep: 0 main-side emitters for `cove/hotkeys/triggered` IPC
+#      channel (the preload binding exists at electron/preload.ts:174 but no
+#      caller exists in electron/main.ts).

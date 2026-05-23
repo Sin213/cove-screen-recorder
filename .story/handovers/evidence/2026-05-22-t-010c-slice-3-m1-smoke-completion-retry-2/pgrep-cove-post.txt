@@ -1,0 +1,21 @@
+# Process-name pgrep (cove-replay-engine / cove-replay /cove-screen-rec) — no command-line substring match
+# Note: 'pgrep -fa' substring-matches against the full command line, which produces
+#       false positives when this shell's own command line contains the search literal.
+#       Using process-name pgrep here for the authoritative leak invariant.
+
+--- pgrep cove-replay-engine (name-only) ---
+(no match)
+
+--- pgrep cove-screen-rec (name-only) ---
+(no match)
+
+--- pgrep electron (name-only) ---
+(no match)
+
+--- pgrep -fa cove (substring; for context only — filter own shell) ---
+(no match after filtering shell/IDE noise)
+
+--- verdict ---
+cove-replay-engine alive: 0
+Electron app alive: 0
+Operator visual confirmation: 'Cove quit' at ~16:36 PDT

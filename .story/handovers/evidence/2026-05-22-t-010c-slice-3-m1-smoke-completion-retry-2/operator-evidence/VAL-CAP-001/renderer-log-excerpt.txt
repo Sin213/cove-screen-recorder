@@ -1,0 +1,22 @@
+# Per-row renderer audit probe — captured at row close (post-stop, pre-VAL-CAP-006).
+# DOM probe against .log-line entries, filter
+#   /^(recovery\.|v2 capture|capture\.|encoder\.|engine\.|hotkeys\.)/.
+# Wrapped in JSON.stringify (slice -40).
+#
+# Result:
+[
+  {
+    "t": "10:50:03",
+    "lvl": "info",
+    "msg": "recovery.ignored count=51"
+  }
+]
+#
+# Interpretation: the only matching entry is the ISS-009 audit from the gate
+# clear. NO entries match `v2 capture: requestSession failed`, `v2 capture:
+# startStream failed`, `v2 capture: sessionReady not received within Nms`, or
+# `v2 capture: stopSession failed`. Per src/v2/engine.ts, gs().log() is only
+# invoked on error/timeout paths for capture; a clean capture+stop produces no
+# renderer-side capture audit. Absence is evidence of success here — the helper
+# slice (helper-log-excerpt.txt) carries the positive proof (portal session
+# established + PW stream ready, 25 ms total).

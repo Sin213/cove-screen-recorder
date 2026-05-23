@@ -1,0 +1,52 @@
+# Probes run from Electron DevTools Console under VITE_COVE_V2_UI=1 dev session,
+# all captured manually from screenshots (no useStore on window).
+# Session: helper PID 1040850, listening 2026-05-22T17:15:19.739986Z.
+
+>> Block 1 (read store via window.useStore)
+   returned: "useStore not on window — try React DevTools"
+   (Zustand store not exposed; switched to DOM probes.)
+
+>> Block 2 (replay.recoverableSessions RPC)
+   Promise → fulfilled (object). Bridge end-to-end live.
+
+>> Block 2b (preload bridge present?)
+   { coveApi_present: 'object',
+     engine_present: 'object',
+     capture_present: 'object',
+     replay_present: 'object',
+     onReady_type: 'function' }
+   All routes reachable from renderer.
+
+>> Block 2c (Start button DOM state)
+   { text: 'Start replay buffer', disabled: true, aria_disabled: null,
+     classes: 'btn btn-outline btn-sm' }
+   Confirmed disabled.
+
+>> Block 2d (Diagnostics + RecoveryBanner DOM presence)
+   { v2_diagnostics_present: false,
+     v2_diagnostics_html_len: null,
+     recovery_banner_present: false,
+     banner_visibility: null,
+     banner_position: null }
+   .v2-diagnostics absent → Diagnostics returned null → v2State === "BOOTING".
+
+>> Step A (subscribe + restart)
+   onReady + onStateChanged subscribed: 'subscribed; will report if anything fires'
+   engine.restart() called: Promise<pending>, eventually returned null
+   Captured:
+     STATE-CAUGHT "shuttingDown"
+     STATE-CAUGHT "idle"
+     STATE-CAUGHT "starting"
+     STATE-CAUGHT "ready"
+     restart returned null
+     READY-CAUGHT {"helperVersion":"0.1.0","protocolVersion":1}
+   → Race proven; listener catches the post-restart ready emission.
+
+>> Post-Step A (recheck DOM)
+   { startDisabled: false (caveat: querySelector('button') hit the FIRST button, not Start),
+     diagnosticsPresent: true,
+     recoveryText: true (innerText contains 'Unsaved recordings found'),
+     startReplayButtons: Array(1) }
+   → Diagnostics + RecoveryBanner now rendered → v2State === "RECOVERY_AVAILABLE".
+
+>> Operator action: clicked "Ignore for this session" → banner hid; Start replay buffer enabled.

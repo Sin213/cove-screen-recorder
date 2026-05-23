@@ -1,0 +1,10 @@
+# Process-name pgrep for ffmpeg / /usr/bin/ffmpeg leak invariant
+
+--- pgrep ffmpeg (name-only) ---
+(no match)
+
+--- pgrep -fa /usr/bin/ffmpeg (substring; should be 0 for orphan check) ---
+(no /usr/bin/ffmpeg orphans)
+
+--- verdict ---
+ffmpeg orphans: 0

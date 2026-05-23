@@ -1,0 +1,29 @@
+
+> cove-screen-recorder@1.1.0 dev
+> concurrently -k -s first -n VITE,ELECTRON "npm:dev:renderer" "npm:dev:electron"
+
+[VITE] 
+[VITE] > cove-screen-recorder@1.1.0 dev:renderer
+[VITE] > vite
+[VITE] 
+[ELECTRON] 
+[ELECTRON] > cove-screen-recorder@1.1.0 dev:electron
+[ELECTRON] > tsc -p tsconfig.electron.json && wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .
+[ELECTRON] 
+[VITE] [33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+[VITE] 
+[VITE]   VITE v5.4.21  ready in 107 ms
+[VITE] 
+[VITE]   ➜  Local:   http://localhost:5173/
+[VITE]   ➜  Network: use --host to expose
+[VITE] (node:1037830) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/sin/Projects/cove-screen-recorder/postcss.config.js is not specified and it doesn't parse as CommonJS.
+[VITE] Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+[VITE] To eliminate this warning, add "type": "module" to /home/sin/Projects/cove-screen-recorder/package.json.
+[VITE] (Use `node --trace-warnings ...` to show where the warning was created)
+[ELECTRON] [supervisor] dev mode: skipping SHA-256 verification
+[ELECTRON] [1037893:0522/100710.537052:ERROR:CONSOLE(1)] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+[ELECTRON] [1037893:0522/100710.537091:ERROR:CONSOLE(1)] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+[ELECTRON] [1037893:0522/101318.279751:ERROR:atom_cache.cc(230)] Add WM_CHANGE_STATE to kAtomsToCache
+[ELECTRON] npm run dev:electron exited with code 0
+--> Sending SIGTERM to other processes..
+[VITE] npm run dev:renderer exited with code SIGTERM
