@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-23",
+  "createdDate": "2026-05-23",
+  "description": "Add exactly one authoritative provenance log line to electron/ffmpeg.ts remux() for the V1 MediaRecorder→libx264 path. Ties the final libx264 artifact to route, input codec, output codec, pix_fmt, and output artifact path. Logging only — zero behavior change. Enables conclusive grep-able attribution of V1 vs V2 artifacts in future ISS-014 repros.",
+  "id": "T-032",
+  "order": 130,
+  "phase": "p4-release",
+  "status": "complete",
+  "title": "ISS-014 replay path provenance instrumentation (v1 MediaRecorder→libx264 attribution)",
+  "type": "task"
+}

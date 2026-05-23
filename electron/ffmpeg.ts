@@ -429,6 +429,7 @@ export function remux(opts: RemuxOptions): Promise<void> {
       args.push("-filter_complex", filters.join(";"));
     }
 
+    let provenanceTag: string | undefined;
     if (opts.format === "webm") {
       if (trimStartSeconds === null) args.push("-c", "copy");
       else args.push("-c:v", "libvpx-vp9");
@@ -495,6 +496,7 @@ export function remux(opts: RemuxOptions): Promise<void> {
         args.push("-fps_mode", "cfr", "-r", String(fps));
       }
       args.push("-pix_fmt", "yuv420p", "-movflags", "+faststart");
+      provenanceTag = `[iss-014][provenance] route=v1-mediarecorder input_container=webm output_codec=${enc} output_pix_fmt=yuv420p encode_mode=reencode is_replay=${!!opts.trimLastMs} output_path=${opts.outputPath}`;
       if (audioMode === "mix") {
         args.push("-map", videoMap, "-map", audioMap ?? "[aout]");
       } else if (audioMode === "sidecar-only") {
@@ -534,8 +536,12 @@ export function remux(opts: RemuxOptions): Promise<void> {
     proc.stderr.on("data", (b: Buffer) => opts.onLog?.(b.toString("utf-8")));
     proc.once("error", (err) => reject(err));
     proc.once("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}`));
+      if (code === 0) {
+        if (provenanceTag) opts.onLog?.(provenanceTag);
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
     });
   });
 }
