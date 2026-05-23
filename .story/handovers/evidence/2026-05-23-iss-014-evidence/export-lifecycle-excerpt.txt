@@ -1,0 +1,20 @@
+2026-05-23T17:12:48.464Z [export lifecycle] export.started export_id=exp-1779556368463918361-0007 mode=stream-copy
+2026-05-23T17:12:51.231Z [export lifecycle] export.completed export_id=exp-1779556368463918361-0007 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779556368463918361-0007.mp4 bytes=93407270
+2026-05-23T17:42:22.184Z [export lifecycle] export.queued export_id=exp-1779558142169678132-0001 snapshot_id=snap-1779558141230751395-0000
+2026-05-23T17:42:22.185Z [export lifecycle] export.started export_id=exp-1779558142169678132-0001 mode=stream-copy
+2026-05-23T17:42:24.864Z [export lifecycle] export.completed export_id=exp-1779558142169678132-0001 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779558142169678132-0001.mp4 bytes=87534883
+2026-05-23T17:43:53.516Z [export lifecycle] export.queued export_id=exp-1779558233515945700-0003 snapshot_id=snap-1779558232638968065-0002
+2026-05-23T17:43:53.520Z [export lifecycle] export.started export_id=exp-1779558233515945700-0003 mode=stream-copy
+2026-05-23T17:43:55.250Z [export lifecycle] export.completed export_id=exp-1779558233515945700-0003 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779558233515945700-0003.mp4 bytes=68362122
+2026-05-23T17:44:03.536Z [export lifecycle] export.queued export_id=exp-1779558243536149163-0005 snapshot_id=snap-1779558243530161726-0004
+2026-05-23T17:44:03.537Z [export lifecycle] export.started export_id=exp-1779558243536149163-0005 mode=stream-copy
+2026-05-23T17:44:07.157Z [export lifecycle] export.completed export_id=exp-1779558243536149163-0005 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779558243536149163-0005.mp4 bytes=119055960
+2026-05-23T17:45:10.404Z [export lifecycle] export.queued export_id=exp-1779558310403968755-0007 snapshot_id=snap-1779558309686184882-0006
+2026-05-23T17:45:10.404Z [export lifecycle] export.started export_id=exp-1779558310403968755-0007 mode=stream-copy
+2026-05-23T17:45:15.075Z [export lifecycle] export.completed export_id=exp-1779558310403968755-0007 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779558310403968755-0007.mp4 bytes=194281443
+2026-05-23T17:45:26.188Z [export lifecycle] export.queued export_id=exp-1779558326187826129-0009 snapshot_id=snap-1779558325538306056-0008
+2026-05-23T17:45:26.192Z [export lifecycle] export.started export_id=exp-1779558326187826129-0009 mode=stream-copy
+2026-05-23T17:45:31.890Z [export lifecycle] export.completed export_id=exp-1779558326187826129-0009 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779558326187826129-0009.mp4 bytes=227706465
+2026-05-23T17:45:52.914Z [export lifecycle] export.queued export_id=exp-1779558352913925351-0011 snapshot_id=snap-1779558352285341320-0010
+2026-05-23T17:45:52.914Z [export lifecycle] export.started export_id=exp-1779558352913925351-0011 mode=stream-copy
+2026-05-23T17:45:57.130Z [export lifecycle] export.completed export_id=exp-1779558352913925351-0011 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779558352913925351-0011.mp4 bytes=168812010
