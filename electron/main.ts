@@ -90,13 +90,33 @@ function wireHelperNotifications(rpc: EngineRpc): void {
   rpc.onNotification("replay.snapshotPinned", (p) => send("cove/replay/snapshotPinned", p));
   rpc.onNotification("replay.snapshotReleased", (p) => send("cove/replay/snapshotReleased", p));
   // export notifications
-  rpc.onNotification("export.queued", (p) => send("cove/export/queued", p));
-  rpc.onNotification("export.started", (p) => send("cove/export/started", p));
+  rpc.onNotification("export.queued", (p) => {
+    const ev = p as Record<string, unknown> | undefined;
+    console.log(`[export lifecycle] export.queued export_id=${ev?.export_id ?? "?"} snapshot_id=${ev?.snapshot_id ?? "?"}`);
+    send("cove/export/queued", p);
+  });
+  rpc.onNotification("export.started", (p) => {
+    const ev = p as Record<string, unknown> | undefined;
+    console.log(`[export lifecycle] export.started export_id=${ev?.export_id ?? "?"} mode=${ev?.mode ?? "?"}`);
+    send("cove/export/started", p);
+  });
   rpc.onNotification("export.progress", (p) => send("cove/export/progress", p));
   rpc.onNotification("export.stalled", (p) => send("cove/export/stalled", p));
-  rpc.onNotification("export.completed", (p) => send("cove/export/completed", p));
-  rpc.onNotification("export.failed", (p) => send("cove/export/failed", p));
-  rpc.onNotification("export.cancelled", (p) => send("cove/export/cancelled", p));
+  rpc.onNotification("export.completed", (p) => {
+    const ev = p as Record<string, unknown> | undefined;
+    console.log(`[export lifecycle] export.completed export_id=${ev?.export_id ?? "?"} final_path=${ev?.final_path ?? "?"} bytes=${ev?.bytes ?? "?"}`);
+    send("cove/export/completed", p);
+  });
+  rpc.onNotification("export.failed", (p) => {
+    const ev = p as Record<string, unknown> | undefined;
+    console.log(`[export lifecycle] export.failed export_id=${ev?.export_id ?? "?"} stage=${ev?.stage ?? "?"} reason_code=${ev?.reason_code ?? "?"}`);
+    send("cove/export/failed", p);
+  });
+  rpc.onNotification("export.cancelled", (p) => {
+    const ev = p as Record<string, unknown> | undefined;
+    console.log(`[export lifecycle] export.cancelled export_id=${ev?.export_id ?? "?"} stage=${ev?.stage ?? "?"} partial_bytes=${ev?.partial_bytes ?? "?"}`);
+    send("cove/export/cancelled", p);
+  });
   rpc.onNotification("export.rejected", (p) => send("cove/export/rejected", p));
   // engine log
   rpc.onNotification("engine.logLine", (p) => send("cove/engine/logLine", p));

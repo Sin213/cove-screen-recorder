@@ -271,9 +271,25 @@ async fn emit_export_failed(
     diagnostics_path: &str,
     terminal_fired: &Arc<AtomicBool>,
 ) {
-    if terminal_fired.swap(true, Ordering::SeqCst) {
+    let terminal_fired_was = terminal_fired.swap(true, Ordering::SeqCst);
+    if terminal_fired_was {
+        warn!(
+            export_id = %export_id,
+            stage = %stage,
+            reason_code = %reason_code,
+            terminal_fired_was = terminal_fired_was,
+            "export.failed suppressed_double_emit"
+        );
         return;
     }
+    warn!(
+        export_id = %export_id,
+        stage = %stage,
+        reason_code = %reason_code,
+        details = %details,
+        pid = std::process::id(),
+        "export.failed emit"
+    );
     let evt = ExportFailedEvent {
         export_id: export_id.to_string(),
         stage: stage.to_string(),
@@ -752,6 +768,13 @@ async fn handle_export_start(
         snapshot_id,
         requested_duration_s,
     };
+    info!(
+        export_id = %export_id,
+        snapshot_id = %queued.snapshot_id,
+        requested_duration_s = requested_duration_s,
+        pid = std::process::id(),
+        "export.queued"
+    );
     let _ = notifier
         .notify(
             "export.queued",
@@ -955,6 +978,16 @@ async fn run_export(
         est_duration_s,
         est_output_bytes: est_bytes,
     };
+    info!(
+        export_id = %export_id,
+        snapshot_id = %snapshot.snapshot_id,
+        est_duration_s = est_duration_s,
+        est_output_bytes = est_bytes,
+        tmp_path = %tmp_path.display(),
+        final_path = %final_path,
+        pid = std::process::id(),
+        "export.started"
+    );
     let _ = notifier
         .notify(
             "export.started",
@@ -1042,6 +1075,15 @@ async fn run_export(
                                         } else {
                                             0
                                         };
+                                        if pct >= 100.0 {
+                                            info!(
+                                                export_id = %export_id,
+                                                pct = pct,
+                                                bytes_out = bytes_out,
+                                                elapsed_ms = start_time.elapsed().as_millis() as u64,
+                                                "export.progress terminal pct=100"
+                                            );
+                                        }
                                         let prog = ExportProgressEvent {
                                             export_id: export_id.clone(),
                                             stage: "copy".into(),
@@ -1105,15 +1147,31 @@ async fn run_export(
                 }
             }
             _ = cancel_rx.changed() => {
+                info!(
+                    export_id = %export_id,
+                    stage = "copy",
+                    "export.cancel preswap (copy-stage)"
+                );
                 child.kill().await.ok();
                 child.wait().await.ok();
                 let partial_bytes =
                     tokio::fs::metadata(&tmp_path).await.map(|m| m.len()).unwrap_or(0);
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 let _ = tokio::fs::remove_file(&diag_path).await;
-                if terminal_fired.swap(true, Ordering::SeqCst) {
+                let terminal_fired_was = terminal_fired.swap(true, Ordering::SeqCst);
+                if terminal_fired_was {
+                    warn!(
+                        export_id = %export_id,
+                        terminal_fired_was = terminal_fired_was,
+                        "export.cancel suppressed_double_emit (copy-stage)"
+                    );
                     return;
                 }
+                info!(
+                    export_id = %export_id,
+                    partial_bytes = partial_bytes,
+                    "export.cancel postswap (copy-stage)"
+                );
                 let evt = ExportCancelledEvent {
                     export_id: export_id.clone(),
                     stage: "copy".into(),
@@ -1148,19 +1206,42 @@ async fn run_export(
     // MUXING stage: set in_muxing BEFORE checking cancel so the handler
     // cannot accept a cancel that arrives after this store — closing the
     // race where the handler returns ok=true while the task continues to publish.
+    let mux_start = Instant::now();
+    info!(
+        export_id = %export_id,
+        bytes_out = bytes_out,
+        elapsed_ms = start_time.elapsed().as_millis() as u64,
+        "export.muxing enter"
+    );
     in_muxing.store(true, Ordering::SeqCst);
 
     // Now honour any cancel that arrived before the store above.
     if *cancel_rx.borrow() {
+        info!(
+            export_id = %export_id,
+            stage = "mux",
+            "export.cancel preswap (mux-stage)"
+        );
         let partial_bytes = tokio::fs::metadata(&tmp_path)
             .await
             .map(|m| m.len())
             .unwrap_or(0);
         let _ = tokio::fs::remove_file(&tmp_path).await;
         let _ = tokio::fs::remove_file(&diag_path).await;
-        if terminal_fired.swap(true, Ordering::SeqCst) {
+        let terminal_fired_was = terminal_fired.swap(true, Ordering::SeqCst);
+        if terminal_fired_was {
+            warn!(
+                export_id = %export_id,
+                terminal_fired_was = terminal_fired_was,
+                "export.cancel suppressed_double_emit (mux-stage)"
+            );
             return;
         }
+        info!(
+            export_id = %export_id,
+            partial_bytes = partial_bytes,
+            "export.cancel postswap (mux-stage)"
+        );
         let evt = ExportCancelledEvent {
             export_id: export_id.clone(),
             stage: "copy".into(),
@@ -1183,7 +1264,15 @@ async fn run_export(
         })
         .await;
         match sync_result {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => {
+                let tmp_bytes = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
+                info!(
+                    export_id = %export_id,
+                    tmp_bytes = tmp_bytes,
+                    tmp_path = %tmp_path.display(),
+                    "export.tmp fsync success"
+                );
+            }
             Ok(Err(e)) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 emit_export_failed(
@@ -1237,7 +1326,13 @@ async fn run_export(
             })
     };
     match rename_err {
-        Ok(()) => {} // same-device success — proceed to fsync dest dir
+        Ok(()) => {
+            info!(
+                export_id = %export_id,
+                final_path = %final_path,
+                "export.rename success (same-device)"
+            );
+        } // same-device success — proceed to fsync dest dir
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             emit_export_failed(
@@ -1381,6 +1476,11 @@ async fn run_export(
             });
             match xd_rename {
                 Ok(()) => {
+                    info!(
+                        export_id = %export_id,
+                        final_path = %final_path,
+                        "export.rename success (cross-device)"
+                    );
                     let _ = tokio::fs::remove_file(&hint_path).await;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -1437,7 +1537,13 @@ async fn run_export(
         let fsync_result =
             tokio::task::spawn_blocking(move || crate::segment::writer::fsync_dir(&dir)).await;
         match fsync_result {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => {
+                info!(
+                    export_id = %export_id,
+                    dir = %dest_dir_for_fsync.display(),
+                    "export.dir fsync success"
+                );
+            }
             Ok(Err(e)) => {
                 emit_export_failed(
                     &notifier,
@@ -1475,6 +1581,13 @@ async fn run_export(
     let (file_bytes, sha256) = match sha_result {
         Ok(Ok(hex)) => {
             let bytes = std::fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0);
+            info!(
+                export_id = %export_id,
+                bytes = bytes,
+                sha256 = %hex,
+                final_path = %final_path,
+                "export.sha256 success"
+            );
             (bytes, hex)
         }
         Ok(Err(e)) => {
@@ -1505,22 +1618,51 @@ async fn run_export(
         }
     };
 
-    if terminal_fired.swap(true, Ordering::SeqCst) {
+    let terminal_fired_was = terminal_fired.swap(true, Ordering::SeqCst);
+    let mux_duration_ms = mux_start.elapsed().as_millis() as u64;
+    let total_duration_ms = start_time.elapsed().as_millis() as u64;
+    info!(
+        export_id = %export_id,
+        terminal_fired_was = terminal_fired_was,
+        mux_duration_ms = mux_duration_ms,
+        total_duration_ms = total_duration_ms,
+        "export.completion preswap"
+    );
+    if terminal_fired_was {
+        warn!(
+            export_id = %export_id,
+            "export.completion suppressed_double_emit — terminal already fired"
+        );
         return;
     }
+    info!(
+        export_id = %export_id,
+        mux_duration_ms = mux_duration_ms,
+        total_duration_ms = total_duration_ms,
+        "export.completion postswap"
+    );
 
     // Export succeeded; clean up the diagnostics file (only needed on failure).
     let _ = tokio::fs::remove_file(&diag_path).await;
 
     let completed = ExportCompletedEvent {
         export_id: export_id.clone(),
-        final_path,
+        final_path: final_path.clone(),
         bytes: file_bytes,
-        sha256,
+        sha256: sha256.clone(),
         duration_s: est_duration_s,
         mode: "stream-copy".into(),
         fps_observed_out: snapshot.framerate_hint as f64,
     };
+    info!(
+        export_id = %export_id,
+        final_path = %final_path,
+        bytes = file_bytes,
+        sha256 = %sha256,
+        total_duration_ms = total_duration_ms,
+        pid = std::process::id(),
+        "export.completed emit"
+    );
     let _ = notifier
         .notify(
             "export.completed",

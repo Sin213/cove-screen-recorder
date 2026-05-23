@@ -27,14 +27,19 @@ function _releaseCurrentSnapshot(): void {
 // event. Retry with backoff until the release is accepted.
 async function _releaseWithRetry(id: string): Promise<void> {
   for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, 150 * attempt));
+    if (attempt > 0) {
+      gs().log("info", `[export lifecycle] snapshot release retry: id=${id} attempt=${attempt}`);
+      await new Promise<void>((r) => setTimeout(r, 150 * attempt));
+    }
     try {
       await window.coveApi.replay.snapshotRelease({ snapshot_id: id });
+      gs().log("info", `[export lifecycle] snapshot release success: id=${id} attempt=${attempt}`);
       return;
     } catch {
       // retry
     }
   }
+  gs().log("warn", `[export lifecycle] snapshot release exhausted: id=${id}`);
 }
 
 export function initV2Engine(): Unsub {
@@ -133,7 +138,11 @@ export function initV2Engine(): Unsub {
   // accept the event — it belongs to the pending export.
   function _isStaleExport(eventId: string | undefined): boolean {
     const active = gs().v2ExportId;
-    return !!(eventId && active && eventId !== active);
+    const stale = !!(eventId && active && eventId !== active);
+    if (stale) {
+      gs().log("info", `[export lifecycle] stale-guard discard: event export_id=${eventId} active=${active}`);
+    }
+    return stale;
   }
 
   subs.push(api.export.onProgress((raw) => {
@@ -144,6 +153,7 @@ export function initV2Engine(): Unsub {
 
   subs.push(api.export.onCompleted((raw) => {
     const ev = raw as { export_id?: string; final_path?: string };
+    gs().log("info", `[export lifecycle] export.completed received: export_id=${ev.export_id ?? "?"} final_path=${ev.final_path ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
     gs().setV2ExportOutputPath(ev.final_path ?? null);
     gs().setV2ExportProgress(null);
@@ -154,10 +164,12 @@ export function initV2Engine(): Unsub {
     } else {
       gs().setV2State("IDLE");
     }
+    gs().log("info", `[export lifecycle] export.completed post-transition: v2State=${gs().v2State}`);
   }));
 
   subs.push(api.export.onFailed((raw) => {
-    const ev = raw as { export_id?: string };
+    const ev = raw as { export_id?: string; stage?: string; reason_code?: string };
+    gs().log("info", `[export lifecycle] export.failed received: export_id=${ev.export_id ?? "?"} stage=${ev.stage ?? "?"} reason_code=${ev.reason_code ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
@@ -169,10 +181,12 @@ export function initV2Engine(): Unsub {
         gs().setV2State("IDLE");
       }
     }
+    gs().log("info", `[export lifecycle] export.failed post-transition: v2State=${gs().v2State}`);
   }));
 
   subs.push(api.export.onCancelled((raw) => {
-    const ev = raw as { export_id?: string };
+    const ev = raw as { export_id?: string; stage?: string; partial_bytes?: number };
+    gs().log("info", `[export lifecycle] export.cancelled received: export_id=${ev.export_id ?? "?"} stage=${ev.stage ?? "?"} partial_bytes=${ev.partial_bytes ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
@@ -184,23 +198,27 @@ export function initV2Engine(): Unsub {
         gs().setV2State("IDLE");
       }
     }
+    gs().log("info", `[export lifecycle] export.cancelled post-transition: v2State=${gs().v2State}`);
   }));
 
   return () => subs.forEach((u) => u());
 }
 
 async function _startExport(snapshotId: string): Promise<void> {
+  gs().log("info", `[export lifecycle] _startExport RPC call: snapshotId=${snapshotId} v2State=${gs().v2State}`);
   try {
     const result = await window.coveApi.replay.exportStart({
       snapshot: { snapshot_id: snapshotId },
       options: { max_compat: false, audio_mode: "default" },
     }) as { export_id?: string } | undefined;
+    gs().log("info", `[export lifecycle] _startExport RPC result: export_id=${result?.export_id ?? "null"} v2State=${gs().v2State} v2SnapshotId=${gs().v2SnapshotId ?? "null"}`);
     // Only store the export_id if the export is still active — a fast terminal
     // event may have already cleared the export and transitioned state.
     if (result?.export_id && gs().v2State === "EXPORTING" && gs().v2SnapshotId === snapshotId) {
       gs().setV2ExportId(result.export_id);
     }
-  } catch {
+  } catch (err) {
+    gs().log("info", `[export lifecycle] _startExport RPC error: ${err instanceof Error ? err.message : String(err)} v2State=${gs().v2State}`);
     gs().setV2ExportId(null);
     gs().setV2ExportProgress(null);
     _releaseCurrentSnapshot();
