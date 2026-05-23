@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-23",
+  "description": "Classification-only investigation for ISS-014. Determine: (1) which replay path produced the corrupted artifact (v1 MediaRecorder/VP8 or v2 helper/NVENC), (2) which codec/container was used, (3) whether corruption exists before finalization, during encoding, or during export/remux, (4) whether current evidence is sufficient or additive logging is required. No fixes, no architecture changes.",
+  "id": "T-030",
+  "order": 110,
+  "phase": "p4-release",
+  "status": "inprogress",
+  "title": "Classify replay corruption boundary (ISS-014)",
+  "type": "task"
+}

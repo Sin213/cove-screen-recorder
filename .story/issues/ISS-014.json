@@ -1,0 +1,20 @@
+{
+  "components": [
+    "replay",
+    "encoder",
+    "capture"
+  ],
+  "discoveredDate": "2026-05-23",
+  "id": "ISS-014",
+  "impact": "Replay exports complete successfully (FSM healthy per T-029/ISS-012 diagnostics), but replay artifacts show deterministic vertical striping with preserved scene geometry. Corruption screenshot strongly suggests stride/pixel-format mismatch. Observed on NVIDIA GPU, KDE Plasma 6, Wayland, SHM fallback likely active, logs showed codec=vp8.",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [
+    "T-029"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "Replay artifacts show deterministic vertical striping with preserved scene geometry"
+}

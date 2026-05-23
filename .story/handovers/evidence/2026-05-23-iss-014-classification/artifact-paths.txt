@@ -1,0 +1,47 @@
+ISS-014 Artifact Paths — 2026-05-23
+
+## v1 MediaRecorder WebM recordings (ALL EMPTY STUBS)
+~/.config/cove-screen-recorder/recordings/
+  rec_moe31qr4_xw0il1.webm  1B
+  rec_moe218cs_2zs3jm.webm  0B
+  rec_moe27kjk_zv8ioe.webm  0B
+  rec_moe27ymc_8ij3r4.webm  0B
+  rec_moe2ai42_sm3ksa.webm  0B
+  rec_moedwq6o_1j04bz.webm  0B
+  rec_moel5z6l_395lml.webm  0B
+  rec_moepkxlr_ytc7p1.webm  0B
+
+=> v1 MediaRecorder never produced valid output. All stubs are 0-1B.
+
+## v2 helper exports (26 files, all H.264/NVENC, yuv420p)
+/run/user/1000/cove-screen-recorder/exports/exp-*.mp4
+  Resolutions: 3840x2160 (22 files) or 1920x1080 (4 files)
+  All at r_frame_rate=120/1 (rolling buffer rate)
+  Size range: 4.3M to 227.2M
+  Oldest: exp-1779472766251868620-0001.mp4
+  Newest: exp-1779558352913925351-0011.mp4
+
+## Final user-visible exports (13 files)
+~/Videos/Cove Recordings/
+  Encoders: h264_nvenc (9 files), libx264 (4 files)
+  Resolutions: 3840x2160, 2560x1440, 2560x1398, 1920x1080, 1730x1080, 702x1246
+  Dates: 2026-05-05 to 2026-05-23
+
+## libx264-tagged final exports (possible v1→ffmpeg transcode path)
+  Cove_Gaming_2026-05-05_203431_537.mp4  1920x1080 120fps libx264
+  Cove_Gaming_2026-05-05_203958_146.mp4  1920x1080 60fps libx264
+  Cove_Gaming_2026-05-05_210137_622.mp4  2560x1440 2000fps(!) libx264
+  Cove_Gaming_2026-05-22_065759_955.mp4  2560x1440 60000/1001 libx264
+
+## Frame extraction (visual inspection — NO corruption found)
+  /tmp/iss014-1730x1080.png      clean (Cove Video Editor window capture)
+  /tmp/iss014-702x1246.png       clean (portrait browser/image capture)
+  /tmp/iss014-2560x1440-libx264.png  clean (Hollow Knight gameplay)
+  /tmp/iss014-2560x1398-nvenc.png    clean (Discord watch party)
+  /tmp/iss014-helper-latest.png  clean (Discord, desaturated right side — UI, not corruption)
+  /tmp/iss014-helper-oldest.png  clean (Cove SR v1.1.0 UI)
+  /tmp/iss014-helper-small.png   clean (Cove SR v1.1.0 UI + desktop)
+
+## Corrupted artifact: NOT FOUND
+  No currently available artifact shows visible vertical striping.
+  The corrupted replay may be from a prior session whose artifacts were cleaned up.
