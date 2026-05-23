@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-23",
+  "description": "Follow-up from ISS-011 / T-027. VAL-CAP-006b (declared frame-count tolerance under a working zero-copy DMA-BUF capture path; N-008 §6.1 round(duration × declared_fps) ± 1, unchanged) is adjudicated cannot-validate on the M1 NVIDIA / KDE Plasma 6 / Wayland host because DMA-BUF zero-copy hard-fails there and only SHM-fallback evidence exists (per N-008 §26.4 predicate complete). cannot-validate is not green and does not satisfy §24; the cell is parked here.\n\nGoal: adjudicate VAL-CAP-006b to a real pass/fail on AMD (VAAPI, M2) or Intel (QSV, M3) hardware where DMA-BUF zero-copy succeeds. Verify DMA-BUF negotiation actually succeeds (capture.diagnostics.bufferType === \"dmabuf\", per VAL-CAP-009) before relying on the frame-count result. If, on a working zero-copy path, the declared-frame-count deficit persists beyond the §6.1 tolerance, that is a real capture/encoder defect (fail) — not cannot-validate.\n\nUnblocks the §24 parking of VAL-CAP-006b. Requires AMD/Intel DMA-BUF validation hardware (M2/M3). Relates to ISS-011 and T-027. No threshold changes.",
+  "id": "T-028",
+  "order": 90,
+  "phase": "p4-release",
+  "status": "open",
+  "title": "AMD/Intel VAL-CAP-006b zero-copy declared-frame-count validation (DMA-BUF)",
+  "type": "task"
+}
