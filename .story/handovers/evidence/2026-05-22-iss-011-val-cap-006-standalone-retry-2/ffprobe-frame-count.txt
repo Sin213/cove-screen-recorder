@@ -1,0 +1,26 @@
+Export file: exp-1779512366090814371-0005.mp4 (46.5M)
+Source: $XDG_RUNTIME_DIR/cove-screen-recorder/exports/exp-1779512366090814371-0005.mp4
+
+ffprobe results:
+  width: 1920
+  height: 1080
+  r_frame_rate: 54/1
+  avg_frame_rate: 10800000/197603 (~54.65 fps)
+  duration: 28.542656s
+  nb_read_frames: 1560
+  nb_read_packets: (not counted separately)
+
+N-008 §6.1 declared frame count calculation:
+  declared_fps: 60
+  expected: round(28.542656 × 60) = round(1712.56) = 1713
+  actual: 1560
+  ratio: 1560 / 1713 = 91.1%
+  deficit: 8.9%
+  tolerance: ±5%
+  verdict: OUTSIDE TOLERANCE (8.9% > 5%)
+
+Capture conditions:
+  DP-4 mode: 1920x1080@60 (held through all checkpoints)
+  Buffer type: SHM (DMA-BUF hard-failed)
+  PW stream: width=1920 height=1080 fourcc=XR24
+  Portal session: pw-session-0000-1187898-1779512250870

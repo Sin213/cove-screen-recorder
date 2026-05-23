@@ -1,0 +1,1 @@
+no cove/electron/ffmpeg processes running
