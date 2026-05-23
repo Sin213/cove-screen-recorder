@@ -11,9 +11,9 @@
   "relatedTickets": [
     "T-010c"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Renderer now reconciles current engine readiness after registering subscriptions via existing engine.version IPC and routes both live onReady and reconcile through the same readiness handler. Manual validation confirmed first launch exits BOOTING without engine.restart() and RecoveryBanner/IDLE UI becomes reachable. Fix commit: 0c38503. Evidence: .story/handovers/evidence/2026-05-23-iss-013-engine-ready-race-resolved/",
+  "resolvedDate": "2026-05-23",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "Renderer can miss initial engine.ready and remain in BOOTING"
 }
