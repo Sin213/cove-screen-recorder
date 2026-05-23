@@ -1,0 +1,9 @@
+1104 avahi-daemon: chroot helper
+1452 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper
+1453 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper
+1058570 /home/sin/bots/cove-video-downloader-bot/.venv/bin/python -u /home/sin/bots/cove-video-downloader-bot/bot.py
+1171564 /home/sin/bots/cove-bot/.venv/bin/python -m app.main
+1180193 /usr/lib/sddm/sddm-helper --socket /tmp/sddm-auth-d262c939-ea53-45de-8ecd-883ae60a70f6 --id 3 --start /usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland --user sin
+1181216 /usr/lib/firefox/crashhelper 1181211 9 /tmp/ 11
+1186088 /usr/bin/konsole --workdir /home/sin/Projects/cove-screen-recorder
+1223284 /bin/bash -c source /home/sin/.claude/shell-snapshots/snapshot-bash-1779517039603-jwpmx3.sh 2>/dev/null || true && export CODEX_COMPANION_SESSION_ID='56ed8de2-0400-4c60-b65e-ad4d1e6addc7' export CLAUDE_PLUGIN_DATA='/home/sin/.claude/plugins/data/codex-openai-codex' : && shopt -u extglob 2>/dev/null || true && eval 'EVIDENCE=".story/handovers/evidence/2026-05-22-iss-012-repro-pass-1" && pgrep -af '"'"'cove|electron|helper'"'"' > "$EVIDENCE/pgrep-pre.txt" 2>&1 || echo "no cove processes" > "$EVIDENCE/pgrep-pre.txt" && echo "pgrep-pre done"' < /dev/null && pwd -P >| /tmp/claude-e717-cwd
