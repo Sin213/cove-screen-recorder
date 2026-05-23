@@ -1,0 +1,15 @@
+{
+  "content": "Verbatim-runnable execution spec for adjudicating VAL-CAP-006b on future AMD (VAAPI) / Intel (QSV) DMA-BUF hardware. Define-only pass (2026-05-23): no hardware validation run, no adjudication, no runtime/helper/validation change. T-028 stays open — dual-gated: hardware-blocked (M2/M3) AND implementation-blocked (VAAPI/QSV zero-copy encoder backend + real dmabuf_imports increment; follow-up tickets not created here). ISS-011 stays inprogress; N-008 unchanged.\n\nSpec dir: .story/handovers/evidence/2026-05-23-t-028-execution-spec/\n- assertion-definition.md — strict N-008 §6.1 round(duration_s × 60) ± 1; declared_fps = 60 (ISS-011 lineage); explicitly excludes the checkFrameCountVariableRate 0.85–1.02 band (would weaken 006b).\n- hardware-eligibility.md — gpuInfo starts amd:/intel: (never nvidia:); Wayland + PipeWire portal; AMD→VAAPI / Intel→QSV zero-copy import in the v2 helper encoder (implementation prerequisite, not present today); declared 60 fps; source resolution verified at start and pre-save.\n- dmabuf-success-criteria.md — buffers.buffer_type==\"dmabuf\" steady + settle marker + no SHM/soft/payload/hard-fail/stream-error/formatChanged fallback + encoder dmabuf_imports + sessionReady. Encoder import + dmabuf_imports are an implementation prerequisite (not present today). Caveat: helper emits buffers.buffer_type, not the bufferType prose; adjudicator uses the emitted field (not fixed in T-028).\n- evidence-bundle-template.md — placeholder bundle shape; path-only screenshots; no NVIDIA/KDE reclassification.\n- decision-table.md — nvidia+SHM = cannot-validate; amd/intel+confirmed-DMA-BUF within ±1 = PASS, outside = FAIL; amd/intel+no-confirmed-DMA-BUF = INCONCLUSIVE; pre-first-frame/unknown = INVALID. No fake-green branch. Presumes the implementation prerequisites are met.\n- instrumentation-sufficiency.md — capture-side instrumentation sufficient; encoder zero-copy import NOT implemented (no backend imports DMA-BUF; dmabuf_imports never incremented in real code), so 006b is dual-gated (hardware + a VAAPI/QSV zero-copy backend + dmabuf_imports increment, both follow-up implementation, not created here).\n- execution-prerequisites.md — future operator checklist; current NVIDIA/KDE host explicitly not eligible.\n- iss-011-t010c-disposition.md — ISS-011 stays inprogress; future PASS may resolve it, FAIL escalates it, cannot-validate never resolves it; T-028 define-only does not unblock T-010c; 006a covers survival, 006b parks §24 until a real qualifying pass/fail.\n\nHandover: .story/handovers/2026-05-23-02-t-028-execution-spec.md. Relates ISS-011, T-027, T-010c.",
+  "createdDate": "2026-05-23",
+  "id": "N-009",
+  "status": "active",
+  "tags": [
+    "t-028",
+    "val-cap-006b",
+    "validation",
+    "execution-spec",
+    "dmabuf"
+  ],
+  "title": "T-028 execution spec",
+  "updatedDate": "2026-05-23"
+}
