@@ -1,0 +1,19 @@
+{
+  "components": [
+    "renderer",
+    "export"
+  ],
+  "discoveredDate": "2026-05-24",
+  "id": "ISS-016",
+  "impact": "Misleading warn in [export lifecycle] log fires when saves are triggered in rapid succession (second save within ~1s of prior export.completed). The warn reads \"no snapshot_id\" but the snapshot_id IS present in the same log line (hasResult=true snapshot_id=&lt;id&gt; v2State=EXPORTING). Saves complete successfully; this is a renderer timing artifact in the finally block of v2SaveReplay running mid-FSM-transition. Risk: during ISS-012 investigation, this warn could be misread as a save failure or confused with the ISS-015 snapshot-IPC-drop path. Observed on saves 4 and 5 of a rapid-fire sequence (14:44:07 and 14:44:08 PDT).",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [
+    "T-037"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "v2SaveReplay \"no snapshot_id\" warn fires spuriously on rapid-fire saves despite snapshot_id being populated"
+}
