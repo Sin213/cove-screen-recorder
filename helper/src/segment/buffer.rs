@@ -243,8 +243,8 @@ impl BufferInner {
             if seg.pin_count > 0 {
                 continue;
             }
-            let age = now_pts - seg.pts_start_90k;
-            if age > self.config.window_duration_90k as i64
+            let cutoff = now_pts - self.config.window_duration_90k as i64;
+            if (seg.pts_end_90k as i64) < cutoff
                 || self.bytes_on_disk.saturating_sub(
                     evict_positions.iter().map(|&j| self.committed[j].byte_size).sum::<u64>(),
                 ) > self.config.disk_cap_bytes
@@ -279,7 +279,8 @@ impl BufferInner {
                 Ok(()) => {
                     let seg = self.committed.remove(pos).unwrap();
                     let age_90k = now_pts - seg.pts_start_90k;
-                    let trigger = if age_90k > self.config.window_duration_90k as i64 {
+                    let cutoff = now_pts - self.config.window_duration_90k as i64;
+                    let trigger = if (seg.pts_end_90k as i64) < cutoff {
                         "age"
                     } else {
                         "disk_cap"

@@ -6,15 +6,15 @@
   ],
   "discoveredDate": "2026-05-23",
   "id": "ISS-015",
-  "impact": "v2 save silently fails with \"no committed segments available to pin\" (T-038 classification: rolling-buffer seal failure). T-039 commit-path classification: B4 — segments_committed > 0 (confirmed up to 8 across 4 attempts) but replay pin always empty. durElig=false persists regardless of committed count. Hypothesis: helper pin predicate requires duration_eligible=true for in-progress segment; encode rate under static-screen content (~5% real-time) means pending segment never reaches PTS duration threshold. Evidence: .story/handovers/evidence/2026-05-24-iss-015-commit-path-classification/. Related: T-038 (reason classification), T-039 (commit-path classification).",
+  "impact": "v2 save silently fails with \"no committed segments available to pin\" (T-038: rolling-buffer seal failure). T-039: B4 — segments_committed > 0 (up to 8) but pin always fails. T-042 (B4 repro under T-040/T-041 instrumentation): **Branch B confirmed** — segments_evicted == segments_committed at save time; trigger=age. Root cause: segment PTS duration (~38.6s) exceeds window_duration_90k (30s = 2,700,000 at 90kHz), so every committed segment is immediately evictable upon commit. Eviction fires every ~38s under static-screen/dedup conditions. Ring is always empty at save time. is_closing=false (not a closing-state race). Evidence: .story/handovers/evidence/2026-05-24-iss-015-b4-repro/. Related: T-038, T-039, T-040, T-041, T-042.",
   "location": [],
   "phase": null,
   "relatedTickets": [
     "T-035"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "T-043 applied overlap-safe eviction predicate to evict_eligible in helper/src/segment/buffer.rs. T-044 validation: 2/2 saves reached EXPORTING and completed successfully under 4K/XR24/static-dedup conditions. committed_len_after=1 on all evictions (ring no longer emptied). No pin_snapshot empty-ring warning. Branch A confirmed.",
+  "resolvedDate": "2026-05-24",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "v2 save silently fails: SAVING→RECORDING with no snapshot ID despite valid rolling buffer segments"
 }

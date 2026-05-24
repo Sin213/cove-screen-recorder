@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-24",
+  "createdDate": "2026-05-24",
+  "description": "Root cause (T-042): segment PTS duration (~38.6s at 90kHz) exceeds window_duration_90k (30s = 2,700,000), so every committed segment is immediately evictable upon commit. Eviction policy checks now_pts - segment.pts_start > window_duration_90k. Since segment.pts_end ≈ now_pts at commit time and pts_end - pts_start > window, the start is always outside the window. Fix options: (A) use pts_end instead of pts_start for age check — keeps segments whose END is within the window; (B) check if segment overlaps the window (pts_end >= cutoff) rather than checking start age; (C) commit segments more frequently so duration stays under window. Option B (overlap check) is most correct: keep a segment if any part of it is within the window. The evict_eligible predicate should be: evict if pts_end < cutoff (i.e., the segment ends entirely before the window start). Affects helper/src/segment/buffer.rs evict_eligible function. Blocked by: T-042 (evidence complete).",
+  "id": "T-043",
+  "order": 240,
+  "phase": "p4-release",
+  "status": "complete",
+  "title": "ISS-015 B4 remediation: fix age-based eviction for segments whose duration exceeds window",
+  "type": "task"
+}
