@@ -157,6 +157,10 @@ export function initV2Engine(): Unsub {
     const ev = raw as { export_id?: string; final_path?: string };
     gs().log("info", `[export lifecycle] export.completed received: export_id=${ev.export_id ?? "?"} final_path=${ev.final_path ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
+    gs().log(
+      "info",
+      `[export lifecycle] stale-guard accept: event export_id=${ev.export_id ?? "undef"} active=${gs().v2ExportId ?? "null"} verdict=accept`,
+    );
     gs().setV2ExportOutputPath(ev.final_path ?? null);
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
@@ -173,6 +177,10 @@ export function initV2Engine(): Unsub {
     const ev = raw as { export_id?: string; stage?: string; reason_code?: string };
     gs().log("info", `[export lifecycle] export.failed received: export_id=${ev.export_id ?? "?"} stage=${ev.stage ?? "?"} reason_code=${ev.reason_code ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
+    gs().log(
+      "info",
+      `[export lifecycle] stale-guard accept: event export_id=${ev.export_id ?? "undef"} active=${gs().v2ExportId ?? "null"} verdict=accept`,
+    );
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
     _releaseCurrentSnapshot();
@@ -190,6 +198,10 @@ export function initV2Engine(): Unsub {
     const ev = raw as { export_id?: string; stage?: string; partial_bytes?: number };
     gs().log("info", `[export lifecycle] export.cancelled received: export_id=${ev.export_id ?? "?"} stage=${ev.stage ?? "?"} partial_bytes=${ev.partial_bytes ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
+    gs().log(
+      "info",
+      `[export lifecycle] stale-guard accept: event export_id=${ev.export_id ?? "undef"} active=${gs().v2ExportId ?? "null"} verdict=accept`,
+    );
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
     _releaseCurrentSnapshot();
@@ -203,13 +215,24 @@ export function initV2Engine(): Unsub {
     gs().log("info", `[export lifecycle] export.cancelled post-transition: v2State=${gs().v2State}`);
   }));
 
+  gs().log(
+    "info",
+    `[export lifecycle] engine subscriptions registered: subs=${subs.length} v2State=${gs().v2State}`,
+  );
+
   // ── Reconcile: catch ready replay that fired before subscriptions ───────
   void api.engine.version().then(
     (info) => _applyEngineReady(info),
     () => {},
   );
 
-  return () => subs.forEach((u) => u());
+  return () => {
+    gs().log(
+      "info",
+      `[export lifecycle] engine subscriptions torn down: v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"} v2SnapshotId=${gs().v2SnapshotId ?? "null"}`,
+    );
+    subs.forEach((u) => u());
+  };
 }
 
 async function _startExport(snapshotId: string): Promise<void> {
@@ -224,6 +247,15 @@ async function _startExport(snapshotId: string): Promise<void> {
     // event may have already cleared the export and transitioned state.
     if (result?.export_id && gs().v2State === "EXPORTING" && gs().v2SnapshotId === snapshotId) {
       gs().setV2ExportId(result.export_id);
+      gs().log(
+        "info",
+        `[export lifecycle] _startExport export_id stored: export_id=${result.export_id} stored=true`,
+      );
+    } else if (result?.export_id) {
+      gs().log(
+        "info",
+        `[export lifecycle] _startExport export_id NOT stored: export_id=${result.export_id} v2State=${gs().v2State} v2SnapshotId=${gs().v2SnapshotId ?? "null"} expected=${snapshotId} stored=false`,
+      );
     }
   } catch (err) {
     gs().log("info", `[export lifecycle] _startExport RPC error: ${err instanceof Error ? err.message : String(err)} v2State=${gs().v2State}`);
