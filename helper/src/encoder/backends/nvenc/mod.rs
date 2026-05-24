@@ -66,6 +66,101 @@ fn drm_fourcc_to_str(v: u32) -> String {
     .to_string()
 }
 
+// ── DRM fourcc constants (local to this module) ──────────────────────────────
+
+#[cfg(test)]
+const DRM_FORMAT_NV12: u32 = 0x3231564E;
+const DRM_FORMAT_XR24: u32 = 0x34325258;
+const DRM_FORMAT_AR24: u32 = 0x34325241;
+
+/// Convert packed BGRx/BGRa SHM frame to planar NV12 using BT.709 limited range.
+///
+/// # Safety
+/// `src` must be valid for reads up to `src_len` bytes.
+/// `dst` must be valid for writes of `enc_h * dst_pitch * 3 / 2` bytes.
+/// `src` and `dst` must not alias.
+#[allow(clippy::too_many_arguments)]
+fn convert_packed_bgra_to_nv12(
+    src: *const u8,
+    src_len: usize,
+    src_stride: usize,
+    src_w: usize,
+    src_h: usize,
+    dst: *mut u8,
+    dst_pitch: usize,
+    enc_w: usize,
+    enc_h: usize,
+    has_alpha: bool,
+) {
+    let _ = has_alpha;
+
+    // Y plane
+    for y in 0..enc_h {
+        for x in 0..enc_w {
+            let luma = if y < src_h && x < src_w {
+                let off = y * src_stride + x * 4;
+                if off + 2 < src_len {
+                    let b = unsafe { *src.add(off) } as i32;
+                    let g = unsafe { *src.add(off + 1) } as i32;
+                    let r = unsafe { *src.add(off + 2) } as i32;
+                    (16 + ((47 * r + 157 * g + 16 * b + 128) >> 8)).clamp(16, 235) as u8
+                } else {
+                    16u8
+                }
+            } else {
+                16u8
+            };
+            unsafe { *dst.add(y * dst_pitch + x) = luma; }
+        }
+    }
+
+    // UV plane — interleaved NV12, half resolution, 2×2 block averaging
+    let chroma_base = enc_h * dst_pitch;
+    let chroma_h = enc_h / 2;
+    let chroma_w = enc_w / 2;
+    for cy in 0..chroma_h {
+        for cx in 0..chroma_w {
+            let mut r_sum: i32 = 0;
+            let mut g_sum: i32 = 0;
+            let mut b_sum: i32 = 0;
+            let mut count: i32 = 0;
+
+            for dy in 0..2usize {
+                for dx in 0..2usize {
+                    let sy = cy * 2 + dy;
+                    let sx = cx * 2 + dx;
+                    if sy < src_h && sx < src_w {
+                        let off = sy * src_stride + sx * 4;
+                        if off + 2 < src_len {
+                            b_sum += unsafe { *src.add(off) } as i32;
+                            g_sum += unsafe { *src.add(off + 1) } as i32;
+                            r_sum += unsafe { *src.add(off + 2) } as i32;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+
+            let (u, v) = if count > 0 {
+                let r = r_sum / count;
+                let g = g_sum / count;
+                let b = b_sum / count;
+                (
+                    (128 + ((-26 * r - 87 * g + 112 * b + 128) >> 8)).clamp(16, 240) as u8,
+                    (128 + ((112 * r - 102 * g - 10 * b + 128) >> 8)).clamp(16, 240) as u8,
+                )
+            } else {
+                (128u8, 128u8)
+            };
+
+            unsafe {
+                *dst.add(chroma_base + cy * dst_pitch + cx * 2) = u;
+                *dst.add(chroma_base + cy * dst_pitch + cx * 2 + 1) = v;
+            }
+        }
+    }
+}
+
 // ── Active encode session state ───────────────────────────────────────────────
 
 struct EncodeSession {
@@ -740,12 +835,15 @@ impl EncoderBackend for NvencBackend {
         let locked_ptr = lock_in_params.bufferDataPtr;
         let locked_pitch = lock_in_params.pitch;
 
-        // NV12: luma plane (height rows) + chroma plane (height/2 rows of interleaved UV).
-        // SHM frame arrives as NV12 (fourcc=NV12) or similar — copy luma + chroma.
         let h = sess.enc_height as usize;
         let w = sess.enc_width as usize;
         let pitch = locked_pitch as usize;
         let frame_stride = stride as usize;
+
+        let copy_path = match incoming_format {
+            DRM_FORMAT_XR24 | DRM_FORMAT_AR24 => "convert",
+            _ => "copy",
+        };
 
         if sess.frame_count == 0 {
             info!(
@@ -754,6 +852,7 @@ impl EncoderBackend for NvencBackend {
                 incoming_fourcc = %drm_fourcc_to_str(incoming_format),
                 configured_fourcc = %sess.cfg.format.fourcc,
                 nvenc_buffer_fmt = "NV12",
+                path = copy_path,
                 src_width = incoming_width,
                 src_height = incoming_height,
                 enc_width = sess.enc_width,
@@ -773,6 +872,7 @@ impl EncoderBackend for NvencBackend {
                 incoming_fourcc = %drm_fourcc_to_str(incoming_format),
                 configured_fourcc = %sess.cfg.format.fourcc,
                 nvenc_buffer_fmt = "NV12",
+                path = copy_path,
                 src_width = incoming_width,
                 src_height = incoming_height,
                 enc_width = sess.enc_width,
@@ -787,37 +887,58 @@ impl EncoderBackend for NvencBackend {
             );
         }
 
-        // Copy luma rows.
-        for row in 0..h {
-            let src_off = row * frame_stride;
-            let dst_off = row * pitch;
-            let copy_len = w.min(if src_off < shm_size { shm_size - src_off } else { 0 });
-            if copy_len > 0 {
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        shm_ptr.add(src_off),
-                        (locked_ptr as *mut u8).add(dst_off),
-                        copy_len,
-                    );
-                }
+        match incoming_format {
+            DRM_FORMAT_XR24 => {
+                convert_packed_bgra_to_nv12(
+                    shm_ptr, shm_size, frame_stride,
+                    incoming_width as usize, incoming_height as usize,
+                    locked_ptr as *mut u8, pitch,
+                    w, h,
+                    false,
+                );
             }
-        }
+            DRM_FORMAT_AR24 => {
+                convert_packed_bgra_to_nv12(
+                    shm_ptr, shm_size, frame_stride,
+                    incoming_width as usize, incoming_height as usize,
+                    locked_ptr as *mut u8, pitch,
+                    w, h,
+                    true,
+                );
+            }
+            _ => {
+                // NV12, P010, and all other formats: existing byte copy (verbatim).
+                for row in 0..h {
+                    let src_off = row * frame_stride;
+                    let dst_off = row * pitch;
+                    let copy_len = w.min(if src_off < shm_size { shm_size - src_off } else { 0 });
+                    if copy_len > 0 {
+                        unsafe {
+                            ptr::copy_nonoverlapping(
+                                shm_ptr.add(src_off),
+                                (locked_ptr as *mut u8).add(dst_off),
+                                copy_len,
+                            );
+                        }
+                    }
+                }
 
-        // Copy chroma (UV interleaved, half height).
-        let chroma_src_off = h * frame_stride;
-        let chroma_dst_off = h * pitch;
-        let chroma_rows = h / 2;
-        for row in 0..chroma_rows {
-            let src_off = chroma_src_off + row * frame_stride;
-            let dst_off = chroma_dst_off + row * pitch;
-            let copy_len = w.min(if src_off < shm_size { shm_size - src_off } else { 0 });
-            if copy_len > 0 {
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        shm_ptr.add(src_off),
-                        (locked_ptr as *mut u8).add(dst_off),
-                        copy_len,
-                    );
+                let chroma_src_off = h * frame_stride;
+                let chroma_dst_off = h * pitch;
+                let chroma_rows = h / 2;
+                for row in 0..chroma_rows {
+                    let src_off = chroma_src_off + row * frame_stride;
+                    let dst_off = chroma_dst_off + row * pitch;
+                    let copy_len = w.min(if src_off < shm_size { shm_size - src_off } else { 0 });
+                    if copy_len > 0 {
+                        unsafe {
+                            ptr::copy_nonoverlapping(
+                                shm_ptr.add(src_off),
+                                (locked_ptr as *mut u8).add(dst_off),
+                                copy_len,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -1112,5 +1233,200 @@ mod tests {
         assert_eq!(r0, 1);
         // 16.667 ms ≈ 1499–1500 ticks (integer division)
         assert!(pts1 >= 1499 && pts1 <= 1501, "pts1={pts1}");
+    }
+
+    // ── convert_packed_bgra_to_nv12 tests ────────────────────────────────────
+
+    fn make_bgrx(pixels: &[(u8, u8, u8)], w: usize, stride: usize) -> Vec<u8> {
+        let h = pixels.len() / w;
+        let mut buf = vec![0u8; h * stride];
+        for (i, &(b, g, r)) in pixels.iter().enumerate() {
+            let y = i / w;
+            let x = i % w;
+            let off = y * stride + x * 4;
+            buf[off] = b;
+            buf[off + 1] = g;
+            buf[off + 2] = r;
+            buf[off + 3] = 0; // X
+        }
+        buf
+    }
+
+    fn run_convert(src: &[u8], src_stride: usize, src_w: usize, src_h: usize,
+                   enc_w: usize, enc_h: usize, dst_pitch: usize) -> Vec<u8> {
+        let dst_size = enc_h * dst_pitch + (enc_h / 2) * dst_pitch;
+        let mut dst = vec![0xFFu8; dst_size];
+        convert_packed_bgra_to_nv12(
+            src.as_ptr(), src.len(), src_stride,
+            src_w, src_h,
+            dst.as_mut_ptr(), dst_pitch,
+            enc_w, enc_h,
+            false,
+        );
+        dst
+    }
+
+    #[test]
+    fn convert_white_yields_y235() {
+        let src = make_bgrx(&[(255,255,255); 4], 2, 8);
+        let dst = run_convert(&src, 8, 2, 2, 2, 2, 2);
+        for i in 0..4 { assert_eq!(dst[i], 235, "Y[{i}]"); }
+        assert!((dst[4] as i32 - 128).unsigned_abs() <= 1, "U={}", dst[4]);
+        assert!((dst[5] as i32 - 128).unsigned_abs() <= 1, "V={}", dst[5]);
+    }
+
+    #[test]
+    fn convert_black_yields_y16() {
+        let src = make_bgrx(&[(0,0,0); 4], 2, 8);
+        let dst = run_convert(&src, 8, 2, 2, 2, 2, 2);
+        for i in 0..4 { assert_eq!(dst[i], 16, "Y[{i}]"); }
+        assert_eq!(dst[4], 128, "U");
+        assert_eq!(dst[5], 128, "V");
+    }
+
+    #[test]
+    fn convert_pure_red() {
+        // B=0, G=0, R=255
+        let src = make_bgrx(&[(0,0,255); 4], 2, 8);
+        let dst = run_convert(&src, 8, 2, 2, 2, 2, 2);
+        let y_expected = 16 + ((47 * 255 + 128) >> 8); // 63
+        for i in 0..4 {
+            assert!((dst[i] as i32 - y_expected).unsigned_abs() <= 1, "Y[{i}]={} expected {y_expected}", dst[i]);
+        }
+        let u_expected = 128 + ((-26 * 255 + 128) >> 8); // 102
+        let v_expected = 128 + ((112 * 255 + 128) >> 8); // 240
+        assert!((dst[4] as i32 - u_expected).unsigned_abs() <= 1, "U={} expected {u_expected}", dst[4]);
+        assert!((dst[5] as i32 - v_expected).unsigned_abs() <= 1, "V={} expected {v_expected}", dst[5]);
+    }
+
+    #[test]
+    fn convert_pure_green() {
+        // B=0, G=255, R=0
+        let src = make_bgrx(&[(0,255,0); 4], 2, 8);
+        let dst = run_convert(&src, 8, 2, 2, 2, 2, 2);
+        let y_expected = 16 + ((157 * 255 + 128) >> 8); // 172
+        for i in 0..4 {
+            assert!((dst[i] as i32 - y_expected).unsigned_abs() <= 1, "Y[{i}]={} expected {y_expected}", dst[i]);
+        }
+        let u_expected = 128 + ((-87 * 255 + 128) >> 8); // 41
+        let v_expected = 128 + ((-102 * 255 + 128) >> 8); // 26
+        assert!((dst[4] as i32 - u_expected).unsigned_abs() <= 1, "U={} expected {u_expected}", dst[4]);
+        assert!((dst[5] as i32 - v_expected).unsigned_abs() <= 1, "V={} expected {v_expected}", dst[5]);
+    }
+
+    #[test]
+    fn convert_pure_blue() {
+        // B=255, G=0, R=0
+        let src = make_bgrx(&[(255,0,0); 4], 2, 8);
+        let dst = run_convert(&src, 8, 2, 2, 2, 2, 2);
+        let y_expected = 16 + ((16 * 255 + 128) >> 8); // 32
+        for i in 0..4 {
+            assert!((dst[i] as i32 - y_expected).unsigned_abs() <= 1, "Y[{i}]={} expected {y_expected}", dst[i]);
+        }
+        let u_expected = 128 + ((112 * 255 + 128) >> 8); // 240
+        let v_expected = 128 + ((-10 * 255 + 128) >> 8); // 118
+        assert!((dst[4] as i32 - u_expected).unsigned_abs() <= 1, "U={} expected {u_expected}", dst[4]);
+        assert!((dst[5] as i32 - v_expected).unsigned_abs() <= 1, "V={} expected {v_expected}", dst[5]);
+    }
+
+    #[test]
+    fn convert_padded_stride() {
+        // 2px wide, but stride=16 (extra padding bytes after each row)
+        let stride = 16;
+        let mut src = vec![0u8; 2 * stride]; // 2 rows
+        // Row 0: white, white + padding
+        for x in 0..2 {
+            let off = x * 4;
+            src[off] = 255; src[off+1] = 255; src[off+2] = 255;
+        }
+        // Row 1: white, white + padding
+        for x in 0..2 {
+            let off = stride + x * 4;
+            src[off] = 255; src[off+1] = 255; src[off+2] = 255;
+        }
+        let dst = run_convert(&src, stride, 2, 2, 2, 2, 2);
+        for i in 0..4 { assert_eq!(dst[i], 235, "Y[{i}]"); }
+    }
+
+    #[test]
+    fn convert_enc_larger_than_src_pads() {
+        // src=2×2, enc=4×4 → extra pixels padded with Y=16, UV=128
+        let src = make_bgrx(&[(255,255,255); 4], 2, 8);
+        let enc_w = 4;
+        let enc_h = 4;
+        let pitch = 4;
+        let dst = run_convert(&src, 8, 2, 2, enc_w, enc_h, pitch);
+        // Source pixels → Y=235
+        assert_eq!(dst[0 * pitch + 0], 235);
+        assert_eq!(dst[0 * pitch + 1], 235);
+        assert_eq!(dst[1 * pitch + 0], 235);
+        assert_eq!(dst[1 * pitch + 1], 235);
+        // Padding pixels → Y=16
+        assert_eq!(dst[0 * pitch + 2], 16);
+        assert_eq!(dst[0 * pitch + 3], 16);
+        assert_eq!(dst[2 * pitch + 0], 16);
+        assert_eq!(dst[3 * pitch + 3], 16);
+        // UV padding: chroma_base = 4*4 = 16, block (1,0) and (1,1) are out of src
+        let cb = enc_h * pitch;
+        // Block (0,0) covers src pixels → U/V from white (±1 rounding)
+        assert!((dst[cb] as i32 - 128).unsigned_abs() <= 1, "U(0,0)={}", dst[cb]);
+        assert!((dst[cb + 1] as i32 - 128).unsigned_abs() <= 1, "V(0,0)={}", dst[cb + 1]);
+        // Block (1,0) is fully outside src → padded 128
+        assert_eq!(dst[cb + 2], 128, "U(1,0)");
+        assert_eq!(dst[cb + 3], 128, "V(1,0)");
+        // Block (0,1) row 1 of chroma
+        assert_eq!(dst[cb + pitch], 128, "U(0,1)");
+        assert_eq!(dst[cb + pitch + 1], 128, "V(0,1)");
+    }
+
+    #[test]
+    fn convert_checkerboard_2x2_averaging() {
+        // 2×2: top-left=red, top-right=green, bottom-left=blue, bottom-right=white
+        // B,G,R
+        let src = make_bgrx(&[
+            (0,0,255),   (0,255,0),
+            (255,0,0),   (255,255,255),
+        ], 2, 8);
+        let dst = run_convert(&src, 8, 2, 2, 2, 2, 2);
+        // UV should be average of all 4 pixels
+        let avg_r = (255 + 0 + 0 + 255) / 4; // 127
+        let avg_g = (0 + 255 + 0 + 255) / 4; // 127
+        let avg_b = (0 + 0 + 255 + 255) / 4; // 127
+        let u_expected = (128 + ((-26 * avg_r - 87 * avg_g + 112 * avg_b + 128) >> 8)).clamp(16, 240);
+        let v_expected = (128 + ((112 * avg_r - 102 * avg_g - 10 * avg_b + 128) >> 8)).clamp(16, 240);
+        assert!((dst[4] as i32 - u_expected).unsigned_abs() <= 1, "U={} expected {u_expected}", dst[4]);
+        assert!((dst[5] as i32 - v_expected).unsigned_abs() <= 1, "V={} expected {v_expected}", dst[5]);
+    }
+
+    #[test]
+    fn convert_truncated_src_len_no_panic() {
+        // src_len truncated so some pixels are unreadable
+        let src = make_bgrx(&[(255,255,255); 4], 2, 8);
+        // Only give 5 bytes (enough for 1 pixel + partial second)
+        let dst = run_convert(&src[..5], 8, 2, 2, 2, 2, 2);
+        // First pixel readable → Y=235
+        assert_eq!(dst[0], 235);
+        // Second pixel at offset 4: off+2=6 >= src_len=5 → Y=16
+        assert_eq!(dst[1], 16);
+        // Row 1 entirely out of range → Y=16
+        assert_eq!(dst[2], 16);
+        assert_eq!(dst[3], 16);
+    }
+
+    #[test]
+    fn convert_zero_src_dims_no_panic() {
+        let src: Vec<u8> = vec![];
+        let dst = run_convert(&src, 0, 0, 0, 2, 2, 2);
+        // All padding
+        for i in 0..4 { assert_eq!(dst[i], 16, "Y[{i}]"); }
+        assert_eq!(dst[4], 128, "U");
+        assert_eq!(dst[5], 128, "V");
+    }
+
+    #[test]
+    fn drm_fourcc_constants_match_expected() {
+        assert_eq!(drm_fourcc_to_str(DRM_FORMAT_XR24), "XR24");
+        assert_eq!(drm_fourcc_to_str(DRM_FORMAT_AR24), "AR24");
+        assert_eq!(drm_fourcc_to_str(DRM_FORMAT_NV12), "NV12");
     }
 }

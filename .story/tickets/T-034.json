@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-23",
+  "description": "ISS-014 root cause fix: PipeWire SHM fallback delivers XR24 (packed BGRx, 4 B/px). NVENC backend allocates NV12 buffers but copies packed XR24 bytes directly into planar NV12 memory, causing deterministic vertical striping. Fix: add BT.709 limited-range XR24/AR24→NV12 conversion in push_frame, keep NV12/P010 fast paths byte-identical. Related: T-030, T-031, T-032.",
+  "id": "T-034",
+  "order": 150,
+  "phase": "p4-release",
+  "status": "inprogress",
+  "title": "Convert packed XR24/BGRx SHM frames to NV12 before NVENC submission",
+  "type": "task"
+}
