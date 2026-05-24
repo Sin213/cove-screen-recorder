@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-23",
+  "createdDate": "2026-05-23",
+  "description": "Reproduce ONE stuck-EXPORTING failure (max ~5 attempts) and classify which single boundary breaks using log correlation. RESULT: 2 attempts, ISS-012 NOT reproduced. Both runs hit Branch A (no valid file, no export.queued) — different failure mode classified as ISS-015. Evidence: .story/handovers/evidence/2026-05-23-iss-012-classification/",
+  "id": "T-035",
+  "order": 160,
+  "phase": "p4-release",
+  "status": "complete",
+  "title": "Classify ISS-012 stuck-EXPORTING boundary via log correlation",
+  "type": "task"
+}

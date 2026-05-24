@@ -6,7 +6,7 @@
   ],
   "discoveredDate": "2026-05-22",
   "id": "ISS-012",
-  "impact": "During ISS-011 VAL-CAP-006 standalone retry-2, replay save reached 100%, a valid MP4 landed on disk and ffprobed cleanly, but renderer remained stuck in EXPORTING and controls stayed disabled. Evidence path: .story/handovers/evidence/2026-05-22-iss-011-val-cap-006-standalone-retry-2/",
+  "impact": "During ISS-011 VAL-CAP-006 standalone retry-2, replay save reached 100%, a valid MP4 landed on disk and ffprobed cleanly, but renderer remained stuck in EXPORTING and controls stayed disabled. Evidence path: .story/handovers/evidence/2026-05-22-iss-011-val-cap-006-standalone-retry-2/\n\nT-035 classification pass (2026-05-23): ISS-012 was NOT reproduced in 2 attempts. Both runs hit Branch A (no valid file, no export.queued) — a DIFFERENT failure mode (ISS-015, snapshot IPC silent drop). ISS-012 repro rate: 1/10+ attempts cumulative. T-029 [export lifecycle][render] diagnostics are present in current build and will classify on next repro. Evidence: .story/handovers/evidence/2026-05-23-iss-012-classification/",
   "location": [],
   "phase": null,
   "relatedTickets": [

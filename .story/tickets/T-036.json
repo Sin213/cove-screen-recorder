@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-23",
+  "description": "Add minimal renderer-side logging to src/v2/engine.ts to classify ISS-012 (stuck-EXPORTING) on next repro. Log ONLY: onCompleted receipt, onFailed receipt, onCancelled receipt, _isStaleExport verdict at receipt, v2State at receipt. Do NOT implement watchdogs, timeouts, or state machine changes. Scope: single file src/v2/engine.ts. Purpose: when ISS-012 next fires, these logs will prove whether export.completed reached the renderer and whether _isStaleExport discarded it. Required per T-035 verdict.md classification guidance. Status: blocked pending ISS-015 investigation — ISS-015 (snapshot IPC silent drop) may be preventing conditions needed to reproduce ISS-012 in the current build.",
+  "id": "T-036",
+  "order": 170,
+  "phase": "p4-release",
+  "status": "open",
+  "title": "Add ISS-012 renderer completion logging to src/v2/engine.ts",
+  "type": "task"
+}

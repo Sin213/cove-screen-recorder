@@ -1,0 +1,14 @@
+# Rolling buffer for pw-session-0000-1523385-1779585302277 at time of save attempt
+# /run/user/1000/cove-screen-recorder/segments/pw-session-0000-1523385-1779585302277/
+
+manifest.json:
+{"session_id":"pw-session-0000-1523385-1779585302277","segments":[{"index":2,"pts_start_90k":6856630,"pts_end_90k":7307511,"duration_90k":24000,"byte_size":2634742,"is_keyframe_first":true,"discontinuity":false,"fragment_count":16}]}
+
+Files:
+  init.mp4  660B
+  00000002.mp4  2.6MB
+
+Derived duration: (7307511 - 6856630) / 90000 = 5.01 seconds
+Segment count: 1 (index=2; segments 1 rolled out)
+Helper frames logged: seq=1 only (frame_count=0 at seq=1)
+Note: Portal session opened 32s before save; save immediately after re-arm.

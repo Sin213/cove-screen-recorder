@@ -1,0 +1,20 @@
+{
+  "components": [
+    "export",
+    "helper",
+    "renderer"
+  ],
+  "discoveredDate": "2026-05-23",
+  "id": "ISS-015",
+  "impact": "User triggers a replay save, the UI transitions briefly to SAVING state, then silently returns to RECORDING with no MP4 produced and no error displayed. The helper has valid rolling buffer segments but no snapshot_id is returned to the renderer. v2SnapshotId and v2ExportId remain null throughout. No export.queued fires in export-lifecycle.log. Entirely silent — no toast, no error log. Reproduced twice in T-035 classification pass (run-01: 18.24s buffer, run-02: 5.01s buffer). Distinct from ISS-012 (no valid MP4 exists here; ISS-012 requires valid MP4 + stuck EXPORTING).",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [
+    "T-035"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "v2 save silently fails: SAVING→RECORDING with no snapshot ID despite valid rolling buffer segments"
+}

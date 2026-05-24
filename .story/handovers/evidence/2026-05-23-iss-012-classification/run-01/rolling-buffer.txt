@@ -1,0 +1,14 @@
+# Rolling buffer for pw-session-0000-1523385-1779583964285 at time of save attempt
+# /run/user/1000/cove-screen-recorder/segments/pw-session-0000-1523385-1779583964285/
+
+manifest.json:
+{"session_id":"pw-session-0000-1523385-1779583964285","segments":[{"index":2,"pts_start_90k":6815738,"pts_end_90k":8457149,"duration_90k":85500,"byte_size":13500961,"is_keyframe_first":true,"discontinuity":false,"fragment_count":57}]}
+
+Files:
+  init.mp4  660B
+  00000002.mp4  12.9MB
+
+Derived duration: (8457149 - 6815738) / 90000 = 18.24 seconds
+Segment count: 1 (index=2; segment 1 was likely rolled out before the save attempt)
+Helper frames logged: seq=1 only (frame_count=0 at seq=1)
+Note: T-034 encode path confirmed (path=convert in shm frame log)
