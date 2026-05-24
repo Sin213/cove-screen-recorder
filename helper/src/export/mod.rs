@@ -368,12 +368,26 @@ async fn handle_replay_save(
     let segments = match buffer_clone.pin_snapshot(duration_90k).await {
         Some(segs) if !segs.is_empty() => segs,
         Some(_) => {
+            warn!(
+                session_id = %session_id,
+                duration_s = duration_s,
+                duration_90k = duration_90k,
+                is_closing = buffer_clone.is_closing(),
+                "replay.save: pin_snapshot Some(empty) — no segments within requested window"
+            );
             return Response::error(
                 id,
                 RpcError::invalid_request("no segments fall within the requested duration"),
             )
         }
         None => {
+            warn!(
+                session_id = %session_id,
+                duration_s = duration_s,
+                duration_90k = duration_90k,
+                is_closing = buffer_clone.is_closing(),
+                "replay.save: pin_snapshot None — no committed segments available"
+            );
             return Response::error(
                 id,
                 RpcError::invalid_request("no committed segments available to pin"),

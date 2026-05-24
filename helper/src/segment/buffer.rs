@@ -511,6 +511,19 @@ impl SegmentBuffer {
     pub async fn pin_snapshot(&self, duration_90k: u64) -> Option<Vec<SegmentRef>> {
         let mut inner = self.inner.lock().await;
         if inner.committed.is_empty() {
+            warn!(
+                session_id = %inner.session_id,
+                committed_len = 0u64,
+                segments_committed = inner.segments_committed,
+                segments_evicted = inner.segments_evicted,
+                pinned_count = inner.pinned_count(),
+                next_index = inner.next_index,
+                bytes_on_disk = inner.bytes_on_disk,
+                window_duration_90k = inner.config.window_duration_90k,
+                disk_cap_bytes = inner.config.disk_cap_bytes,
+                requested_duration_90k = duration_90k,
+                "pin_snapshot: committed ring empty at save time"
+            );
             return None;
         }
 
@@ -536,6 +549,23 @@ impl SegmentBuffer {
             });
         }
         refs.reverse();
+
+        if refs.is_empty() {
+            let oldest_pts_start_90k = inner.committed.front().map(|s| s.pts_start_90k);
+            let oldest_pts_end_90k = inner.committed.front().map(|s| s.pts_end_90k);
+            let newest_pts_start_90k = inner.committed.back().map(|s| s.pts_start_90k);
+            warn!(
+                session_id = %inner.session_id,
+                committed_len = inner.committed.len(),
+                oldest_pts_start_90k = ?oldest_pts_start_90k,
+                oldest_pts_end_90k = ?oldest_pts_end_90k,
+                newest_pts_start_90k = ?newest_pts_start_90k,
+                newest_pts_end_90k = newest_pts,
+                cutoff = cutoff,
+                duration_90k = duration_90k,
+                "pin_snapshot: refs empty after cutoff loop (unexpected path)"
+            );
+        }
 
         inner.segments_pinned = inner.pinned_count();
         Some(refs)
