@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-23",
+  "description": "EVIDENCE-ONLY pass. Reproduce ISS-012 (stuck-EXPORTING after valid MP4) using original VAL-CAP-006 conditions: >60s recording, window source, 4K if available, portal active. Classify which single boundary breaks using T-036 renderer logs (gs().log() -> useStore logs, NOT export-lifecycle.log). Decision tree: (1) no export.completed received but valid MP4 → delivery/subscription fault; (2) received + stale-guard discard + no accept → stale-guard/export_id lineage fault; (3) received + accept + post-transition RECORDING|IDLE but controls disabled → Zustand/UI render fault; (4) received + accept + post-transition EXPORTING → FSM transition-execution fault; (5) save never reaches EXPORTING (SAVING→RECORDING, null snapshot) → ISS-015 interception, STOP. No source changes. No watchdogs/timeouts. src/v2/engine.ts is read-only reference. Budget: 1 clean repro classification, hard cap 5 attempts.",
+  "id": "T-037",
+  "order": 180,
+  "phase": "p4-release",
+  "status": "inprogress",
+  "title": "ISS-012 stuck-EXPORTING controlled repro + boundary classification",
+  "type": "task"
+}
