@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-24",
+  "createdDate": "2026-05-24",
+  "description": "COMPLETE. Instrumented onSegmentDiagnostics in engine.ts. Functional repro: B4 confirmed (committed=1..8, pin always empty, durElig always false). Evidence: .story/handovers/evidence/2026-05-24-iss-015-commit-path-classification/",
+  "id": "T-039",
+  "order": 200,
+  "phase": "p4-release",
+  "status": "complete",
+  "title": "Surface helper segment-diagnostics in renderer for ISS-015 commit-path classification",
+  "type": "task"
+}

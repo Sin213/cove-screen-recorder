@@ -6,7 +6,7 @@
   ],
   "discoveredDate": "2026-05-23",
   "id": "ISS-015",
-  "impact": "User triggers a replay save, the UI transitions briefly to SAVING state, then silently returns to RECORDING with no MP4 produced and no error displayed. The helper has valid rolling buffer segments but no snapshot_id is returned to the renderer. v2SnapshotId and v2ExportId remain null throughout. No export.queued fires in export-lifecycle.log. Entirely silent — no toast, no error log. Reproduced twice in T-035 classification pass (run-01: 18.24s buffer, run-02: 5.01s buffer). Distinct from ISS-012 (no valid MP4 exists here; ISS-012 requires valid MP4 + stuck EXPORTING).",
+  "impact": "v2 save silently fails with \"no committed segments available to pin\" (T-038 classification: rolling-buffer seal failure). T-039 commit-path classification: B4 — segments_committed > 0 (confirmed up to 8 across 4 attempts) but replay pin always empty. durElig=false persists regardless of committed count. Hypothesis: helper pin predicate requires duration_eligible=true for in-progress segment; encode rate under static-screen content (~5% real-time) means pending segment never reaches PTS duration threshold. Evidence: .story/handovers/evidence/2026-05-24-iss-015-commit-path-classification/. Related: T-038 (reason classification), T-039 (commit-path classification).",
   "location": [],
   "phase": null,
   "relatedTickets": [

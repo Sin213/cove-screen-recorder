@@ -1,0 +1,44 @@
+T-039 — ISS-015 commit-path classification render log
+Session: pw-session-0000-1665676-1779608771513
+Captured: 2026-05-24 (session started 07:46:11 UTC / 00:46:11 PDT)
+
+00:42:16    info    [export lifecycle] engine subscriptions registered: subs=13 v2State=BOOTING
+00:42:16    info    [export lifecycle][render] snapshot: v2State=BOOTING v2ExportId=null v2SnapshotId=null v2SessionId=null v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=false recordingState=ready recordingLabel="Ready"
+00:42:16    info    [export lifecycle] engine subscriptions torn down: v2State=BOOTING v2ExportId=null v2SnapshotId=null
+00:42:16    info    [export lifecycle] engine subscriptions registered: subs=13 v2State=BOOTING
+00:42:16    info    [export lifecycle][render] snapshot: v2State=BOOTING v2ExportId=null v2SnapshotId=null v2SessionId=null v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=false recordingState=ready recordingLabel="Ready"
+00:42:16    info    ffmpeg n8.1.1 · encoders: h264_nvenc, hevc_nvenc, av1_nvenc, h264_amf, hevc_amf, h264_qsv…
+00:42:16    info    Wayland session — pick the source in the system screen-share dialog (one prompt per recording).
+00:42:16    info    [export lifecycle][render] snapshot: v2State=IDLE v2ExportId=null v2SnapshotId=null v2SessionId=null v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=false bigButtonDisabled=false recordingState=ready recordingLabel="Ready"
+00:45:39    info    [export lifecycle][render] snapshot: v2State=IDLE v2ExportId=null v2SnapshotId=null v2SessionId=null v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:46:11    info    [export lifecycle][render] snapshot: v2State=RECORDING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:46:15    info    [export lifecycle][render] v2SaveReplay start (hotkey): v2State=RECORDING v2SnapshotId=null v2ExportId=null
+00:46:15    info    [export lifecycle][render] snapshot: v2State=SAVING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=true startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:46:31    info    [segment diagnostics] first fragment received
+00:46:31    info    [segment diagnostics] first keyframe seen
+00:46:31    warn    [export lifecycle] v2SaveReplay RPC rejected: code=? message=no committed segments available to pin v2State=SAVING
+00:46:31    warn    [segment diagnostics] save snapshot: frags=3 keyframes=1 committed=0 durElig=false pendDur90k=4500 lastKfAgeMs=657 idrTotal=1 ptIdrTotal=1
+00:46:31    info    [export lifecycle][render] snapshot: v2State=RECORDING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:46:31    info    [export lifecycle][render] v2SaveReplay finally (hotkey): v2State=RECORDING v2ExportId=null v2SnapshotId=null
+00:46:51    info    [segment diagnostics] duration became eligible
+00:47:09    info    [segment diagnostics] first segment committed
+00:47:23    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING v2SnapshotId=null v2ExportId=null
+00:47:23    info    [export lifecycle][render] snapshot: v2State=SAVING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=true startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:47:28    warn    [export lifecycle] v2SaveReplay RPC rejected: code=? message=no committed segments available to pin v2State=SAVING
+00:47:28    warn    [segment diagnostics] save snapshot: frags=221 keyframes=2 committed=1 durElig=false pendDur90k=151500 lastKfAgeMs=32493 idrTotal=2 ptIdrTotal=2
+00:47:28    info    [export lifecycle][render] snapshot: v2State=RECORDING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:47:28    info    [export lifecycle][render] v2SaveReplay finally (button): v2State=RECORDING v2ExportId=null v2SnapshotId=null
+00:47:33    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING v2SnapshotId=null v2ExportId=null
+00:47:33    info    [export lifecycle][render] snapshot: v2State=SAVING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=true startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:47:49    warn    [export lifecycle] v2SaveReplay RPC rejected: code=? message=no committed segments available to pin v2State=SAVING
+00:47:49    warn    [segment diagnostics] save snapshot: frags=249 keyframes=3 committed=2 durElig=false pendDur90k=13500 lastKfAgeMs=2679 idrTotal=3 ptIdrTotal=3
+00:47:49    info    [export lifecycle][render] snapshot: v2State=RECORDING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:47:49    info    [export lifecycle][render] v2SaveReplay finally (button): v2State=RECORDING v2ExportId=null v2SnapshotId=null
+00:49:33    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING v2SnapshotId=null v2ExportId=null
+00:49:33    info    [export lifecycle][render] snapshot: v2State=SAVING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=true startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:51:57    info    [export lifecycle][render] v2SaveReplay start (button): v2State=RECORDING v2SnapshotId=null v2ExportId=null
+00:51:57    info    [export lifecycle][render] snapshot: v2State=SAVING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=true startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:52:03    warn    [export lifecycle] v2SaveReplay RPC rejected: code=? message=no committed segments available to pin v2State=SAVING
+00:52:03    warn    [segment diagnostics] save snapshot: frags=1060 keyframes=9 committed=8 durElig=false pendDur90k=150000 lastKfAgeMs=32563 idrTotal=9 ptIdrTotal=9
+00:52:03    info    [export lifecycle][render] snapshot: v2State=RECORDING v2ExportId=null v2SnapshotId=null v2SessionId=pw-session-0000-1665676-1779608771513 v2ExportProgress=null v2ExportOutputPath=null replaySaving=false status=idle saveControlsDisabled=false startBufferDisabled=true bigButtonDisabled=true recordingState=ready recordingLabel="Ready"
+00:52:03    info    [export lifecycle][render] v2SaveReplay finally (button): v2State=RECORDING v2ExportId=null v2SnapshotId=null

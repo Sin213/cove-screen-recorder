@@ -50,6 +50,24 @@ async function _applyEngineReady(info: { helperVersion: string; protocolVersion:
   }
 }
 
+// ── Per-session segment-diagnostics edge tracking ─────────────────────────
+// Cleared on each new capture session. Enables one-time edge logs and
+// provides a snapshot on save failure for ISS-015 commit-path classification.
+let _lastSegDiag: Record<string, unknown> | null = null;
+
+let _sawFragment = false;
+let _sawKeyframe = false;
+let _sawDurationEligible = false;
+let _sawCommit = false;
+
+function _resetSegDiagEdges() {
+  _lastSegDiag = null;
+  _sawFragment = false;
+  _sawKeyframe = false;
+  _sawDurationEligible = false;
+  _sawCommit = false;
+}
+
 export function initV2Engine(): Unsub {
   const api = window.coveApi;
   const subs: Unsub[] = [];
@@ -86,12 +104,14 @@ export function initV2Engine(): Unsub {
     const ev = raw as { session_id: string };
     gs().setV2SessionId(ev.session_id);
     gs().setV2SessionReadyMs(Date.now());
+    _resetSegDiagEdges();
     _enterRecording();
   }));
 
   subs.push(api.capture.onSessionLost(() => {
     gs().setV2SessionId(null);
     gs().setV2SessionReadyMs(null);
+    _resetSegDiagEdges();
     const cur = gs().v2State;
     if (cur === "RECORDING" || cur === "SAVING") {
       gs().setV2State("IDLE");
@@ -131,6 +151,37 @@ export function initV2Engine(): Unsub {
     if (gs().v2RecoveryIgnoredForSession) return;
     if (sessions.length > 0 && gs().v2State === "IDLE") {
       gs().setV2State("RECOVERY_AVAILABLE");
+    }
+  }));
+
+  subs.push(api.replay.onSegmentDiagnostics((raw) => {
+    const d = raw as {
+      fragments_received?: number;
+      keyframes_seen?: number;
+      segments_committed?: number;
+      duration_eligible?: boolean;
+      pending_duration_90k?: number;
+      last_keyframe_age_ms?: number;
+      current_segment_index?: number;
+      idr_nal_count_total?: number;
+      picture_type_idr_count_total?: number;
+    };
+    _lastSegDiag = d as Record<string, unknown>;
+    if (!_sawFragment && (d.fragments_received ?? 0) > 0) {
+      _sawFragment = true;
+      gs().log("info", "[segment diagnostics] first fragment received");
+    }
+    if (!_sawKeyframe && (d.keyframes_seen ?? 0) > 0) {
+      _sawKeyframe = true;
+      gs().log("info", "[segment diagnostics] first keyframe seen");
+    }
+    if (!_sawDurationEligible && d.duration_eligible) {
+      _sawDurationEligible = true;
+      gs().log("info", "[segment diagnostics] duration became eligible");
+    }
+    if (!_sawCommit && (d.segments_committed ?? 0) > 0) {
+      _sawCommit = true;
+      gs().log("info", "[segment diagnostics] first segment committed");
     }
   }));
 
@@ -284,8 +335,31 @@ export async function saveReplay(durationSeconds: number): Promise<void> {
       gs().setV2SnapshotHeld(true);
       gs().setV2State("EXPORTING");
       void _startExport(result.snapshot_id);
+    } else {
+      gs().log(
+        "warn",
+        `[export lifecycle] v2SaveReplay no snapshot_id: hasResult=${!!result} snapshot_id=${result?.snapshot_id ?? "null"} v2State=${gs().v2State}`,
+      );
+      if (!result?.snapshot_id) {
+        if (_lastSegDiag !== null) {
+          const d = _lastSegDiag as { fragments_received?: number; keyframes_seen?: number; segments_committed?: number; duration_eligible?: boolean; pending_duration_90k?: number; last_keyframe_age_ms?: number; idr_nal_count_total?: number; picture_type_idr_count_total?: number };
+          gs().log("warn", `[segment diagnostics] save snapshot: frags=${d.fragments_received ?? "?"} keyframes=${d.keyframes_seen ?? "?"} committed=${d.segments_committed ?? "?"} durElig=${d.duration_eligible ?? "?"} pendDur90k=${d.pending_duration_90k ?? "?"} lastKfAgeMs=${d.last_keyframe_age_ms ?? "?"} idrTotal=${d.idr_nal_count_total ?? "?"} ptIdrTotal=${d.picture_type_idr_count_total ?? "?"}`);
+        } else {
+          gs().log("warn", "[segment diagnostics] save snapshot: segDiag=none");
+        }
+      }
     }
-  } catch {
+  } catch (err) {
+    gs().log(
+      "warn",
+      `[export lifecycle] v2SaveReplay RPC rejected: code=${(err as { code?: string })?.code ?? "?"} message=${err instanceof Error ? err.message : String(err)} v2State=${gs().v2State}`,
+    );
+    if (_lastSegDiag !== null) {
+      const d = _lastSegDiag as { fragments_received?: number; keyframes_seen?: number; segments_committed?: number; duration_eligible?: boolean; pending_duration_90k?: number; last_keyframe_age_ms?: number; idr_nal_count_total?: number; picture_type_idr_count_total?: number };
+      gs().log("warn", `[segment diagnostics] save snapshot: frags=${d.fragments_received ?? "?"} keyframes=${d.keyframes_seen ?? "?"} committed=${d.segments_committed ?? "?"} durElig=${d.duration_eligible ?? "?"} pendDur90k=${d.pending_duration_90k ?? "?"} lastKfAgeMs=${d.last_keyframe_age_ms ?? "?"} idrTotal=${d.idr_nal_count_total ?? "?"} ptIdrTotal=${d.picture_type_idr_count_total ?? "?"}`);
+    } else {
+      gs().log("warn", "[segment diagnostics] save snapshot: segDiag=none");
+    }
     if (gs().v2State === "SAVING") {
       _enterRecording();
     }
