@@ -18,6 +18,41 @@ function _enterRecording(): void {
   gs().setV2State("RECORDING");
 }
 
+// ── EXPORTING watchdog (ISS-012) ────────────────────────────────────────────
+// If the helper's export task panics, is aborted, or a terminal event is lost
+// in IPC transit, the renderer stays stuck in EXPORTING forever. This watchdog
+// self-recovers after a generous timeout and logs diagnostic state.
+const _EXPORT_WATCHDOG_MS = 120_000;
+let _exportWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+function _startExportWatchdog(): void {
+  _clearExportWatchdog();
+  _exportWatchdogTimer = setTimeout(() => {
+    _exportWatchdogTimer = null;
+    if (gs().v2State !== "EXPORTING") return;
+    gs().log(
+      "warn",
+      `[export lifecycle] EXPORTING watchdog fired after ${_EXPORT_WATCHDOG_MS}ms: v2ExportId=${gs().v2ExportId ?? "null"} v2SnapshotId=${gs().v2SnapshotId ?? "null"} v2SessionId=${gs().v2SessionId ?? "null"}`,
+    );
+    gs().setV2ExportProgress(null);
+    gs().setV2ExportId(null);
+    _releaseCurrentSnapshot();
+    if (gs().v2SessionId !== null) {
+      _enterRecording();
+    } else {
+      gs().setV2State("IDLE");
+    }
+    gs().log("info", `[export lifecycle] EXPORTING watchdog recovery: v2State=${gs().v2State}`);
+  }, _EXPORT_WATCHDOG_MS);
+}
+
+function _clearExportWatchdog(): void {
+  if (_exportWatchdogTimer !== null) {
+    clearTimeout(_exportWatchdogTimer);
+    _exportWatchdogTimer = null;
+  }
+}
+
 function _releaseCurrentSnapshot(): void {
   const id = gs().v2SnapshotId;
   if (id) void _releaseWithRetry(id);
@@ -79,6 +114,7 @@ export function initV2Engine(): Unsub {
   }));
 
   subs.push(api.engine.onCrashed(() => {
+    _clearExportWatchdog();
     gs().setV2State("ENGINE_DOWN");
     gs().setV2SessionId(null);
     gs().setV2SessionReadyMs(null);
@@ -89,6 +125,7 @@ export function initV2Engine(): Unsub {
 
   subs.push(api.engine.onStateChanged((state) => {
     if (state === "unavailable") {
+      _clearExportWatchdog();
       gs().setV2State("ENGINE_UNAVAILABLE");
       gs().setV2SessionId(null);
       gs().setV2SessionReadyMs(null);
@@ -131,6 +168,7 @@ export function initV2Engine(): Unsub {
     gs().setV2SnapshotId(ev.snapshot_id);
     gs().setV2SnapshotHeld(true);
     gs().setV2State("EXPORTING");
+    _startExportWatchdog();
     void _startExport(ev.snapshot_id);
   }));
 
@@ -208,6 +246,7 @@ export function initV2Engine(): Unsub {
     const ev = raw as { export_id?: string; final_path?: string };
     gs().log("info", `[export lifecycle] export.completed received: export_id=${ev.export_id ?? "?"} final_path=${ev.final_path ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
+    _clearExportWatchdog();
     gs().log(
       "info",
       `[export lifecycle] stale-guard accept: event export_id=${ev.export_id ?? "undef"} active=${gs().v2ExportId ?? "null"} verdict=accept`,
@@ -228,6 +267,7 @@ export function initV2Engine(): Unsub {
     const ev = raw as { export_id?: string; stage?: string; reason_code?: string };
     gs().log("info", `[export lifecycle] export.failed received: export_id=${ev.export_id ?? "?"} stage=${ev.stage ?? "?"} reason_code=${ev.reason_code ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
+    _clearExportWatchdog();
     gs().log(
       "info",
       `[export lifecycle] stale-guard accept: event export_id=${ev.export_id ?? "undef"} active=${gs().v2ExportId ?? "null"} verdict=accept`,
@@ -249,6 +289,7 @@ export function initV2Engine(): Unsub {
     const ev = raw as { export_id?: string; stage?: string; partial_bytes?: number };
     gs().log("info", `[export lifecycle] export.cancelled received: export_id=${ev.export_id ?? "?"} stage=${ev.stage ?? "?"} partial_bytes=${ev.partial_bytes ?? "?"} v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"}`);
     if (_isStaleExport(ev.export_id)) return;
+    _clearExportWatchdog();
     gs().log(
       "info",
       `[export lifecycle] stale-guard accept: event export_id=${ev.export_id ?? "undef"} active=${gs().v2ExportId ?? "null"} verdict=accept`,
@@ -278,6 +319,7 @@ export function initV2Engine(): Unsub {
   );
 
   return () => {
+    _clearExportWatchdog();
     gs().log(
       "info",
       `[export lifecycle] engine subscriptions torn down: v2State=${gs().v2State} v2ExportId=${gs().v2ExportId ?? "null"} v2SnapshotId=${gs().v2SnapshotId ?? "null"}`,
@@ -310,6 +352,7 @@ async function _startExport(snapshotId: string): Promise<void> {
     }
   } catch (err) {
     gs().log("info", `[export lifecycle] _startExport RPC error: ${err instanceof Error ? err.message : String(err)} v2State=${gs().v2State}`);
+    _clearExportWatchdog();
     gs().setV2ExportId(null);
     gs().setV2ExportProgress(null);
     _releaseCurrentSnapshot();
@@ -334,6 +377,7 @@ export async function saveReplay(durationSeconds: number): Promise<void> {
       gs().setV2SnapshotId(result.snapshot_id);
       gs().setV2SnapshotHeld(true);
       gs().setV2State("EXPORTING");
+      _startExportWatchdog();
       void _startExport(result.snapshot_id);
     } else {
       gs().log(
@@ -382,6 +426,7 @@ export async function restoreRecovery(sessionId: string): Promise<void> {
       gs().setV2SnapshotId(result.snapshot_id);
       gs().setV2SnapshotHeld(true);
       gs().setV2State("EXPORTING");
+      _startExportWatchdog();
       void _startExport(result.snapshot_id);
     }
   } catch {

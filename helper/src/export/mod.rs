@@ -801,18 +801,40 @@ async fn handle_export_start(
     let eid = export_id.clone();
     let state_c = Arc::clone(state);
 
+    let terminal_fired_guard = Arc::clone(&terminal_fired);
+    let notifier_guard = notifier.clone();
     tokio::spawn(async move {
-        run_export(
-            eid.clone(),
-            snapshot,
-            output_path,
-            staging_dir,
-            notifier_c,
-            cancel_rx,
-            in_muxing,
-            terminal_fired,
-        )
+        let eid_inner = eid.clone();
+        let result = tokio::spawn(async move {
+            run_export(
+                eid_inner,
+                snapshot,
+                output_path,
+                staging_dir,
+                notifier_c,
+                cancel_rx,
+                in_muxing,
+                terminal_fired,
+            )
+            .await;
+        })
         .await;
+        if let Err(ref e) = result {
+            warn!(export_id = %eid, error = %e, "export task panicked");
+        }
+        if !terminal_fired_guard.load(Ordering::SeqCst) {
+            warn!(export_id = %eid, "export task exited without terminal event — emitting fallback export.failed");
+            emit_export_failed(
+                &notifier_guard,
+                &eid,
+                "internal",
+                "task-exited-without-terminal",
+                "export task returned without emitting completed/failed/cancelled",
+                "",
+                &terminal_fired_guard,
+            )
+            .await;
+        }
         state_c.active_exports.lock().await.remove(&eid);
     });
 

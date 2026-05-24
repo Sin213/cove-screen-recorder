@@ -18,9 +18,9 @@
     "T-031",
     "T-032"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in commit 51c4f5a — BGRx/AR24 SHM frames now converted to planar NV12 via BT.709 limited-range conversion before NVENC submission. Verified visually: no striping, geometry and color correct.",
+  "resolvedDate": "2026-05-24",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "Replay artifacts show deterministic vertical striping with preserved scene geometry"
 }
