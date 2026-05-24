@@ -257,6 +257,19 @@ impl BufferInner {
             return false;
         }
 
+        warn!(
+            session_id = %self.session_id,
+            to_evict = evict_positions.len(),
+            committed_len_before = self.committed.len(),
+            segments_committed = self.segments_committed,
+            segments_evicted = self.segments_evicted,
+            bytes_on_disk = self.bytes_on_disk,
+            now_pts = now_pts,
+            window_duration_90k = self.config.window_duration_90k,
+            disk_cap_bytes = self.config.disk_cap_bytes,
+            "evict_eligible: evicting segments"
+        );
+
         // Remove in reverse order to preserve index validity.
         // Only drop metadata after durable file removal succeeds.
         let mut any_removed = false;
@@ -265,8 +278,27 @@ impl BufferInner {
             match self.writer.remove(index) {
                 Ok(()) => {
                     let seg = self.committed.remove(pos).unwrap();
+                    let age_90k = now_pts - seg.pts_start_90k;
+                    let trigger = if age_90k > self.config.window_duration_90k as i64 {
+                        "age"
+                    } else {
+                        "disk_cap"
+                    };
                     self.bytes_on_disk = self.bytes_on_disk.saturating_sub(seg.byte_size);
                     self.segments_evicted += 1;
+                    warn!(
+                        session_id = %self.session_id,
+                        index = seg.index,
+                        pts_start_90k = seg.pts_start_90k,
+                        pts_end_90k = seg.pts_end_90k,
+                        age_90k = age_90k,
+                        trigger = trigger,
+                        byte_size = seg.byte_size,
+                        committed_len_after = self.committed.len(),
+                        segments_evicted = self.segments_evicted,
+                        bytes_on_disk_after = self.bytes_on_disk,
+                        "evict_eligible: segment evicted"
+                    );
                     any_removed = true;
                 }
                 Err(e) => {
