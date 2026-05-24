@@ -1,17 +1,19 @@
 # T-037 — ISS-012 Controlled Repro + Boundary Classification
 
-**Date:** 2026-05-24
-**Ticket:** T-037 (inprogress — qualifying conditions not met). **Issues:** ISS-012 (open, unresolved), ISS-015 (open, NOT confirmed blocking — interception observed under non-qualifying conditions only).
+**Date:** 2026-05-23
+**Ticket:** T-037 (inprogress — window-source qualifying condition not met). **Issues:** ISS-012 (open, unresolved), ISS-015 (open, NOT confirmed blocking under qualifying conditions).
 
 ## Session Goal
 
 Execute controlled repro of ISS-012 (stuck-EXPORTING after valid MP4) using T-036 renderer logs. Classify which single boundary breaks via decision tree. Budget: 1 clean classification, hard cap 5 attempts.
 
-## Result: PARTIAL — Qualifying Conditions Not Met
+## Result: PARTIAL — Window-Source Qualifying Condition Not Met
 
-Current T-037 evidence shows ISS-015-style interception under non-qualifying repro conditions. Because no attempt satisfied the required >60s window-source condition (VAL-CAP-006), this pass does not complete ISS-012 boundary classification. T-037 remains open pending a qualifying controlled repro attempt.
+Run-01: 3 attempts, all hit Branch 5 pattern, conditions not met (attempts 1-2 under 60s; attempt 3 used Screen source).
 
-ISS-012 is NOT confirmed blocked on ISS-015.
+Run-02: 2 attempts at 8m54s and 10m7s elapsed, portal active, Screen source — window source unavailable for replay buffer path on this system. Both hit Branch 5 pattern.
+
+ISS-015-style interception observed across all 5 attempts. ISS-012 boundary classification is NOT yet complete — window-source qualifying condition was never met.
 
 ## What Happened
 
@@ -53,9 +55,9 @@ Hypothesis: rolling buffer writer initialization fails for some sessions. Warran
 
 ## ISS-012 Status
 
-Open. Unresolved. T-037 qualifying repro attempt still pending.
-- ISS-015-style interception observed under non-qualifying conditions only — NOT a confirmed blocker
-- Cumulative repro rate: 1 confirmed / 13+ attempts
+Open. Unresolved. Window-source qualifying repro attempt still pending.
+- ISS-015-style interception observed in all 5 attempts (Screen source only) — NOT a confirmed blocker
+- Cumulative repro rate: 1 confirmed / 15+ attempts
 - T-036 renderer logs are in place for when ISS-012 does fire
 
 ## Evidence Root
@@ -72,17 +74,16 @@ Open. Unresolved. T-037 qualifying repro attempt still pending.
 
 ## Verification
 
-- `git diff --staged --stat`: 8 files (T-037.json, ISS-012.json modified/added, handover + evidence dir including screenshot)
+- `git diff --staged --stat`: 6 new/modified staged files in this pass (T-037.json, ISS-012.json, handover, verdict, run-02 operator-note, run-02 render-snapshot); run-01 evidence and screenshot previously staged
 - Forbidden surfaces (helper/ electron/ src/ validation/ packaging/ .github/ Cargo.* package.json): EMPTY — clean
 
 ## Tickets Changed
 
-- T-037: inprogress (qualifying window-source >60s attempt still required)
-- ISS-012: impact annotation updated — non-qualifying interception noted; ISS-012 is NOT confirmed blocked on ISS-015
+- T-037: inprogress (window-source qualifying attempt still required)
+- ISS-012: impact annotation updated — ISS-015-style interception observed under Screen source only; not confirmed blocked
 
-## Observations (Informational — Not Conclusive)
+## Blocker
 
-ISS-015-style behavior observed in all 3 attempts under non-qualifying conditions. Once a qualifying attempt is completed, the decision tree can be applied to classify ISS-012.
-
-- Session 2 zero-segments anomaly may warrant separate investigation (encoder active, no disk writes)
-- DO NOT add watchdogs/timeouts/retries.
+Window source is not available for the replay buffer path on this system (Wayland portal offers only whole-screen or region for replay buffer). T-037 cannot complete until either:
+- A window-source replay buffer attempt is possible, OR
+- The window-source gate is explicitly lifted by the project owner
