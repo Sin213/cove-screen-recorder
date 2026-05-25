@@ -1,0 +1,21 @@
+{
+  "components": [
+    "export",
+    "validation"
+  ],
+  "discoveredDate": "2026-05-25",
+  "id": "ISS-022",
+  "impact": "VAL-EXP-010 (smoke row 12, must-pass) fails cadence assertion when no display enforcement is applied. PipeWire negotiates the native 4K display at variable-rate (~30fps), producing 960 frames over 31.8s. The cadence gate requires mean in [51..61.2] fps (85–102% of nominal 60). EXP-010 has no kscreen-doctor enforcement unlike VAL-CAP-004 (ISS-021 fix). Smoke execution blocked at row 12; rows 13-20 NOT-ATTEMPTED.",
+  "location": [
+    "validation/drivers.ts (driveValExp010 / produceStreamCopyMp4)"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-010c"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-EXP-010 fails cadence gate when display is at 4K native: PipeWire negotiates 3840×2160 variable-rate, meanFps=30.19 outside required [51..61] fps envelope"
+}
