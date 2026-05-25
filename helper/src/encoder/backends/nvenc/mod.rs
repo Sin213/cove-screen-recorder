@@ -12,6 +12,7 @@ pub mod fmp4;
 
 use std::ffi::c_void;
 use std::ptr;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use libloading::{Library, Symbol};
@@ -202,6 +203,11 @@ struct EncodeSession {
     /// Count of frames submitted to NVENC. Drives only the FORCEIDR cadence;
     /// independent of `seq` (drained fragments) and `dts_90k` (90 kHz wall-time).
     frame_count: u64,
+
+    /// Per-GOP XR24/AR24→NV12 conversion timing (ISS-020 instrumentation).
+    conv_total_us: u64,
+    conv_max_us: u64,
+    conv_gop_frames: u32,
 }
 
 struct PendingFrame {
@@ -764,6 +770,9 @@ impl EncoderBackend for NvencBackend {
             enc_height,
             gop_size: gop_size.max(1),
             frame_count: 0,
+            conv_total_us: 0,
+            conv_max_us: 0,
+            conv_gop_frames: 0,
         }));
 
         Ok(())
@@ -866,6 +875,21 @@ impl EncoderBackend for NvencBackend {
                 "[iss-014][encode-boundary] shm frame",
             );
         } else if sess.frame_count % sess.gop_size as u64 == 0 {
+            if sess.conv_gop_frames > 0 {
+                let mean_us = sess.conv_total_us / sess.conv_gop_frames as u64;
+                warn!(
+                    mean_us,
+                    max_us = sess.conv_max_us,
+                    frame_count = sess.conv_gop_frames,
+                    format = %drm_fourcc_to_str(incoming_format),
+                    width = incoming_width,
+                    height = incoming_height,
+                    "[iss-020] bgra-to-nv12 conversion cost per GOP",
+                );
+                sess.conv_total_us = 0;
+                sess.conv_max_us = 0;
+                sess.conv_gop_frames = 0;
+            }
             debug!(
                 seq = frame.seq,
                 frame_count = sess.frame_count,
@@ -889,6 +913,7 @@ impl EncoderBackend for NvencBackend {
 
         match incoming_format {
             DRM_FORMAT_XR24 => {
+                let t0 = Instant::now();
                 convert_packed_bgra_to_nv12(
                     shm_ptr, shm_size, frame_stride,
                     incoming_width as usize, incoming_height as usize,
@@ -896,8 +921,15 @@ impl EncoderBackend for NvencBackend {
                     w, h,
                     false,
                 );
+                let us = t0.elapsed().as_micros() as u64;
+                sess.conv_total_us += us;
+                if us > sess.conv_max_us {
+                    sess.conv_max_us = us;
+                }
+                sess.conv_gop_frames += 1;
             }
             DRM_FORMAT_AR24 => {
+                let t0 = Instant::now();
                 convert_packed_bgra_to_nv12(
                     shm_ptr, shm_size, frame_stride,
                     incoming_width as usize, incoming_height as usize,
@@ -905,6 +937,12 @@ impl EncoderBackend for NvencBackend {
                     w, h,
                     true,
                 );
+                let us = t0.elapsed().as_micros() as u64;
+                sess.conv_total_us += us;
+                if us > sess.conv_max_us {
+                    sess.conv_max_us = us;
+                }
+                sess.conv_gop_frames += 1;
             }
             _ => {
                 // NV12, P010, and all other formats: existing byte copy (verbatim).
