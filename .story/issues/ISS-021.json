@@ -1,0 +1,27 @@
+{
+  "components": [
+    "capture",
+    "helper",
+    "validation"
+  ],
+  "discoveredDate": "2026-05-25",
+  "id": "ISS-021",
+  "impact": "VAL-CAP-004 (1080p60 monitor capture 60s on NVENC, must-pass smoke row) cannot complete on KDE Plasma / NVIDIA. Test expects 1920x1080 source but portal picks 3840x2160 (KDE's preferred mode). Resolution lock via kscreen-doctor is overridden during test, causing capture cadence (89.3 fps vs nominal 60 fps) and drop-rate gates (96% vs required ≤0%) to fail. Smoke suite stops early at first must-pass red.",
+  "location": [
+    "validation/rows.ts:VAL-CAP-004",
+    "dist-validation/runner.js",
+    "helper/src/pipewire/",
+    ".story/validation/N-008.md"
+  ],
+  "phase": "p4-release",
+  "relatedTickets": [
+    "T-010c",
+    "T-027",
+    "T-028"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-CAP-004 blocked: KDE Plasma restores 4K resolution mid-capture despite kscreen-doctor lock to 1080p60"
+}

@@ -1217,7 +1217,7 @@ export async function driveValCap004(
     // --- Stage 3: Spawn helper and connect ----------------------------------
     const socketPath = runnerOwnedSocketPath();
     writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
-    spawned = await spawnHelper(socketPath);
+    spawned = await spawnHelper(socketPath, ["--log-dir", evidenceDir]);
     rpc = await RpcClient.connect(socketPath, 5_000);
 
     const readyNotif = await rpc.waitNotification("engine.ready", 10_000);
