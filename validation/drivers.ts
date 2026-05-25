@@ -3133,6 +3133,7 @@ async function produceStreamCopyMp4(
   let exportId: string | null = null;
   let exportTmpDir: string | null = null;
   let callerOwnsCleanup = false;
+  let modesetResult: ModesetResult | null = null;
 
   const cleanup = () => {
     if (exportTmpDir) {
@@ -3225,6 +3226,18 @@ async function produceStreamCopyMp4(
       argv: load.argv,
     });
 
+    // ISS-022 Stage 1: enforce 1920x1080@60 before helper spawn so PipeWire
+    // does not negotiate 4K variable-rate when the display is at native 4K.
+    modesetResult = enforceDisplayMode({ width: 1920, height: 1080 }, 60);
+    writeJsonEvidence(evidenceDir, "display-modeset.json", modesetResult);
+    if (!modesetResult.success) {
+      return {
+        kind: "fail",
+        message: `ISS-022: display mode enforcement failed — target 1920x1080@60, got ${modesetResult.appliedMode ? `${modesetResult.appliedMode.width}x${modesetResult.appliedMode.height}` : "(unknown)"} after ${modesetResult.attempts} attempts`,
+        durationMs: Date.now() - start,
+      };
+    }
+
     const socketPath = runnerOwnedSocketPath();
     writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
     spawned = await spawnHelper(socketPath);
@@ -3257,6 +3270,19 @@ async function produceStreamCopyMp4(
       return {
         kind: "fail",
         message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    // ISS-022 Stage 2: re-enforce 1920x1080@60 after portal interaction.
+    // The portal D-Bus round-trip can trigger KDE compositor recomposition
+    // which reverts kscreen-doctor mode changes before PipeWire stream startup.
+    const recheckModeset = enforceDisplayMode({ width: 1920, height: 1080 }, 60);
+    writeJsonEvidence(evidenceDir, "display-modeset-pre-stream.json", recheckModeset);
+    if (!recheckModeset.success) {
+      return {
+        kind: "fail",
+        message: `ISS-022: display mode reverted after portal interaction — target 1920x1080@60, got ${recheckModeset.appliedMode ? `${recheckModeset.appliedMode.width}x${recheckModeset.appliedMode.height}` : "(unknown)"}`,
         durationMs: Date.now() - start,
       };
     }
@@ -3603,6 +3629,9 @@ async function produceStreamCopyMp4(
       durationMs: Date.now() - start,
     };
   } finally {
+    if (modesetResult?.priorMode && modesetResult.attempts > 0) {
+      restoreDisplayMode(modesetResult.priorMode, modesetResult.output);
+    }
     if (exportId && rpc) {
       await rpc
         .call("replay.export_cancel", { export_id: exportId }, 5_000)
