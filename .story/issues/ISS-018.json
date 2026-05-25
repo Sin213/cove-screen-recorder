@@ -1,0 +1,24 @@
+{
+  "components": [
+    "packaging",
+    "supervision",
+    "ui"
+  ],
+  "discoveredDate": "2026-05-24",
+  "id": "ISS-018",
+  "impact": "N-008 VAL-UI-010 (sha256 mismatch) and VAL-UI-011 (protocol version mismatch) require a blocking modal that makes the main UI unreachable. Actual behavior: both errors route through the generic supervisor \"unavailable\" path and emit a non-blocking \"Engine unavailable\" banner in Diagnostics.tsx — the main recording UI remains accessible. No `helper-binary-tampered` IPC code exists. No protocol-mismatch-specific modal. The underlying checks fire correctly (verifySha256 in engine-supervisor.ts:175, connectAndVerify:350) but the required blocking renderer behavior is absent. Prevents T-010d acceptance and T-010e gate.",
+  "location": [
+    "electron/engine-supervisor.ts",
+    "electron/main.ts",
+    "src/v2/Diagnostics.tsx"
+  ],
+  "phase": "p4-release",
+  "relatedTickets": [
+    "T-010d"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-UI-010/011: helper sha256 and protocol mismatch show non-blocking banner instead of blocking modal"
+}

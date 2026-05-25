@@ -1,0 +1,22 @@
+{
+  "components": [
+    "packaging",
+    "supervision",
+    "ui"
+  ],
+  "discoveredDate": "2026-05-24",
+  "id": "ISS-019",
+  "impact": "N-008 VAL-UI-014 requires a startup probe that shows a blocking install-hint modal when `xdg-desktop-portal` (or `pipewire`) is absent from the system. No such probe exists anywhere in electron/main.ts, electron/recorder.ts, or the renderer. The app will silently fail at capture time rather than surfacing a clear install hint at boot. Prevents T-010d acceptance and T-010e gate.",
+  "location": [
+    "electron/main.ts"
+  ],
+  "phase": "p4-release",
+  "relatedTickets": [
+    "T-010d"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-UI-014: dependency probe (pipewire/xdg-desktop-portal) not implemented"
+}
