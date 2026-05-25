@@ -40,7 +40,7 @@ let lastReadyPayload: { helperVersion: string; protocolVersion: number } | null 
 
 // Single transient blocked payload — cleared when engine reaches ready.
 // Re-sent on did-finish-load to cover startup race (supervisor fails before window loads).
-let lastBlockedPayload: { code: string } | null = null;
+let lastBlockedPayload: { code: string; detail?: string } | null = null;
 
 // Structured result envelope for v2 IPC handlers.
 // Returned as a plain object so Electron's structured clone serializes all fields
@@ -1214,9 +1214,16 @@ app.whenReady().then(() => {
     lastReadyPayload = null;
     mainWindow?.webContents.send("cove/engine/stateChanged", "unavailable");
     const code = (err as { code?: string })?.code;
-    if (code === "sha256-mismatch" || code === "protocol-mismatch") {
-      lastBlockedPayload = { code };
-      mainWindow?.webContents.send("cove/engine/blocked", { code });
+    if (
+      code === "sha256-mismatch" ||
+      code === "protocol-mismatch" ||
+      code === "missing-dependency"
+    ) {
+      const detail = (err as { detail?: string })?.detail;
+      const payload: { code: string; detail?: string } =
+        detail !== undefined ? { code, detail } : { code };
+      lastBlockedPayload = payload;
+      mainWindow?.webContents.send("cove/engine/blocked", payload);
     }
   });
 

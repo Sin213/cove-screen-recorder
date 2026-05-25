@@ -9,25 +9,38 @@ export function Diagnostics() {
 
   const isBlocked =
     v2BlockReason?.code === "sha256-mismatch" ||
-    v2BlockReason?.code === "protocol-mismatch";
+    v2BlockReason?.code === "protocol-mismatch" ||
+    v2BlockReason?.code === "missing-dependency";
 
   if (isBlocked) {
+    const { code, detail } = v2BlockReason!;
+
+    const title =
+      code === "sha256-mismatch"
+        ? "Helper integrity check failed"
+        : code === "protocol-mismatch"
+        ? "Helper protocol mismatch"
+        : detail === "pipewire"
+        ? "PipeWire not installed"
+        : "xdg-desktop-portal not installed";
+
+    const body =
+      code === "sha256-mismatch"
+        ? "The helper binary has been modified or corrupted. Please reinstall Cove."
+        : code === "protocol-mismatch"
+        ? "The installed helper version is incompatible with this app. Please reinstall Cove."
+        : detail === "pipewire"
+        ? "PipeWire is required for screen recording but is not installed. Install pipewire using your package manager."
+        : "xdg-desktop-portal is required for screen recording but is not installed. Install xdg-desktop-portal using your package manager.";
+
     return (
       <div className="modal-backdrop">
         <div className="modal">
           <div className="modal-head">
-            <h3>
-              {v2BlockReason!.code === "sha256-mismatch"
-                ? "Helper integrity check failed"
-                : "Helper protocol mismatch"}
-            </h3>
+            <h3>{title}</h3>
           </div>
           <div className="modal-body">
-            <p>
-              {v2BlockReason!.code === "sha256-mismatch"
-                ? "The helper binary has been modified or corrupted. Please reinstall Cove."
-                : "The installed helper version is incompatible with this app. Please reinstall Cove."}
-            </p>
+            <p>{body}</p>
           </div>
           <div className="modal-foot">
             <button

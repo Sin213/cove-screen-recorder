@@ -170,6 +170,30 @@ export class EngineSupervisor extends EventEmitter {
     return path.join(app.getAppPath(), "target", "debug", `cove-replay-engine${ext}`);
   }
 
+  // ── Dependency sentinel check (Linux only) ─────────────────────────────────
+
+  private checkDependencies(): void {
+    if (process.platform !== "linux") return;
+    const sentinels: ReadonlyArray<{ sentinel: string; dep: string }> = [
+      {
+        sentinel:
+          "/usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service",
+        dep: "xdg-desktop-portal",
+      },
+      { sentinel: "/usr/bin/pipewire", dep: "pipewire" },
+    ];
+    for (const { sentinel, dep } of sentinels) {
+      if (!fs.existsSync(sentinel)) {
+        throw Object.assign(
+          new Error(
+            `required dependency not installed: ${dep} (sentinel: ${sentinel})`,
+          ),
+          { code: "missing-dependency" as const, detail: dep },
+        );
+      }
+    }
+  }
+
   // ── SHA-256 verification (packaged builds only) ─────────────────────────────
 
   private async verifySha256(binaryPath: string): Promise<void> {
@@ -408,6 +432,8 @@ export class EngineSupervisor extends EventEmitter {
 
     if (this.shutdownRequested) return;
 
+    this.checkDependencies();
+
     const proc = await this.adoptOrSpawn(socketPath, pidPath, binaryPath);
 
     if (this.shutdownRequested) {
@@ -560,7 +586,11 @@ export class EngineSupervisor extends EventEmitter {
       this.bootCycle().catch((err: unknown) => {
         console.warn("[supervisor] restart failed:", err);
         const code = (err as { code?: string })?.code;
-        if (code === "sha256-mismatch" || code === "protocol-mismatch") {
+        if (
+          code === "sha256-mismatch" ||
+          code === "protocol-mismatch" ||
+          code === "missing-dependency"
+        ) {
           this.stopHeartbeat();
           this.setState("unavailable");
           this.emit("unavailable", err);

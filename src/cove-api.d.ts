@@ -22,7 +22,7 @@ interface CoveApiEngine {
   onCrashed(cb: () => void): UnsubscribeFn;
   onStateChanged(cb: (state: string) => void): UnsubscribeFn;
   onLogLine(cb: (line: string) => void): UnsubscribeFn;
-  onBlocked(cb: (reason: { code: string }) => void): UnsubscribeFn;
+  onBlocked(cb: (reason: { code: string; detail?: string }) => void): UnsubscribeFn;
 }
 
 interface CoveApiCapture {

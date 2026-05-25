@@ -185,7 +185,7 @@ interface State {
   v2ExportId: string | null;
   v2ExportProgress: number | null;
   v2ExportOutputPath: string | null;
-  v2BlockReason: { code: string } | null;
+  v2BlockReason: { code: string; detail?: string } | null;
   setV2State: (s: V2State) => void;
   setV2EngineInfo: (info: V2EngineInfo | null) => void;
   setV2SessionId: (id: string | null) => void;
@@ -195,7 +195,7 @@ interface State {
   setV2ExportId: (id: string | null) => void;
   setV2ExportProgress: (pct: number | null) => void;
   setV2ExportOutputPath: (p: string | null) => void;
-  setV2BlockReason: (r: { code: string } | null) => void;
+  setV2BlockReason: (r: { code: string; detail?: string } | null) => void;
 
   setAppInfo: (info: AppInfo) => void;
   setMode: (m: CaptureMode) => void;
