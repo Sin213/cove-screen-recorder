@@ -379,6 +379,8 @@ export async function saveReplay(durationSeconds: number): Promise<void> {
       gs().setV2State("EXPORTING");
       _startExportWatchdog();
       void _startExport(result.snapshot_id);
+    } else if (result?.snapshot_id && gs().v2State === "EXPORTING" && gs().v2SnapshotId === result.snapshot_id) {
+      // onSnapshotPinned already transitioned FSM to EXPORTING for this snapshot — no-op
     } else {
       gs().log(
         "warn",
