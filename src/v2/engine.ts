@@ -81,7 +81,16 @@ async function _applyEngineReady(info: { helperVersion: string; protocolVersion:
   gs().setV2EngineInfo(info);
   const cur = gs().v2State;
   if (cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
-    await _refreshRecoverableSessions();
+    gs().setV2State("IDLE");
+    try {
+      const result = await window.coveApi.replay.recoverableSessions() as { sessions?: { session_id: string }[] };
+      const sessions = result?.sessions ?? [];
+      if (sessions.length > 0) {
+        void _autoDiscardRecoverableSessions(sessions);
+      }
+    } catch {
+      // non-fatal: helper may not yet have the recovery index ready
+    }
   }
 }
 
@@ -183,12 +192,9 @@ export function initV2Engine(): Unsub {
   }));
 
   subs.push(api.replay.onRecoveryAvailable((raw) => {
-    const ev = raw as { sessions: unknown[] };
-    const sessions = ev.sessions as never[];
-    gs().setV2RecoverableSessions(sessions);
-    if (gs().v2RecoveryIgnoredForSession) return;
-    if (sessions.length > 0 && gs().v2State === "IDLE") {
-      gs().setV2State("RECOVERY_AVAILABLE");
+    const ev = raw as { sessions: { session_id: string }[] };
+    if (ev.sessions.length > 0) {
+      void _autoDiscardRecoverableSessions(ev.sessions);
     }
   }));
 
@@ -412,30 +418,6 @@ export async function saveReplay(durationSeconds: number): Promise<void> {
   }
 }
 
-export async function discardRecovery(sessionId: string): Promise<void> {
-  if (gs().v2State !== "RECOVERY_AVAILABLE") return;
-  await window.coveApi.replay.discardRecoveredSession({ session_id: sessionId });
-  await _refreshRecoverableSessions();
-}
-
-export async function restoreRecovery(sessionId: string): Promise<void> {
-  if (gs().v2State !== "RECOVERY_AVAILABLE") return;
-  gs().setV2State("SAVING");
-  try {
-    const result = await window.coveApi.replay.restoreRecoveredSession({ session_id: sessionId }) as { snapshot_id?: string } | undefined;
-    gs().setV2RecoverableSessions(null);
-    if (result?.snapshot_id && gs().v2State === "SAVING") {
-      gs().setV2SnapshotId(result.snapshot_id);
-      gs().setV2SnapshotHeld(true);
-      gs().setV2State("EXPORTING");
-      _startExportWatchdog();
-      void _startExport(result.snapshot_id);
-    }
-  } catch {
-    await _refreshRecoverableSessions();
-  }
-}
-
 // Default helper capture options used when the operator clicks Start replay
 // buffer without overriding parameters. Mirrors the smoke matrix baseline.
 const DEFAULT_REQUEST_SESSION_OPTS = {
@@ -536,68 +518,13 @@ export async function stopCapture(): Promise<void> {
   }
 }
 
-// Refresh the recoverable sessions list from the helper and update FSM state.
-// Falls back to IDLE when no sessions remain; onSnapshotPinned drives further transitions.
-async function _refreshRecoverableSessions(): Promise<void> {
-  try {
-    const result = await window.coveApi.replay.recoverableSessions() as { sessions?: unknown[] };
-    const sessions = (result?.sessions ?? []) as never[];
-    gs().setV2RecoverableSessions(sessions.length > 0 ? sessions : null);
-    if (sessions.length > 0) {
-      const cur = gs().v2State;
-      // Operator opted out of the recovery prompt for this renderer session.
-      // Keep the recoverable list visible to other surfaces but don't gate
-      // the Start replay buffer button by entering RECOVERY_AVAILABLE — still
-      // normalize boot / down / unavailable / saving back to IDLE so a helper
-      // restart after an in-session Ignore doesn't leave Start disabled.
-      if (gs().v2RecoveryIgnoredForSession) {
-        if (cur === "SAVING" || cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
-          gs().setV2State("IDLE");
-        }
-        return;
-      }
-      if (cur === "IDLE" || cur === "SAVING" || cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
-        gs().setV2State("RECOVERY_AVAILABLE");
-      }
-    } else {
-      const cur = gs().v2State;
-      if (cur === "RECOVERY_AVAILABLE" || cur === "SAVING" || cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
-        gs().setV2State("IDLE");
-      }
-    }
-  } catch {
-    gs().setV2RecoverableSessions(null);
-    const cur = gs().v2State;
-    // Do not overwrite ENGINE_DOWN or ENGINE_UNAVAILABLE — those are driven
-    // by engine lifecycle events, not by a recovery query failure.
-    if (cur === "RECOVERY_AVAILABLE" || cur === "SAVING" || cur === "BOOTING") {
-      gs().setV2State("IDLE");
-    }
-  }
-}
-
-// Operator opted out of the recovery prompt for this renderer session only.
-// Does NOT touch helper recovery data; the banner reappears on next app start
-// while sessions still exist on disk.
-export function ignoreRecoveryForSession(): void {
-  const count = gs().v2RecoverableSessions?.length ?? 0;
-  gs().setV2RecoveryIgnoredForSession(true);
-  gs().setV2State("IDLE");
-  gs().log("info", `recovery.ignored count=${count}`);
-}
-
-// Discard every recoverable session via the existing per-session discardRecovery
-// path. Two-click confirmation is the caller's responsibility (RecoveryBanner).
-export async function discardAllRecoverable(): Promise<void> {
-  if (gs().v2State !== "RECOVERY_AVAILABLE") return;
-  const sessions = (gs().v2RecoverableSessions ?? []).slice();
-  gs().log("info", `recovery.discardedAll count=${sessions.length}`);
+async function _autoDiscardRecoverableSessions(sessions: { session_id: string }[]): Promise<void> {
+  gs().log("info", `recovery.autoDiscard count=${sessions.length}`);
   for (const s of sessions) {
     try {
-      await discardRecovery(s.session_id);
+      await window.coveApi.replay.discardRecoveredSession({ session_id: s.session_id });
     } catch (err) {
-      gs().log("warn", `recovery.discardedAll: discard failed for ${s.session_id}: ${err instanceof Error ? err.message : String(err)}`);
+      gs().log("warn", `recovery.autoDiscard: discard failed for ${s.session_id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  await _refreshRecoverableSessions();
 }

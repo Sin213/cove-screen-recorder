@@ -7,23 +7,12 @@ export type V2State =
   | "RECORDING"
   | "SAVING"
   | "EXPORTING"
-  | "RECOVERY_AVAILABLE"
   | "ENGINE_DOWN"
   | "ENGINE_UNAVAILABLE";
 
 export interface V2EngineInfo {
   helperVersion: string;
   protocolVersion: number;
-}
-
-// Wire-format shape of recoverable session (snake_case, no re-keying by main.ts)
-export interface V2RecoverableSession {
-  session_id: string;
-  started_at: number;
-  duration_s: number;
-  bytes_on_disk: number;
-  segments_count: number;
-  has_discontinuity: boolean;
 }
 
 export function canSaveReplay(s: V2State): boolean {
