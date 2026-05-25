@@ -11,9 +11,9 @@
   "relatedTickets": [
     "T-010c"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "NVENC native ARGB input path (NV_ENC_BUFFER_FORMAT_ARGB = 0x01000000) eliminates 74ms/frame CPU XR24→NV12 conversion. XR24/AR24 frames copied directly row-by-row into NVENC ARGB buffer. VAL-CAP-004 rerun passed drop+cadence gates after remediation. Committed at 3216ff1.",
+  "resolvedDate": "2026-05-25",
   "severity": "high",
-  "status": "inprogress",
+  "status": "resolved",
   "title": "VAL-CAP-004 drop rate regression: consistent 77% frame drops on NVIDIA/SHM/1080p60 in T-010c smoke run (was 0% in T-021 rerun-27)"
 }
