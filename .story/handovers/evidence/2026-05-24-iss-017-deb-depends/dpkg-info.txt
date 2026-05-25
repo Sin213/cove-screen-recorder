@@ -1,0 +1,36 @@
+ new Debian package, version 2.0.
+ size 77900500 bytes: control archive=3400 bytes.
+     632 bytes,    14 lines      control
+    6114 bytes,    80 lines      md5sums
+    1275 bytes,    27 lines   *  postinst             #!/bin/bash
+     233 bytes,     8 lines   *  postrm               #!/bin/bash
+ Package: cove-screen-recorder
+ Version: 1.1.0
+ License: MIT
+ Vendor: Cove <79215527+Sin213@users.noreply.github.com>
+ Architecture: amd64
+ Maintainer: Cove <79215527+Sin213@users.noreply.github.com>
+ Installed-Size: 286860
+ Depends: ffmpeg, libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, pipewire (>= 0.3), xdg-desktop-portal (>= 1.18)
+ Recommends: libappindicator3-1
+ Section: default
+ Priority: optional
+ Homepage: https://github.com/Sin213/cove-screen-recorder
+ Description:
+   Desktop screen recorder with hardware-accelerated encoding, live preview, and a dark UI. Linux + Windows builds from a single repo.
+Package: cove-screen-recorder
+Version: 1.1.0
+License: MIT
+Vendor: Cove <79215527+Sin213@users.noreply.github.com>
+Architecture: amd64
+Maintainer: Cove <79215527+Sin213@users.noreply.github.com>
+Installed-Size: 286860
+Depends: ffmpeg, libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, pipewire (>= 0.3), xdg-desktop-portal (>= 1.18)
+Recommends: libappindicator3-1
+Section: default
+Priority: optional
+Homepage: https://github.com/Sin213/cove-screen-recorder
+Description:
+  Desktop screen recorder with hardware-accelerated encoding, live preview, and a dark UI. Linux + Windows builds from a single repo.
+--- dpkg-deb -f Depends only ---
+ffmpeg, libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, pipewire (>= 0.3), xdg-desktop-portal (>= 1.18)

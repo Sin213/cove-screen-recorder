@@ -92,7 +92,9 @@
         "libxss1",
         "libxtst6",
         "xdg-utils",
-        "libatspi2.0-0"
+        "libatspi2.0-0",
+        "pipewire (>= 0.3)",
+        "xdg-desktop-portal (>= 1.18)"
       ]
     },
     "win": {

@@ -12,9 +12,9 @@
   "relatedTickets": [
     "T-010d"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Added pipewire (>= 0.3) and xdg-desktop-portal (>= 1.18) to package.json build.deb.depends. Verified with dpkg-deb -f: both entries present in generated .deb control file. Evidence: .story/handovers/evidence/2026-05-24-iss-017-deb-depends/dpkg-info.txt",
+  "resolvedDate": "2026-05-24",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "v2.0.0 .deb Depends missing pipewire and xdg-desktop-portal per N-007 §17"
 }
