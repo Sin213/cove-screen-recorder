@@ -38,6 +38,10 @@ let helperShutdownPromise: Promise<void> | null = null;
 // renderer receives engine.onReady even when the helper boots before the window.
 let lastReadyPayload: { helperVersion: string; protocolVersion: number } | null = null;
 
+// Single transient blocked payload — cleared when engine reaches ready.
+// Re-sent on did-finish-load to cover startup race (supervisor fails before window loads).
+let lastBlockedPayload: { code: string } | null = null;
+
 // Structured result envelope for v2 IPC handlers.
 // Returned as a plain object so Electron's structured clone serializes all fields
 // deterministically — no reliance on Error property preservation across invoke.
@@ -273,9 +277,14 @@ function createWindow(): void {
 
   // Replay the last supervisor "ready" payload so the renderer receives
   // engine.onReady even when the helper finished booting before the window loaded.
+  // Also replay a blocked payload to cover the startup race (supervisor fails before
+  // the window finishes loading).
   mainWindow.webContents.on("did-finish-load", () => {
     if (lastReadyPayload) {
       mainWindow?.webContents.send("cove/engine/ready", lastReadyPayload);
+    }
+    if (lastBlockedPayload) {
+      mainWindow?.webContents.send("cove/engine/blocked", lastBlockedPayload);
     }
   });
 
@@ -1186,6 +1195,7 @@ app.whenReady().then(() => {
 
   supervisor.on("ready", ({ helper_version, protocol_version }) => {
     lastReadyPayload = { helperVersion: helper_version, protocolVersion: protocol_version };
+    lastBlockedPayload = null;
     mainWindow?.webContents.send("cove/engine/ready", lastReadyPayload);
     const rpc = supervisor?.rpcClient;
     if (rpc) wireHelperNotifications(rpc);
@@ -1200,9 +1210,14 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send("cove/engine/stateChanged", state);
   });
 
-  supervisor.on("unavailable", () => {
+  supervisor.on("unavailable", (err: unknown) => {
     lastReadyPayload = null;
     mainWindow?.webContents.send("cove/engine/stateChanged", "unavailable");
+    const code = (err as { code?: string })?.code;
+    if (code === "sha256-mismatch" || code === "protocol-mismatch") {
+      lastBlockedPayload = { code };
+      mainWindow?.webContents.send("cove/engine/blocked", { code });
+    }
   });
 
   void supervisor.start();

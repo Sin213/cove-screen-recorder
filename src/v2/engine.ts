@@ -79,6 +79,7 @@ async function _releaseWithRetry(id: string): Promise<void> {
 
 async function _applyEngineReady(info: { helperVersion: string; protocolVersion: number }): Promise<void> {
   gs().setV2EngineInfo(info);
+  gs().setV2BlockReason(null);
   const cur = gs().v2State;
   if (cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
     gs().setV2State("IDLE");
@@ -142,6 +143,10 @@ export function initV2Engine(): Unsub {
       gs().setV2SnapshotHeld(false);
       gs().setV2ExportId(null);
     }
+  }));
+
+  subs.push(api.engine.onBlocked((reason) => {
+    gs().setV2BlockReason(reason as { code: string });
   }));
 
   // ── Capture events ────────────────────────────────────────────────────────

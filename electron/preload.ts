@@ -109,6 +109,7 @@ const coveApiV2 = {
     onCrashed: (cb: () => void) => onCh("cove/engine/crashed", cb),
     onStateChanged: (cb: (state: string) => void) => onCh("cove/engine/stateChanged", cb),
     onLogLine: (cb: (line: string) => void) => onCh("cove/engine/logLine", cb),
+    onBlocked: (cb: (reason: { code: string }) => void) => onCh("cove/engine/blocked", cb),
   },
   capture: {
     listSources: () => callRpc("cove/capture/listSources"),

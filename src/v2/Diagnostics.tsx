@@ -5,6 +5,42 @@ export function Diagnostics() {
   const v2State = useStore((s) => s.v2State);
   const v2EngineInfo = useStore((s) => s.v2EngineInfo);
   const v2ExportProgress = useStore((s) => s.v2ExportProgress);
+  const v2BlockReason = useStore((s) => s.v2BlockReason);
+
+  const isBlocked =
+    v2BlockReason?.code === "sha256-mismatch" ||
+    v2BlockReason?.code === "protocol-mismatch";
+
+  if (isBlocked) {
+    return (
+      <div className="modal-backdrop">
+        <div className="modal">
+          <div className="modal-head">
+            <h3>
+              {v2BlockReason!.code === "sha256-mismatch"
+                ? "Helper integrity check failed"
+                : "Helper protocol mismatch"}
+            </h3>
+          </div>
+          <div className="modal-body">
+            <p>
+              {v2BlockReason!.code === "sha256-mismatch"
+                ? "The helper binary has been modified or corrupted. Please reinstall Cove."
+                : "The installed helper version is incompatible with this app. Please reinstall Cove."}
+            </p>
+          </div>
+          <div className="modal-foot">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => void window.coveApi.engine.openDiagnosticsBundle()}
+            >
+              Diagnostics…
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isDown = v2State === "ENGINE_DOWN" || v2State === "ENGINE_UNAVAILABLE";
   const isExporting = v2State === "EXPORTING";

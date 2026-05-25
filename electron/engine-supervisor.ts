@@ -192,8 +192,9 @@ export class EngineSupervisor extends EventEmitter {
     const binData = fs.readFileSync(binaryPath);
     const actualHash = crypto.createHash("sha256").update(binData).digest("hex");
     if (actualHash !== expectedHash) {
-      throw new Error(
-        `SHA-256 mismatch for ${binaryPath}: expected ${expectedHash}, got ${actualHash}`,
+      throw Object.assign(
+        new Error(`SHA-256 mismatch for ${binaryPath}: expected ${expectedHash}, got ${actualHash}`),
+        { code: "sha256-mismatch" as const },
       );
     }
   }
@@ -350,8 +351,9 @@ export class EngineSupervisor extends EventEmitter {
     if (version.protocol_version !== PROTOCOL_VERSION) {
       rpc.disconnect();
       this._rpc = null;
-      throw new Error(
-        `protocolVersion mismatch: expected ${PROTOCOL_VERSION}, got ${version.protocol_version}`,
+      throw Object.assign(
+        new Error(`protocolVersion mismatch: expected ${PROTOCOL_VERSION}, got ${version.protocol_version}`),
+        { code: "protocol-mismatch" as const },
       );
     }
 
@@ -450,9 +452,13 @@ export class EngineSupervisor extends EventEmitter {
       }
 
       if (pidStillLive) {
-        throw new Error(
-          `adopted helper failed handshake but PID is still live — ` +
-            `another instance may hold the connection; not spawning fresh helper`,
+        const origCode = (handshakeErr as { code?: string })?.code;
+        throw Object.assign(
+          new Error(
+            `adopted helper failed handshake but PID is still live — ` +
+              `another instance may hold the connection; not spawning fresh helper`,
+          ),
+          origCode ? { code: origCode } : {},
         );
       }
 
@@ -487,8 +493,10 @@ export class EngineSupervisor extends EventEmitter {
       } catch (spawnErr) {
         this.cleanupFailedBoot();
         if (this.shutdownRequested) return;
-        throw new Error(
-          `helper startup failed after adoption fallback to spawn: ${spawnErr}`,
+        const origCode = (spawnErr as { code?: string })?.code;
+        throw Object.assign(
+          new Error(`helper startup failed after adoption fallback to spawn: ${spawnErr}`),
+          origCode ? { code: origCode } : {},
         );
       }
     }
@@ -551,6 +559,13 @@ export class EngineSupervisor extends EventEmitter {
       if (this.shutdownRequested) return;
       this.bootCycle().catch((err: unknown) => {
         console.warn("[supervisor] restart failed:", err);
+        const code = (err as { code?: string })?.code;
+        if (code === "sha256-mismatch" || code === "protocol-mismatch") {
+          this.stopHeartbeat();
+          this.setState("unavailable");
+          this.emit("unavailable", err);
+          return;
+        }
         this.scheduleRestart();
       });
     }, delay);
