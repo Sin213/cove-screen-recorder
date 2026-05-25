@@ -4092,6 +4092,7 @@ export async function driveValExp012(
   let snapshotId: string | null = null;
   let exportId: string | null = null;
   let exportTmpDir: string | null = null;
+  let modesetResult: ModesetResult | null = null;
   const BASELINE_MIN_SAMPLES = 5;
   const BASELINE_WINDOW_MS = 10_000;
 
@@ -4128,6 +4129,17 @@ export async function driveValExp012(
         skipReason: "helper-not-available",
         message:
           "xdg-desktop-portal not running — cannot negotiate screencast session",
+      });
+    }
+
+    // ISS-023 Stage 1: enforce 1920x1080@60 before launchMotion60 / helper spawn
+    // so PipeWire does not negotiate 4K variable-rate when the display is at native 4K.
+    modesetResult = enforceDisplayMode({ width: 1920, height: 1080 }, 60);
+    writeJsonEvidence(evidenceDir, "display-modeset.json", modesetResult);
+    if (!modesetResult.success) {
+      return makeReport(row, "fail", {
+        message: `ISS-023: display mode enforcement failed — target 1920x1080@60, got ${modesetResult.appliedMode ? `${modesetResult.appliedMode.width}x${modesetResult.appliedMode.height}` : "(unknown)"} after ${modesetResult.attempts} attempts`,
+        durationMs: Date.now() - start,
       });
     }
 
@@ -4200,6 +4212,18 @@ export async function driveValExp012(
     if (reqResp.error) {
       return makeReport(row, "fail", {
         message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
+        durationMs: Date.now() - start,
+      });
+    }
+
+    // ISS-023 Stage 2: re-enforce 1920x1080@60 after portal interaction.
+    // The portal D-Bus round-trip can trigger KDE compositor recomposition
+    // which reverts kscreen-doctor mode changes before PipeWire stream startup.
+    const recheckModeset = enforceDisplayMode({ width: 1920, height: 1080 }, 60);
+    writeJsonEvidence(evidenceDir, "display-modeset-pre-stream.json", recheckModeset);
+    if (!recheckModeset.success) {
+      return makeReport(row, "fail", {
+        message: `ISS-023: display mode reverted after portal interaction — target 1920x1080@60, got ${recheckModeset.appliedMode ? `${recheckModeset.appliedMode.width}x${recheckModeset.appliedMode.height}` : "(unknown)"}`,
         durationMs: Date.now() - start,
       });
     }
@@ -4745,6 +4769,9 @@ export async function driveValExp012(
       durationMs: Date.now() - start,
     });
   } finally {
+    if (modesetResult?.priorMode && modesetResult.attempts > 0) {
+      restoreDisplayMode(modesetResult.priorMode, modesetResult.output);
+    }
     if (exportId !== null && rpc !== null) {
       await rpc
         .call("replay.export_cancel", { export_id: exportId }, 5_000)
