@@ -16,9 +16,9 @@
   "relatedTickets": [
     "T-010d"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Blocking modal implemented in src/v2/Diagnostics.tsx and IPC event cove/engine/blocked added in electron/main.ts. Committed 15cce8d.",
+  "resolvedDate": "2026-05-25",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-UI-010/011: helper sha256 and protocol mismatch show non-blocking banner instead of blocking modal"
 }

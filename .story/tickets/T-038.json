@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": "2026-05-24",
+  "createdDate": "2026-05-24",
+  "description": "Add two additive warn logs to saveReplay in src/v2/engine.ts to make ISS-015/ISS-012 repro attempts self-classifying at the renderer boundary. No behavior change.\n\n1. Capture err in the bare catch {} and log the RPC rejection reason + code + v2State.\n2. Add an else branch to the snapshot_id guard to log the no-snapshot_id path with result presence and v2State.\n\nRESULT: Instrumentation deployed. Functional repro on first attempt (2026-05-24): new warn log fired with reason=\"no committed segments available to pin\". ISS-015 classified as rolling-buffer seal failure. Stop condition met.",
+  "id": "T-038",
+  "order": 190,
+  "phase": "p4-release",
+  "status": "complete",
+  "title": "Add renderer-surface saveReplay failure reason classification log (ISS-015/ISS-012)",
+  "type": "task"
+}

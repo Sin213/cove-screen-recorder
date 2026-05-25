@@ -32,6 +32,11 @@ import {
 } from "./assertions";
 import { probeEnvironment, hasDisplayServer } from "./env-probe";
 import { launchMotion60, LoadScriptMissingError, LaunchedLoad } from "./loads";
+import {
+  enforceDisplayMode,
+  restoreDisplayMode,
+  ModesetResult,
+} from "./display-mode";
 
 // ---------------------------------------------------------------------------
 // ISS-001 VAL-CAP-004: variable-rate cadence policy exports.
@@ -1111,6 +1116,7 @@ export async function driveValCap004(
   let load: LaunchedLoad | null = null;
   let spawned: SpawnedHelper | null = null;
   let rpc: RpcClient | null = null;
+  let modesetResult: ModesetResult | null = null;
 
   try {
     // --- Stage 1: Environment probe ----------------------------------------
@@ -1184,6 +1190,30 @@ export async function driveValCap004(
       });
     }
 
+    // --- Stage 2b: Display mode enforcement (ISS-021) -----------------------
+    // KDE Plasma reverts kscreen-doctor mode changes when PipeWire screencast
+    // sessions trigger compositor recomposition. Enforce the mode as late as
+    // possible — right before spawning the helper — to minimise the revert
+    // window. The modeset retries up to 3 times with verification.
+    if (row.expectedCaptureFormat) {
+      modesetResult = enforceDisplayMode(
+        row.expectedCaptureFormat,
+        row.nominalFps ?? 60,
+      );
+      writeJsonEvidence(evidenceDir, "display-modeset.json", modesetResult);
+
+      if (!modesetResult.success) {
+        return makeReport(row, "fail", {
+          message: `ISS-021: display mode enforcement failed — target ${row.expectedCaptureFormat.width}x${row.expectedCaptureFormat.height}, got ${modesetResult.appliedMode ? `${modesetResult.appliedMode.width}x${modesetResult.appliedMode.height}` : "(unknown)"} after ${modesetResult.attempts} attempts`,
+          durationMs: Date.now() - start,
+          evidencePaths: {
+            "env-probe": evidenceDir + "/env-probe.json",
+            "display-modeset": evidenceDir + "/display-modeset.json",
+          },
+        });
+      }
+    }
+
     // --- Stage 3: Spawn helper and connect ----------------------------------
     const socketPath = runnerOwnedSocketPath();
     writeEvidence(evidenceDir, "helper-socket.txt", socketPath + "\n");
@@ -1222,6 +1252,28 @@ export async function driveValCap004(
         message: `capture.requestSession error: ${JSON.stringify(reqResp.error)}`,
         durationMs: Date.now() - start,
       });
+    }
+
+    // ISS-021: re-enforce display mode after portal picker completes.
+    // The portal D-Bus round-trip can trigger KDE compositor recomposition
+    // which reverts kscreen-doctor mode changes.
+    if (row.expectedCaptureFormat && modesetResult?.success) {
+      const recheck = enforceDisplayMode(
+        row.expectedCaptureFormat,
+        row.nominalFps ?? 60,
+      );
+      writeJsonEvidence(evidenceDir, "display-modeset-pre-stream.json", recheck);
+      if (!recheck.success) {
+        return makeReport(row, "fail", {
+          message: `ISS-021: display mode reverted after portal picker — target ${row.expectedCaptureFormat.width}x${row.expectedCaptureFormat.height}, got ${recheck.appliedMode ? `${recheck.appliedMode.width}x${recheck.appliedMode.height}` : "(unknown)"}`,
+          durationMs: Date.now() - start,
+          evidencePaths: {
+            "display-modeset": evidenceDir + "/display-modeset.json",
+            "display-modeset-pre-stream":
+              evidenceDir + "/display-modeset-pre-stream.json",
+          },
+        });
+      }
     }
 
     const startResp = await rpc.call("capture.startStream", {}, 10_000);
@@ -1612,6 +1664,9 @@ export async function driveValCap004(
     }
     if (load) {
       await load.teardown().catch(() => {});
+    }
+    if (modesetResult?.priorMode && modesetResult.attempts > 0) {
+      restoreDisplayMode(modesetResult.priorMode, modesetResult.output);
     }
   }
 }

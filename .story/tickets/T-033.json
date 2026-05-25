@@ -1,12 +1,12 @@
 {
   "blockedBy": [],
-  "completedDate": null,
+  "completedDate": "2026-05-24",
   "createdDate": "2026-05-23",
   "description": "The recovery banner (\"Unsaved recordings found\") appears on every app restart when the helper engine has leftover segments from prior sessions. This interrupts repro workflows and normal usage. Remove the dialog entirely or add an auto-discard-all-on-startup option so old sessions are cleaned up silently. Relevant code: recovery detection in src/store.ts and src/v2/engine.ts (discardAll / recovery prompt flow).",
   "id": "T-033",
   "order": 140,
   "phase": "p4-release",
-  "status": "open",
+  "status": "complete",
   "title": "Remove recovery/unsaved-sessions dialog on app startup",
   "type": "chore"
 }

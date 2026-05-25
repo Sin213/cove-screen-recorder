@@ -7,7 +7,7 @@
   "order": 40,
   "parentTicket": "T-010",
   "phase": "p4-release",
-  "status": "open",
+  "status": "inprogress",
   "title": "v2.0.0 release: smoke + RC execution and report",
   "type": "task"
 }

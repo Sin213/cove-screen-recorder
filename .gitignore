@@ -27,3 +27,5 @@ RELEASES.md
 
 # Local Claude Code session data
 .claude/
+AGENTS.md
+.claudeignore

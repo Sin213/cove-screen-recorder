@@ -11,9 +11,9 @@
   "relatedTickets": [
     "T-037"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Fixed in src/v2/engine.ts: inserted explicit else-if no-op branch for the case where snapshot_id is present, v2State is already EXPORTING, and v2SnapshotId matches the result. The spurious warn no longer fires on rapid-fire saves where onSnapshotPinned transitions the FSM before the RPC returns. All other unexpected states still warn. Patch is +2 lines, no deletions, typecheck clean.",
+  "resolvedDate": "2026-05-24",
   "severity": "low",
-  "status": "open",
+  "status": "resolved",
   "title": "v2SaveReplay \"no snapshot_id\" warn fires spuriously on rapid-fire saves despite snapshot_id being populated"
 }

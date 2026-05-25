@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "method": "encoder.selected",
+  "params": {
+    "backend": "nvenc",
+    "codec": "h264",
+    "parameters": {
+      "fourcc": "XR24",
+      "fps_den": 1,
+      "fps_num": 0,
+      "height": 2160,
+      "stream_id": "pw-stream-0000",
+      "width": 3840
+    },
+    "reason_for_choice": "first-available"
+  }
+}

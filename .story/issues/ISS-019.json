@@ -14,9 +14,9 @@
   "relatedTickets": [
     "T-010d"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Implemented in commit 8331348. checkDependencies() in engine-supervisor.ts checks fs.existsSync sentinels for /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service (xdg-desktop-portal) and /usr/bin/pipewire before helper launch on Linux. Missing sentinel throws missing-dependency with detail field; main.ts routes it through existing cove/engine/blocked IPC; Diagnostics.tsx renders dep-specific install-hint blocking modal. Terminal in both initial boot and restart paths. Release policy: supported targets are standard package-manager installs on Debian/Ubuntu/Arch/Fedora FHS-compatible distros. Non-standard installs out of scope for v2.0.0.",
+  "resolvedDate": "2026-05-25",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-UI-014: dependency probe (pipewire/xdg-desktop-portal) not implemented"
 }

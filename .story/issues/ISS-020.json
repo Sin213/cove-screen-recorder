@@ -1,0 +1,19 @@
+{
+  "components": [
+    "capture",
+    "helper"
+  ],
+  "discoveredDate": "2026-05-25",
+  "id": "ISS-020",
+  "impact": "VAL-CAP-004 (must-pass, §22 row 4) fails with 0.771104 drop rate (40-47 drops/second, all 58 samples non-zero) against maxDropRate=0 threshold. Last known-good run (2026-05-22T02-21-35-097Z, T-021 rerun-27) showed 0.000000 drop rate with identical hardware. Blocks T-010c §22 smoke at row 4. Cadence (54.0 fps) and resolution (1920x1080) pass normally — only drop rate fails. pipewire.rs has not changed since 6371f46 (pre-T-021 rerun-27); capture code path is unchanged. Possible causes: (a) PipeWire/KWin compositor behavior change between 2026-05-22 and 2026-05-25 (system updates, compositor state), (b) back-pressure from helper changes in 927bf0d (ISS-012 watchdog, export/mod.rs) or 1f558ae (ISS-015 overlap fix, segment/buffer.rs) slowing buffer writes and causing encoder back-pressure. Drop pattern is systematic (not intermittent), consistent across all 58 seconds. System load at test time: kwin_wayland 9.5% CPU, firefox 8.5%, baloo_file 7.3% (indexer active). Evidence: validation-artifacts/smoke/2026-05-25T08-56-46-064Z/VAL-CAP-004/ (thresholds.json, capture-diagnostics.json, env-probe.json).",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [
+    "T-010c"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "VAL-CAP-004 drop rate regression: consistent 77% frame drops on NVIDIA/SHM/1080p60 in T-010c smoke run (was 0% in T-021 rerun-27)"
+}
