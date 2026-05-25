@@ -232,6 +232,10 @@ pub const NV_ENC_TUNING_INFO_LOW_LATENCY: u32 = 2;
 /// `NV_ENC_BUFFER_FORMAT_NV12` — 4:2:0 planar, semi-planar NV12 (0x10).
 pub const NV_ENC_BUFFER_FORMAT_NV12: u32 = 0x00000010;
 
+/// `NV_ENC_BUFFER_FORMAT_ARGB` — 32-bit word-ordered A8R8G8B8 (B in byte 0, A in byte 3).
+/// Matches XR24/AR24 SHM memory layout; NVENC discards alpha during H.264 encode.
+pub const NV_ENC_BUFFER_FORMAT_ARGB: u32 = 0x01000000;
+
 /// `NV_ENC_ERR_NEED_MORE_INPUT` — SDK 12.1 status 17.
 /// Returned by nvEncEncodePicture when the encoder is buffering B-frames;
 /// not an error, just means no output is ready yet.

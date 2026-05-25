@@ -804,6 +804,11 @@ impl EncoderBackend for NvencBackend {
             }
         };
 
+        let nvenc_fmt = match incoming_format {
+            DRM_FORMAT_XR24 | DRM_FORMAT_AR24 => NV_ENC_BUFFER_FORMAT_ARGB,
+            _ => NV_ENC_BUFFER_FORMAT_NV12,
+        };
+
         // Allocate an input buffer.
         let create_input_buf: FnNvEncCreateInputBuffer = unsafe {
             std::mem::transmute(sess.fn_list.nvEncCreateInputBuffer)
@@ -812,7 +817,7 @@ impl EncoderBackend for NvencBackend {
         create_in.version = NV_ENC_CREATE_INPUT_BUFFER_VER;
         create_in.width = sess.enc_width;
         create_in.height = sess.enc_height;
-        create_in.bufferFmt = NV_ENC_BUFFER_FORMAT_NV12;
+        create_in.bufferFmt = nvenc_fmt;
         let status = unsafe { create_input_buf(sess.encoder, &mut create_in) };
         if status != NV_ENC_SUCCESS {
             return Err(EncoderError::Runtime(format!("create-input-buffer-failed:{status}")));
@@ -850,9 +855,10 @@ impl EncoderBackend for NvencBackend {
         let frame_stride = stride as usize;
 
         let copy_path = match incoming_format {
-            DRM_FORMAT_XR24 | DRM_FORMAT_AR24 => "convert",
+            DRM_FORMAT_XR24 | DRM_FORMAT_AR24 => "direct-argb",
             _ => "copy",
         };
+        let nvenc_buf_fmt_str = if nvenc_fmt == NV_ENC_BUFFER_FORMAT_ARGB { "ARGB" } else { "NV12" };
 
         if sess.frame_count == 0 {
             info!(
@@ -860,7 +866,7 @@ impl EncoderBackend for NvencBackend {
                 frame_count = sess.frame_count,
                 incoming_fourcc = %drm_fourcc_to_str(incoming_format),
                 configured_fourcc = %sess.cfg.format.fourcc,
-                nvenc_buffer_fmt = "NV12",
+                nvenc_buffer_fmt = %nvenc_buf_fmt_str,
                 path = copy_path,
                 src_width = incoming_width,
                 src_height = incoming_height,
@@ -884,7 +890,7 @@ impl EncoderBackend for NvencBackend {
                     format = %drm_fourcc_to_str(incoming_format),
                     width = incoming_width,
                     height = incoming_height,
-                    "[iss-020] bgra-to-nv12 conversion cost per GOP",
+                    "[iss-020] argb-copy cost per GOP",
                 );
                 sess.conv_total_us = 0;
                 sess.conv_max_us = 0;
@@ -895,7 +901,7 @@ impl EncoderBackend for NvencBackend {
                 frame_count = sess.frame_count,
                 incoming_fourcc = %drm_fourcc_to_str(incoming_format),
                 configured_fourcc = %sess.cfg.format.fourcc,
-                nvenc_buffer_fmt = "NV12",
+                nvenc_buffer_fmt = %nvenc_buf_fmt_str,
                 path = copy_path,
                 src_width = incoming_width,
                 src_height = incoming_height,
@@ -912,31 +918,26 @@ impl EncoderBackend for NvencBackend {
         }
 
         match incoming_format {
-            DRM_FORMAT_XR24 => {
+            DRM_FORMAT_XR24 | DRM_FORMAT_AR24 => {
+                // Direct packed copy: XR24/AR24 [B,G,R,X/A] matches NVENC ARGB buffer layout.
+                // Use frame_stride.min(pitch) to avoid over-reading when enc_width is
+                // align16-padded beyond incoming_width. Bottom-padding rows are skipped
+                // by the shm_size bound (NVENC crops via SPS to the declared encode height).
                 let t0 = Instant::now();
-                convert_packed_bgra_to_nv12(
-                    shm_ptr, shm_size, frame_stride,
-                    incoming_width as usize, incoming_height as usize,
-                    locked_ptr as *mut u8, pitch,
-                    w, h,
-                    false,
-                );
-                let us = t0.elapsed().as_micros() as u64;
-                sess.conv_total_us += us;
-                if us > sess.conv_max_us {
-                    sess.conv_max_us = us;
+                for row in 0..h {
+                    let src_off = row * frame_stride;
+                    let dst_off = row * pitch;
+                    let copy_len = frame_stride.min(pitch).min(if src_off < shm_size { shm_size - src_off } else { 0 });
+                    if copy_len > 0 {
+                        unsafe {
+                            ptr::copy_nonoverlapping(
+                                shm_ptr.add(src_off),
+                                (locked_ptr as *mut u8).add(dst_off),
+                                copy_len,
+                            );
+                        }
+                    }
                 }
-                sess.conv_gop_frames += 1;
-            }
-            DRM_FORMAT_AR24 => {
-                let t0 = Instant::now();
-                convert_packed_bgra_to_nv12(
-                    shm_ptr, shm_size, frame_stride,
-                    incoming_width as usize, incoming_height as usize,
-                    locked_ptr as *mut u8, pitch,
-                    w, h,
-                    true,
-                );
                 let us = t0.elapsed().as_micros() as u64;
                 sess.conv_total_us += us;
                 if us > sess.conv_max_us {
@@ -1022,7 +1023,7 @@ impl EncoderBackend for NvencBackend {
         pic_params.inputPitch = locked_pitch;
         pic_params.inputBuffer = input_buf;
         pic_params.outputBitstream = output_buf;
-        pic_params.bufferFmt = NV_ENC_BUFFER_FORMAT_NV12;
+        pic_params.bufferFmt = nvenc_fmt;
         pic_params.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
         pic_params.inputTimeStamp = pts_90k;
         if is_idr_boundary {
