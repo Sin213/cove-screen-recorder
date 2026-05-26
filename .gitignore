@@ -15,6 +15,9 @@ vendor/
 .codex
 screenshots/
 
+# Session aids (orientation snapshots, etc.)
+*-orientation.md
+
 # Local AI/audit scratch files
 .audit/
 codex-reviews/
@@ -29,3 +32,5 @@ RELEASES.md
 .claude/
 AGENTS.md
 .claudeignore
+
+.codex-reviews/
