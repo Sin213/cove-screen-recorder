@@ -32,5 +32,6 @@ RELEASES.md
 .claude/
 AGENTS.md
 .claudeignore
-
+.rtk/
 .codex-reviews/
+
