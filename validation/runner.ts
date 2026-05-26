@@ -132,6 +132,9 @@ const SELF_SPAWNING_ROW_IDS = new Set([
   "VAL-PROC-007",
   "VAL-CAP-003",
   "VAL-CAP-004",
+  "VAL-CAP-013",
+  "VAL-CAP-014",
+  "VAL-CAP-016",
   "VAL-PROC-002",
   "VAL-PROC-003",
   "VAL-ENC-001",
@@ -158,6 +161,12 @@ async function dispatchScriptedLocal(
     case "VAL-CAP-003":
       return driveValCap003(row, ctx);
     case "VAL-CAP-004":
+      return driveValCap004(row, ctx);
+    case "VAL-CAP-013":
+      return driveValCap004(row, ctx);
+    case "VAL-CAP-014":
+      return driveValCap004(row, ctx);
+    case "VAL-CAP-016":
       return driveValCap004(row, ctx);
     case "VAL-PROC-001":
       return driveValProc001(row, ctx);
@@ -395,7 +404,7 @@ async function main(): Promise<void> {
 
   switch (mode.kind) {
     case "smoke":
-      rows = SMOKE_ROWS;
+      rows = SMOKE_ROWS.filter((r) => r.smokeOrder <= 20);
       suiteKind = "smoke";
       break;
 

@@ -44,6 +44,7 @@ export const THRESHOLDS = {
     "1080p60-nvenc": 0,
     "1080p60-vaapi": 0,
     "1080p60-qsv": 0,
+    "1080p60-libx264": 0,
     "1440p60-nvenc": 0,
     "1440p60-vaapi": 0,
     "1440p60-qsv": 0,
