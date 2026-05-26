@@ -19,9 +19,9 @@
     "T-027",
     "T-028"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Resolved via two-stage kscreen-doctor display mode enforcement in VAL-CAP-004 driver (commit 70c8a9e). Enforcement locks display to 1080p60 pre-PipeWire-negotiation and confirms modeset before capture begins. KDE Plasma modeset reversion during capture is fully suppressed. VAL-CAP-004 PASS confirmed at §22 smoke row 4 on HEAD d335a09.",
+  "resolvedDate": "2026-05-25",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-CAP-004 blocked: KDE Plasma restores 4K resolution mid-capture despite kscreen-doctor lock to 1080p60"
 }

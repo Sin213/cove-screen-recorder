@@ -13,9 +13,9 @@
   "relatedTickets": [
     "T-010c"
   ],
-  "resolution": null,
-  "resolvedDate": null,
+  "resolution": "Resolved by adding kscreen-doctor display mode enforcement to produceStreamCopyMp4 (commit c22b520). Same enforcement pattern as ISS-021/VAL-CAP-004 applied to the EXP-010 pipeline path. VAL-EXP-010 PASS confirmed at §22 smoke row 12 on HEAD d335a09 (evidence: smoke/2026-05-26T00-31-39-742Z/VAL-EXP-010/, 1680 frames in 31.1s, cadence within variable-rate policy).",
+  "resolvedDate": "2026-05-25",
   "severity": "high",
-  "status": "open",
+  "status": "resolved",
   "title": "VAL-EXP-010 fails cadence gate when display is at 4K native: PipeWire negotiates 3840×2160 variable-rate, meanFps=30.19 outside required [51..61] fps envelope"
 }
