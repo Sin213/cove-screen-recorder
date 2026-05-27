@@ -4,7 +4,9 @@ use std::sync::{
 };
 
 use anyhow::Result;
-use tokio::{io::split, net::UnixListener, sync::watch};
+use tokio::{io::split, sync::watch};
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -156,6 +158,117 @@ pub async fn run_with_config(
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     remove_own_socket(socket_path, socket_id);
+    Ok(())
+}
+
+// ── Windows named-pipe transport ─────────────────────────────────────────────
+
+#[cfg(windows)]
+pub async fn run(pipe_path: &str, set_level: SetLevelFn) -> Result<()> {
+    run_with_config(pipe_path, set_level, RunConfig::default()).await
+}
+
+#[cfg(windows)]
+pub async fn run_with_config(
+    pipe_path: &str,
+    set_level: SetLevelFn,
+    config: RunConfig,
+) -> Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let export_staging_dir = crate::export::resolve_export_staging_dir();
+    crate::export::reap_orphaned_exports(&export_staging_dir);
+
+    let ffmpeg_available = std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok();
+    if !ffmpeg_available {
+        warn!("ffmpeg not found on PATH; export requests will be rejected");
+    }
+
+    let segments_root = crate::segment::recovery::resolve_segments_root();
+    let recovered = crate::segment::recovery::scan_recoverable_sessions(&segments_root)
+        .unwrap_or_default();
+    if !recovered.is_empty() {
+        info!(count = recovered.len(), "discovered recoverable sessions from prior crash");
+    }
+
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let shutdown_tx = Arc::new(shutdown_tx);
+
+    let state: SharedState = Arc::new(crate::engine::HelperState {
+        start_time: std::time::Instant::now(),
+        set_level,
+        shutdown_tx: Arc::clone(&shutdown_tx),
+        ffmpeg_available,
+        active_capture_windows: tokio::sync::Mutex::new(None),
+        recoverable_sessions: tokio::sync::Mutex::new(recovered),
+        active_segment_buffer: tokio::sync::Mutex::new(None),
+        active_snapshots: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        active_exports: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+    });
+
+    let connected = Arc::new(AtomicBool::new(false));
+
+    // first_pipe_instance(true) ensures exclusive creation on first boot;
+    // any stale handle from a prior crash is surfaced as an error here.
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(pipe_path)?;
+
+    info!(pipe = pipe_path, "listening");
+
+    loop {
+        tokio::select! {
+            result = server.connect() => {
+                match result {
+                    Ok(()) => {
+                        if connected.swap(true, Ordering::SeqCst) {
+                            warn!("second connection rejected (single-connection model)");
+                            let _ = server.disconnect();
+                            continue;
+                        }
+                        // Recreate the server so the pipe name stays visible for reconnects
+                        // before handling the current client.  Subsequent instances must NOT
+                        // use first_pipe_instance(true) — that would fail while the first
+                        // handle is still open.
+                        let client = std::mem::replace(
+                            &mut server,
+                            ServerOptions::new().create(pipe_path)?,
+                        );
+                        let state_c = Arc::clone(&state);
+                        let connected_c = Arc::clone(&connected);
+                        let shutdown_rx_c = shutdown_rx.clone();
+                        let sim_c = config.sim.clone();
+                        let max_pf = config.max_pending_frames.unwrap_or(MAX_PENDING_FRAMES);
+                        let max_pb = config.max_pending_bytes.unwrap_or(MAX_PENDING_BYTES);
+                        tokio::spawn(async move {
+                            handle_connection(
+                                client, state_c, shutdown_rx_c, sim_c, max_pf, max_pb,
+                            )
+                            .await;
+                            connected_c.store(false, Ordering::SeqCst);
+                        });
+                    }
+                    Err(e) => error!(error = %e, "named pipe accept error"),
+                }
+            }
+            _ = signal_shutdown() => {
+                info!("signal received, shutting down");
+                break;
+            }
+            _ = shutdown_rx.changed() => {
+                info!("engine.shutdown requested");
+                break;
+            }
+        }
+    }
+
+    // Named pipes auto-close when the server handle drops; no explicit cleanup needed.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     Ok(())
 }
 
@@ -334,14 +447,16 @@ fn acquire_socket_lock(socket_path: &str) -> Result<std::fs::File> {
     Ok(file)
 }
 
-async fn handle_connection(
-    stream: tokio::net::UnixStream,
+async fn handle_connection<S>(
+    stream: S,
     state: SharedState,
     mut shutdown_rx: watch::Receiver<bool>,
     sim: Option<std::sync::Arc<crate::sim::SimState>>,
     max_pending_frames: usize,
     max_pending_bytes: usize,
-) {
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let (reader, writer) = split(stream);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
@@ -620,7 +735,22 @@ async fn signal_shutdown() {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+async fn signal_shutdown() {
+    use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_c, ctrl_shutdown};
+    let mut cc = ctrl_c().expect("ctrl_c signal init failed");
+    let mut cb = ctrl_break().expect("ctrl_break signal init failed");
+    let mut cl = ctrl_close().expect("ctrl_close signal init failed");
+    let mut cs = ctrl_shutdown().expect("ctrl_shutdown signal init failed");
+    tokio::select! {
+        _ = cc.recv() => {}
+        _ = cb.recv() => {}
+        _ = cl.recv() => {}
+        _ = cs.recv() => {}
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 async fn signal_shutdown() {
     tokio::signal::ctrl_c().await.ok();
 }
