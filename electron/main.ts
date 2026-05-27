@@ -243,8 +243,13 @@ function updateTrayMenu(): void {
     items.push({
       label: "Stop Recording",
       click: () => {
-        mainWindow?.show();
-        mainWindow?.webContents.send("cove:hotkey", "toggle");
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+          if (!mainWindow.webContents.isDestroyed()) {
+            mainWindow.webContents.send("cove:hotkey", "toggle");
+          }
+        }
       },
     });
   }
@@ -266,12 +271,14 @@ function updateTrayTooltip(): void {
 }
 
 function onTrayRecordingStart(): void {
+  if (!tray) return;
+  if (trayDurationInterval) { clearInterval(trayDurationInterval); trayDurationInterval = null; }
   trayRecordingStartedAt = Date.now();
   trayDurationInterval = setInterval(updateTrayTooltip, 1_000);
   updateTrayMenu();
   updateTrayTooltip();
   const recIcon = path.join(app.getAppPath(), "cove_icon_recording.png");
-  if (fs.existsSync(recIcon)) tray?.setImage(recIcon);
+  if (fs.existsSync(recIcon)) tray.setImage(recIcon);
 }
 
 function onTrayRecordingStop(outputPath?: string): void {
@@ -283,7 +290,7 @@ function onTrayRecordingStop(outputPath?: string): void {
   tray?.setImage(iconPath);
   if (process.platform === "win32" && tray && outputPath) {
     tray.displayBalloon({
-      icon: "info",
+      iconType: "info",
       title: "Recording saved",
       content: path.basename(outputPath),
     });
