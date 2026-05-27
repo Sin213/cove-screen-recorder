@@ -1,0 +1,20 @@
+{
+  "components": [
+    "encoder"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-035",
+  "impact": "Same advisory as ISS-034; nvEncOpenEncodeSessionEx success implies these are populated but not contractually guaranteed. Lower risk but inconsistent with null-guard discipline added for the 4 register/map/unmap pointers.",
+  "location": [
+    "helper/src/encoder/backends/nvenc/mod.rs"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-057"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "push_frame_d3d11 transmutes nvEncCreateBitstreamBuffer/nvEncEncodePicture without null guards"
+}

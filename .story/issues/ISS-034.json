@@ -1,0 +1,20 @@
+{
+  "components": [
+    "encoder"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-034",
+  "impact": "Defective-driver null fn pointer causes UB on drain call path. Pre-existing pattern across Linux and Windows drain implementations. Recommend converting fn_list raw *mut c_void fields to Option&lt;fn&gt; for bitstream operations.",
+  "location": [
+    "helper/src/encoder/backends/nvenc/mod.rs"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-057"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "low",
+  "status": "open",
+  "title": "nvEncLockBitstream/nvEncDestroyBitstreamBuffer transmuted without null guards in drain()"
+}

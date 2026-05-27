@@ -1,0 +1,22 @@
+{
+  "components": [
+    "encoder",
+    "capture"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-033",
+  "impact": "nvEncRegisterResource will fail with NV_ENC_ERR_INVALID_DEVICE if DXGI capture creates its own D3D11 device instead of using encoder/d3d11_device.rs shared_device(). Zero-copy pipeline silently breaks when T-048/T-051 real DXGI capture is implemented.",
+  "location": [
+    "helper/src/encoder/d3d11_device.rs",
+    "helper/src/capture/dxgi.rs"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-057"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "high",
+  "status": "open",
+  "title": "NVENC D3D11 interop requires shared device with DXGI capture backend"
+}

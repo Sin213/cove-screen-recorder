@@ -1,0 +1,16 @@
+{
+  "blockedBy": [
+    "T-048",
+    "T-053"
+  ],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": "2026-05-27",
+  "createdDate": "2026-05-27",
+  "description": "Ensure the entire frame path from DXGI/WGC capture to encoder submission stays on the GPU — no CPU readback. DXGI DD delivers ID3D11Texture2D; that texture must be registered as an encoder input resource (NVENC NV_ENC_REGISTER_RESOURCE / AMF AMFSurface / QSV mfxFrameSurface1) without copying to system memory. Includes shared D3D11 device management so capture and encoder use the same device context. Benchmark: verify zero memcpy in frame path via GPU profiling.",
+  "id": "T-057",
+  "order": 50,
+  "phase": "p6-win-perf",
+  "status": "complete",
+  "title": "Zero-copy GPU frame pipeline (capture → encode)",
+  "type": "task"
+}

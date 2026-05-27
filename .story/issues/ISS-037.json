@@ -1,0 +1,21 @@
+{
+  "components": [
+    "encoder",
+    "capture"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-037",
+  "impact": "Formats other than 87/88 (e.g. DXGI_FORMAT_R8G8B8A8_UNORM=28, DXGI_FORMAT_NV12=103) silently fall through to NV_ENC_BUFFER_FORMAT_NV12. DXGI_FORMAT_R8G8B8A8 is packed-RGB and would produce corrupt video. No real frame path reaches this yet (capture stub), but T-048 must add explicit format validation or an exhaustive match with error on unrecognised formats.",
+  "location": [
+    "helper/src/encoder/backends/nvenc/mod.rs"
+  ],
+  "phase": null,
+  "relatedTickets": [
+    "T-057"
+  ],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "DXGI format mapping in push_frame_d3d11 silently treats unrecognised formats as NV12"
+}
