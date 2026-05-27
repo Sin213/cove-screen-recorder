@@ -3,13 +3,13 @@
     "T-046"
   ],
   "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
-  "completedDate": null,
+  "completedDate": "2026-05-27",
   "createdDate": "2026-05-27",
   "description": "Implement EncoderBackend using x264 (H.264) and libvpx (VP8/VP9) for systems with no hardware encoder support or when HW encoders are occupied. Uses CPU readback from capture texture. Tuned presets for real-time (ultrafast/realtime). Serves as the universal fallback — every Windows machine can record, even without a dedicated GPU. Also used for GIF export pipeline.",
   "id": "T-059",
   "order": 70,
   "phase": "p6-win-perf",
-  "status": "inprogress",
+  "status": "complete",
   "title": "Software encoder fallback (x264/libvpx) for no-GPU path",
   "type": "task"
 }
