@@ -805,9 +805,14 @@ async function killWithEscalationWindows(
         stdio: "ignore",
         detached: true,
       })
+      .on("error", () => {
+        // Suppress unhandled 'error' event (e.g. ENOENT if taskkill is absent).
+        // Fall back to direct kill so the process is not left alive.
+        try { proc.kill(); } catch {}
+      })
       .unref();
   } catch {
-    // best-effort; if taskkill is unavailable fall back to direct kill
+    // Synchronous spawn failure — fall back to direct kill.
     try {
       proc.kill();
     } catch {}
