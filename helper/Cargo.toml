@@ -37,3 +37,7 @@ path = "tests/nvenc_windows.rs"
 [[test]]
 name = "amf_windows"
 path = "tests/amf_windows.rs"
+
+[[test]]
+name = "qsv_windows"
+path = "tests/qsv_windows.rs"

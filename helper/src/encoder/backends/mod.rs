@@ -11,8 +11,10 @@
 
 pub mod amf;
 pub mod nvenc;
+pub mod qsv;
 pub mod x264;
 
 pub use amf::AmfBackend;
 pub use nvenc::NvencBackend;
+pub use qsv::QsvBackend;
 pub use x264::X264Backend;

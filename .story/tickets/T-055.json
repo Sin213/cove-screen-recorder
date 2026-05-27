@@ -1,0 +1,16 @@
+{
+  "blockedBy": [
+    "T-046",
+    "T-048"
+  ],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Implement EncoderBackend using Intel Media SDK / oneVPL for H.264/H.265 hardware encoding on Intel iGPUs and Arc dGPUs. Uses D3D11 allocator for zero-copy surface sharing. Handles: session init, encoder creation, surface pool management, async encode with SyncOperation. Important for laptops and integrated GPU users. Falls back to software if no Intel GPU present.",
+  "id": "T-055",
+  "order": 30,
+  "phase": "p6-win-perf",
+  "status": "inprogress",
+  "title": "Intel Quick Sync (QSV) encoder backend",
+  "type": "feature"
+}
