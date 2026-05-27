@@ -1,0 +1,13 @@
+{
+  "blockedBy": [],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": "2026-05-27",
+  "createdDate": "2026-05-27",
+  "description": "Windows tray icon with context menu: start/stop recording, show/hide window, recording status indicator (animated icon during recording), quit. Handle Windows notification area overflow (hidden icons), tray icon tooltip with recording duration, and balloon notifications for recording events. Single-instance enforcement via app.requestSingleInstanceLock().",
+  "id": "T-063",
+  "order": 40,
+  "phase": "p7-win-electron",
+  "status": "complete",
+  "title": "Windows system tray integration",
+  "type": "task"
+}
