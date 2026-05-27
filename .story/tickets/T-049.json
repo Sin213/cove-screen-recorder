@@ -1,0 +1,15 @@
+{
+  "blockedBy": [
+    "T-045"
+  ],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": "2026-05-27",
+  "createdDate": "2026-05-27",
+  "description": "Implement CaptureBackend using Windows.Graphics.Capture API (Win10 1903+). Provides per-window capture and handles DRM/protected content gracefully. Uses Direct3D11CaptureFramePool with CreateFreeThreaded for frame delivery. Fallback when DXGI DD fails (e.g., Secure Desktop, UAC, some fullscreen exclusive apps). Also enables window-specific capture that DXGI DD cannot do.",
+  "id": "T-049",
+  "order": 50,
+  "phase": "p5-win-foundation",
+  "status": "complete",
+  "title": "Windows Graphics Capture (WGC) fallback backend",
+  "type": "feature"
+}

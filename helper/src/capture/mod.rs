@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 pub mod pipewire;
 pub mod dxgi;
+pub mod wgc;
 
 use tokio::sync::mpsc;
 
