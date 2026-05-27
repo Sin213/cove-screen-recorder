@@ -344,6 +344,7 @@ export function App() {
             customQuality,
             withSystemAudio,
           });
+          await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 200)));
           setLastError(null);
           try {
             const dir = outputDir ?? "";
