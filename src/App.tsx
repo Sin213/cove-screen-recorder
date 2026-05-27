@@ -331,7 +331,7 @@ export function App() {
   );
 
   const beginCrop = useCallback(
-    async (presetId: PresetId, autoStart = false) => {
+    async (presetId: PresetId, _autoStart = false) => {
       if (status !== "idle") return;
       const info = await getCurrentAppInfo();
       if (isWaylandSession(info)) {
