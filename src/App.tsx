@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SourceModal } from "./components/SourceModal";
+import { CropOverlay } from "./components/CropOverlay";
 import { HotkeysDialog } from "./components/HotkeysDialog";
 import { useStore } from "./store";
 import {
@@ -14,7 +15,10 @@ import type { AppInfo, CaptureSource, CropRect, PresetId } from "./types";
 import {
   startCapture,
   startCaptureViaDisplayMedia,
+  acquireDisplayMediaStream,
+  startCaptureFromAcquiredStream,
   startReplayBuffer,
+  type AcquiredStream,
   type CaptureSession,
   type ReplayBufferHandle,
 } from "./recorder-client";
@@ -108,6 +112,7 @@ export function App() {
 
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
   const [pendingReplaySource, setPendingReplaySource] = useState<IntentMode | null>(null);
+  const [pendingCrop, setPendingCrop] = useState<{ stream: AcquiredStream; preset: PresetId } | null>(null);
   const [hotkeysOpen, setHotkeysOpen] = useState(false);
   const [replayHandle, setReplayHandle] = useState<ReplayBufferHandle | null>(null);
   const [replayBuffered, setReplayBuffered] = useState(0);
@@ -330,8 +335,24 @@ export function App() {
       if (status !== "idle") return;
       const info = await getCurrentAppInfo();
       if (isWaylandSession(info)) {
-        log("info", "Use the dialog's “Share region” option to record a specific area.");
-        await startWaylandCapture("screen", presetId);
+        setStatus("preparing");
+        try {
+          const acquired = await acquireDisplayMediaStream({
+            kind: "screen",
+            fallbackName: "Screen",
+            preset: presetId,
+            customQuality,
+            withSystemAudio,
+          });
+          setPendingCrop({ stream: acquired, preset: presetId });
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "NotAllowedError") {
+            log("info", "Capture cancelled");
+          } else {
+            log("error", `Failed to acquire source: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          setStatus("idle");
+        }
         return;
       }
       setStatus("preparing");
@@ -344,8 +365,51 @@ export function App() {
       if (result.source) await startWithSource(result.source, presetId, result.rect);
       else log("error", "Crop selection returned no source.");
     },
-    [status, getCurrentAppInfo, setStatus, startWithSource, startWaylandCapture, log],
+    [status, getCurrentAppInfo, setStatus, startWithSource, log, customQuality, withSystemAudio],
   );
+
+  const confirmCrop = useCallback(
+    async (cropRect: CropRect) => {
+      if (!pendingCrop) return;
+      const { stream: acquired, preset: presetId } = pendingCrop;
+      setPendingCrop(null);
+      setStatus("preparing");
+      setLastError(null);
+      try {
+        const dir = outputDir ?? "";
+        const session = await startCaptureFromAcquiredStream(acquired, {
+          preset: presetId,
+          customQuality,
+          outputDir: dir,
+          withMic,
+          withSystemAudio,
+          systemAudioHandledBySidecar: appInfo?.platform === "linux",
+          cropRect,
+          onAutoStop: () => void stopFlowRef.current?.(false),
+          onError: (msg) => { log("error", msg); setLastError(msg); },
+          onLog: (level, text) => log(level, text),
+        });
+        sessionRef.current = session;
+        setLivePreview(session.previewStream);
+        setRecording(session.recordingId);
+        setStatus("recording");
+        log("info", `Recording cropped region · ${cropRect.width}×${cropRect.height}`);
+      } catch (err) {
+        acquired.sourceStream.getTracks().forEach((t) => t.stop());
+        log("error", `Failed to start: ${err instanceof Error ? err.message : String(err)}`);
+        setStatus("idle");
+      }
+    },
+    [pendingCrop, outputDir, customQuality, withMic, withSystemAudio, appInfo, setStatus, setRecording, setLastError, log],
+  );
+
+  const cancelCrop = useCallback(() => {
+    if (pendingCrop) {
+      pendingCrop.stream.sourceStream.getTracks().forEach((t) => t.stop());
+      setPendingCrop(null);
+      setStatus("idle");
+    }
+  }, [pendingCrop, setStatus]);
 
   const beginDefault = useCallback(() => {
     if (mode === "window") void beginWindow(preset);
@@ -395,6 +459,7 @@ export function App() {
     if (replayHandle) return;
     setPendingReplaySource(null);
     setLastError(null);
+    setReplayBuffered(0);
     try {
       const dir = outputDir ?? "";
       const handle = await startReplayBuffer({
@@ -781,7 +846,7 @@ export function App() {
                   <>
                     <span className="sep">·</span>
                     <span style={{ color: "var(--accent-2)" }}>
-                      ● live {Math.floor(replayBuffered)}s
+                      ● live {formatReplayTime(Math.floor(replayBuffered))}
                     </span>
                   </>
                 )}
@@ -1059,6 +1124,13 @@ export function App() {
         />
       )}
 
+      {pendingCrop && (
+        <CropOverlay
+          stream={pendingCrop.stream.sourceStream}
+          onConfirm={(rect) => void confirmCrop(rect)}
+          onCancel={cancelCrop}
+        />
+      )}
 
       {hotkeysOpen && (
         <HotkeysDialog
@@ -1343,6 +1415,13 @@ function formatTime(s: number): string {
   const mm = String(m).padStart(2, "0");
   const sss = String(ss).padStart(2, "0");
   return h ? `${h}:${mm}:${sss}` : `${mm}:${sss}`;
+}
+
+function formatReplayTime(s: number): string {
+  const m = Math.floor(s / 60);
+  const ss = s % 60;
+  if (m > 0) return `${m}min ${ss}s`;
+  return `${ss}s`;
 }
 
 function formatLogTime(ts: number): string {

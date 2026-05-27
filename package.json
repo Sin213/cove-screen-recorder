@@ -21,8 +21,8 @@
     "dist": "npm run build && node scripts/prep-helper.js && electron-builder && npm run dist:sha",
     "dist:linux": "npm run build && npm run build:helper:linux && electron-builder --linux AppImage && npm run dist:sha",
     "dist:linux:full": "npm run build && npm run build:helper:linux && electron-builder --linux && npm run dist:sha",
-    "dist:win": "npm run build && electron-builder --win && npm run dist:sha",
-    "dist:win:portable": "npm run build && electron-builder --win portable && npm run dist:sha",
+    "dist:win": "npm run build && npm run build:helper:win && electron-builder --win && npm run dist:sha",
+    "dist:win:portable": "npm run build && npm run build:helper:win && electron-builder --win portable && npm run dist:sha",
     "dist:sha": "bash scripts/sha256.sh",
     "validate:build": "tsc -p tsconfig.validation.json",
     "validate": "npm run validate:build && node dist-validation/runner.js smoke",
@@ -113,6 +113,14 @@
         {
           "from": "vendor/win/ffmpeg.exe",
           "to": "ffmpeg.exe"
+        },
+        {
+          "from": "target/release/cove-replay-engine.exe",
+          "to": "helper/cove-replay-engine.exe"
+        },
+        {
+          "from": "target/release/cove-replay-engine.exe.sha256",
+          "to": "helper/cove-replay-engine.exe.sha256"
         }
       ]
     },

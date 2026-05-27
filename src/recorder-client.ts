@@ -209,6 +209,20 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
 export async function startCaptureViaDisplayMedia(
   opts: StartDisplayMediaOptions,
 ): Promise<CaptureSession> {
+  const acquired = await acquireDisplayMediaStream(opts);
+  return startCaptureFromAcquiredStream(acquired, opts);
+}
+
+export interface AcquiredStream {
+  sourceStream: MediaStream;
+  inferredKind: "screen" | "window";
+  sourceName: string;
+  sourceId: string;
+}
+
+export async function acquireDisplayMediaStream(
+  opts: Pick<StartDisplayMediaOptions, "kind" | "fallbackName" | "preset" | "customQuality" | "captureQuality" | "withSystemAudio">,
+): Promise<AcquiredStream> {
   const preset = opts.customQuality ? effectivePreset(opts.preset, opts.customQuality) : PRESETS[opts.preset];
   const sourceFps = opts.captureQuality?.fps ?? preset.fps;
 
@@ -216,23 +230,14 @@ export async function startCaptureViaDisplayMedia(
 
   const sourceStream = await navigator.mediaDevices.getDisplayMedia({
     video: { frameRate: { ideal: sourceFps, max: sourceFps } },
-    // System audio is best-effort on Wayland — depends on portal + PipeWire.
     audio: opts.withSystemAudio,
   });
 
-  // Wayland subtlety: with our placeholder source-ID approach, Electron
-  // resolves getDisplayMedia() immediately while PipeWire is still showing
-  // the portal picker. The track exists but isn't producing frames. The
-  // `muted` flag is unreliable here (Chromium often leaves it false even
-  // while the source isn't connected), so wait for the actual first frame
-  // via a hidden <video> element — `loadeddata` only fires when real pixels
-  // arrive from PipeWire.
   const videoTrack = sourceStream.getVideoTracks()[0];
   if (videoTrack) {
     await waitForFirstFrame(sourceStream, videoTrack);
   }
 
-  // Fetch what the user picked in the portal so we can label the recording.
   const picked = await window.cove.getLastDisplayMediaSelection();
   const settings = videoTrack?.getSettings?.() as MediaTrackSettings & { displaySurface?: string };
   const displaySurface = settings?.displaySurface;
@@ -246,11 +251,18 @@ export async function startCaptureViaDisplayMedia(
     (inferredKind === "window" ? "Window" : "Screen");
   const sourceId = picked?.id ?? `displaymedia:${videoTrack?.id ?? "unknown"}`;
 
+  return { sourceStream, inferredKind, sourceName, sourceId };
+}
+
+export function startCaptureFromAcquiredStream(
+  acquired: AcquiredStream,
+  opts: Omit<StartDisplayMediaOptions, "kind" | "fallbackName">,
+): Promise<CaptureSession> {
   return wrapStreamIntoSession({
-    sourceStream,
-    mode: inferredKind,
-    sourceId,
-    sourceName,
+    sourceStream: acquired.sourceStream,
+    mode: acquired.inferredKind,
+    sourceId: acquired.sourceId,
+    sourceName: acquired.sourceName,
     preset: opts.preset,
     customQuality: opts.customQuality,
     captureQuality: opts.captureQuality,
@@ -886,7 +898,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
             const t = performance.now() - session.startedAt;
             opts.onState({
               active: !stopped,
-              bufferedSeconds: Math.min(opts.lengthSeconds, t / 1000),
+              bufferedSeconds: t / 1000,
               chunks: session.chunks,
             });
           } catch (err) {
@@ -923,6 +935,15 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
     throw err;
   }
 
+  const timerInterval = window.setInterval(() => {
+    if (stopped) return;
+    opts.onState({
+      active: true,
+      bufferedSeconds: (performance.now() - activeRecording.startedAt) / 1000,
+      chunks: activeRecording.chunks,
+    });
+  }, 1000);
+
   const markTargetLost = () => {
     if (stopped || targetLost) return;
     targetLost = true;
@@ -942,7 +963,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
       if (opts.sourceKind === "window") markTargetLost();
       else void handleStop();
     });
-    if (opts.sourceKind === "window") {
+    if (opts.sourceKind === "window" && !IS_LINUX) {
       t.addEventListener("mute", () => {
         window.setTimeout(() => {
           if (!stopped && t.muted && Date.now() >= suppressTrackEndedUntil) markTargetLost();
@@ -971,8 +992,9 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
     if (videoWithFrames.requestVideoFrameCallback) {
       frameCallback = videoWithFrames.requestVideoFrameCallback(onFrame);
     }
+    const frameAbsenceMs = IS_LINUX ? 60_000 : 5_000;
     const interval = window.setInterval(() => {
-      if (!stopped && performance.now() - lastFrameAt > 5000) markTargetLost();
+      if (!stopped && performance.now() - lastFrameAt > frameAbsenceMs) markTargetLost();
     }, 1000);
     void video.play().catch(() => { /* first-frame gating already succeeded */ });
     frameWatchStop = () => {
@@ -988,6 +1010,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
   const handleStop = async (error?: string) => {
     if (stopped) return;
     stopped = true;
+    window.clearInterval(timerInterval);
     try {
       if (activeRecording.recorder.state !== "inactive") activeRecording.recorder.stop();
     } catch { /* ignore */ }
@@ -1048,6 +1071,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
           activeRecording = await beginReplayRecording();
         } catch (err) {
           stopped = true;
+          window.clearInterval(timerInterval);
           cleanup();
           opts.onError(`Replay buffer stopped after save: ${describeError(err)}`);
         }
@@ -1066,9 +1090,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
     save,
     state: () => ({
       active: !stopped,
-      bufferedSeconds: activeRecording.chunks > 0
-        ? Math.min(opts.lengthSeconds, (performance.now() - activeRecording.startedAt) / 1000)
-        : 0,
+      bufferedSeconds: (performance.now() - activeRecording.startedAt) / 1000,
       chunks: activeRecording.chunks,
     }),
   };
