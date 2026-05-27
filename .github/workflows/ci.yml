@@ -50,6 +50,26 @@ jobs:
       - name: Build helper
         run: cargo build --release -p cove-replay-engine
 
+  build-helper-windows:
+    name: Build Rust helper (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Cargo check (Windows)
+        run: cargo check -p cove-replay-engine --target x86_64-pc-windows-msvc
+
+      - name: Clippy (Windows)
+        run: cargo clippy -p cove-replay-engine --target x86_64-pc-windows-msvc -- -D warnings
+
   build-electron:
     name: Build Electron app (Linux)
     needs: [typecheck, build-helper]
