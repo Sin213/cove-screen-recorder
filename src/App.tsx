@@ -375,6 +375,9 @@ export function App() {
       setPendingCrop(null);
       setStatus("preparing");
       setLastError(null);
+      // Let React flush the CropOverlay removal and the compositor
+      // settle so the overlay never appears in the first captured frames.
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 150)));
       try {
         const dir = outputDir ?? "";
         const session = await startCaptureFromAcquiredStream(acquired, {
