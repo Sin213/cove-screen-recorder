@@ -347,9 +347,13 @@ export function App() {
           setLastError(null);
           try {
             const dir = outputDir ?? "";
+            const cq = (presetId === "gif" || presetId === "custom")
+              ? undefined
+              : REPLAY_QUALITY_PRESETS[replay.quality];
             const session = await startCaptureFromAcquiredStream(acquired, {
               preset: presetId,
               customQuality,
+              captureQuality: cq,
               outputDir: dir,
               withMic,
               withSystemAudio,
@@ -388,7 +392,7 @@ export function App() {
       if (result.source) await startWithSource(result.source, presetId, result.rect);
       else log("error", "Crop selection returned no source.");
     },
-    [status, getCurrentAppInfo, setStatus, startWithSource, log, customQuality, withSystemAudio, outputDir, withMic, setRecording, setLastError, setLivePreview],
+    [status, getCurrentAppInfo, setStatus, startWithSource, log, customQuality, withSystemAudio, outputDir, withMic, replay.quality, setRecording, setLastError, setLivePreview],
   );
 
   const confirmCrop = useCallback(
