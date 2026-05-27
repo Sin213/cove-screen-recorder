@@ -25,6 +25,7 @@ import type {
   CropRect,
   CropSelectionResult,
   FinalizeParams,
+  HotkeyBindFailedPayload,
   RecordingProgress,
   StartRecordingParams,
 } from "./types";
@@ -741,35 +742,63 @@ function normalizeAccelerator(accel: string): string | null {
   return cleaned;
 }
 
+// Known Windows system shortcuts that globalShortcut cannot capture.
+// PrintScreen is intentionally excluded — it CAN be captured on most Windows builds.
+// Keys are normalized with the letter-key portion uppercased for case-insensitive lookup.
+const WINDOWS_RESERVED = new Map<string, string>([
+  ["Super+G",           "Windows Game Bar"],
+  ["Super+PrintScreen", "Save screenshot to Pictures"],
+  ["Super+Shift+S",     "Windows Snipping Tool"],
+  ["Super+L",           "Windows lock screen"],
+]);
+
+function checkWindowsReserved(normalizedAccel: string): string | null {
+  if (process.platform !== "win32") return null;
+  // Case-insensitive lookup handles both bare letters ("Super+g"→"Super+G")
+  // and named keys ("Super+printscreen"→"Super+PrintScreen").
+  const lower = normalizedAccel.toLowerCase();
+  for (const [key, label] of WINDOWS_RESERVED) {
+    if (key.toLowerCase() === lower) return label;
+  }
+  return null;
+}
+
 function applyHotkeys(): void {
   globalShortcut.unregisterAll();
   if (!hotkeysEnabled) return;
-  const tryRegister = (raw: string, action: "toggle" | "gif" | "preview" | "replay") => {
+  const sendBindFailed = (payload: HotkeyBindFailedPayload) => {
+    mainWindow?.webContents.send("cove/hotkeys/bindFailed", payload);
+    // Also surface through sendProgress so the current UI shows the error
+    // until a dedicated bindFailed consumer is added to the renderer.
+    sendProgress({ stage: "error", message: `hotkey error — ${payload.detail}` });
+  };
+  const tryRegister = (raw: string, action: "toggle" | "gif" | "replay") => {
     const accel = normalizeAccelerator(raw);
     if (!accel) {
-      sendProgress({
-        stage: "muxing",
-        message: `hotkey error — invalid accelerator "${raw}" for ${action}`,
-      });
+      sendBindFailed({ action, accelerator: raw, reason: "invalid",
+        detail: `"${raw}" is not a valid accelerator` });
+      return false;
+    }
+    const reserved = checkWindowsReserved(accel);
+    if (reserved) {
+      sendBindFailed({ action, accelerator: accel, reason: "reserved",
+        detail: `Reserved by ${reserved} — choose a different binding` });
       return false;
     }
     let ok = false;
     try {
       ok = globalShortcut.register(accel, () => {
         mainWindow?.webContents.send("cove:hotkey", action);
+        mainWindow?.webContents.send("cove/hotkeys/triggered", action);
       });
     } catch (err) {
-      sendProgress({
-        stage: "muxing",
-        message: `hotkey error — register threw for ${accel}: ${err instanceof Error ? err.message : String(err)}`,
-      });
+      sendBindFailed({ action, accelerator: accel, reason: "error",
+        detail: err instanceof Error ? err.message : String(err) });
       return false;
     }
     if (!ok) {
-      sendProgress({
-        stage: "muxing",
-        message: `hotkey error — couldn't register ${accel} for ${action}; likely conflicts with another app`,
-      });
+      sendBindFailed({ action, accelerator: accel, reason: "conflict",
+        detail: `"${accel}" conflicts with another application` });
     }
     return ok;
   };

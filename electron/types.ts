@@ -1,6 +1,13 @@
 export type CaptureMode = "screen" | "window" | "area";
 export type PresetId = "regular" | "gaming" | "gif" | "custom";
 
+export interface HotkeyBindFailedPayload {
+  action: "toggle" | "gif" | "replay";
+  accelerator: string;
+  reason: "invalid" | "reserved" | "conflict" | "error";
+  detail: string;
+}
+
 export interface CustomQuality {
   fps: number;            // 15-120
   videoBitsPerSecond: number;  // 1_000_000 - 50_000_000
