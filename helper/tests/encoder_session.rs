@@ -154,6 +154,7 @@ impl EncoderBackend for FakeBackend {
             capabilities: cove_replay_engine::encoder::backend::EncoderCapabilities {
                 accepts_dmabuf: true,
                 accepts_shm: true,
+                accepts_d3d11: false,
                 supported_codecs: vec!["h264".into()],
             },
             details: serde_json::json!({}),
@@ -1006,6 +1007,7 @@ async fn clean_stream_end_with_drain_runtime_error_emits_runtime_event() {
                 capabilities: cove_replay_engine::encoder::backend::EncoderCapabilities {
                     accepts_dmabuf: true,
                     accepts_shm: true,
+                    accepts_d3d11: false,
                     supported_codecs: vec!["h264".into()],
                 },
                 details: serde_json::json!({}),
@@ -1170,6 +1172,7 @@ async fn final_drain_retries_backend_back_pressure_then_succeeds_at_eof() {
                 capabilities: cove_replay_engine::encoder::backend::EncoderCapabilities {
                     accepts_dmabuf: true,
                     accepts_shm: true,
+                    accepts_d3d11: false,
                     supported_codecs: vec!["h264".into()],
                 },
                 details: serde_json::json!({}),
@@ -1435,6 +1438,7 @@ async fn final_drain_succeeds_when_backend_emits_on_last_allowed_iteration() {
                 capabilities: cove_replay_engine::encoder::backend::EncoderCapabilities {
                     accepts_dmabuf: true,
                     accepts_shm: true,
+                    accepts_d3d11: false,
                     supported_codecs: vec!["h264".into()],
                 },
                 details: serde_json::json!({}),
@@ -1880,6 +1884,7 @@ async fn init_segment_retried_and_persisted_after_first_drain() {
                 capabilities: cove_replay_engine::encoder::backend::EncoderCapabilities {
                     accepts_dmabuf: true,
                     accepts_shm: true,
+                    accepts_d3d11: false,
                     supported_codecs: vec!["h264".into()],
                 },
                 details: serde_json::json!({}),

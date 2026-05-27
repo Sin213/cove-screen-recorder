@@ -17,6 +17,7 @@ use crate::capture::FrameHandle;
 pub struct EncoderCapabilities {
     pub accepts_dmabuf: bool,
     pub accepts_shm: bool,
+    pub accepts_d3d11: bool,
     pub supported_codecs: Vec<String>,
 }
 
@@ -112,6 +113,7 @@ mod tests {
             capabilities: EncoderCapabilities {
                 accepts_dmabuf: true,
                 accepts_shm: true,
+                accepts_d3d11: false,
                 supported_codecs: vec!["h264".into()],
             },
             details: serde_json::json!({}),

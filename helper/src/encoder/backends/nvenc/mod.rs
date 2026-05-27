@@ -568,7 +568,7 @@ fn probe_nvenc_session(
 
 // ── EncoderBackend impl ───────────────────────────────────────────────────────
 
-#[cfg_attr(not(unix), allow(unused))]
+#[cfg(unix)]
 #[async_trait]
 impl EncoderBackend for NvencBackend {
     fn name(&self) -> &'static str { "nvenc" }
@@ -651,6 +651,7 @@ impl EncoderBackend for NvencBackend {
                     capabilities: EncoderCapabilities {
                         accepts_dmabuf: false, // DMA-BUF deferred
                         accepts_shm: true,
+                        accepts_d3d11: false,
                         supported_codecs: vec!["h264".into()],
                     },
                     details: serde_json::Value::Null,
