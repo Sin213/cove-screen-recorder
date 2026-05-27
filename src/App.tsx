@@ -112,7 +112,7 @@ export function App() {
 
   const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
   const [pendingReplaySource, setPendingReplaySource] = useState<IntentMode | null>(null);
-  const [pendingCrop, setPendingCrop] = useState<{ stream: AcquiredStream; preset: PresetId } | null>(null);
+  const [pendingCrop, setPendingCrop] = useState<{ stream: AcquiredStream; preset: PresetId; autoStart: boolean } | null>(null);
   const [hotkeysOpen, setHotkeysOpen] = useState(false);
   const [replayHandle, setReplayHandle] = useState<ReplayBufferHandle | null>(null);
   const [replayBuffered, setReplayBuffered] = useState(0);
@@ -331,7 +331,7 @@ export function App() {
   );
 
   const beginCrop = useCallback(
-    async (presetId: PresetId) => {
+    async (presetId: PresetId, autoStart = false) => {
       if (status !== "idle") return;
       const info = await getCurrentAppInfo();
       if (isWaylandSession(info)) {
@@ -344,7 +344,7 @@ export function App() {
             customQuality,
             withSystemAudio,
           });
-          setPendingCrop({ stream: acquired, preset: presetId });
+          setPendingCrop({ stream: acquired, preset: presetId, autoStart });
         } catch (err) {
           if (err instanceof DOMException && err.name === "NotAllowedError") {
             log("info", "Capture cancelled");
@@ -559,7 +559,7 @@ export function App() {
         if (status === "recording") void stopFlow(true);
         else if (status === "idle" && !v2Busy) beginDefault();
       } else if (action === "gif") {
-        if (status === "idle" && !v2Busy) void beginCrop("gif");
+        if (status === "idle" && !v2Busy) void beginCrop("gif", true);
       } else if (action === "replay") {
         if (v2State === "RECORDING") {
           const replayKey = useStore.getState().hotkeyBindings.replay.toUpperCase();
@@ -1130,6 +1130,7 @@ export function App() {
       {pendingCrop && (
         <CropOverlay
           stream={pendingCrop.stream.sourceStream}
+          autoStart={pendingCrop.autoStart}
           onConfirm={(rect) => void confirmCrop(rect)}
           onCancel={cancelCrop}
         />

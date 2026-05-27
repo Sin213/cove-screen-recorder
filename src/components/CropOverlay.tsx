@@ -3,6 +3,7 @@ import type { CropRect } from "../types";
 
 interface Props {
   stream: MediaStream;
+  autoStart?: boolean;
   onConfirm: (rect: CropRect) => void;
   onCancel: () => void;
 }
@@ -14,7 +15,7 @@ interface Rect {
   height: number;
 }
 
-export function CropOverlay({ stream, onConfirm, onCancel }: Props) {
+export function CropOverlay({ stream, autoStart, onConfirm, onCancel }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [drawing, setDrawing] = useState(false);
@@ -60,6 +61,7 @@ export function CropOverlay({ stream, onConfirm, onCancel }: Props) {
     setDrawing(true);
     setStart(pt);
     setRect(null);
+    (e.target as HTMLElement).setPointerCapture?.((e.nativeEvent as PointerEvent).pointerId);
   }, [toVideoCoords]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
@@ -74,29 +76,44 @@ export function CropOverlay({ stream, onConfirm, onCancel }: Props) {
     });
   }, [drawing, start, toVideoCoords]);
 
-  const onMouseUp = useCallback(() => {
-    setDrawing(false);
-  }, []);
-
-  const handleConfirm = useCallback(() => {
+  const confirmRect = useCallback((r: Rect) => {
     const video = videoRef.current;
     const overlay = overlayRef.current;
-    if (!rect || !video || !overlay || rect.width < 10 || rect.height < 10) return;
+    if (!video || !overlay || r.width < 10 || r.height < 10) return;
     const bounds = overlay.getBoundingClientRect();
     const scaleX = video.videoWidth / bounds.width;
     const scaleY = video.videoHeight / bounds.height;
     onConfirm({
-      x: Math.round(rect.x * scaleX),
-      y: Math.round(rect.y * scaleY),
-      width: Math.round(rect.width * scaleX),
-      height: Math.round(rect.height * scaleY),
+      x: Math.round(r.x * scaleX),
+      y: Math.round(r.y * scaleY),
+      width: Math.round(r.width * scaleX),
+      height: Math.round(r.height * scaleY),
       dpr: 1,
       displayId: "",
       displayWidth: video.videoWidth,
       displayHeight: video.videoHeight,
       sourceId: "",
     });
-  }, [rect, onConfirm]);
+  }, [onConfirm]);
+
+  const onMouseUp = useCallback((e: React.MouseEvent) => {
+    if (!drawing || !start) { setDrawing(false); return; }
+    const pt = toVideoCoords(e.clientX, e.clientY);
+    setDrawing(false);
+    if (!pt) return;
+    const finalRect: Rect = {
+      x: Math.min(start.x, pt.x),
+      y: Math.min(start.y, pt.y),
+      width: Math.abs(pt.x - start.x),
+      height: Math.abs(pt.y - start.y),
+    };
+    setRect(finalRect);
+    if (autoStart) confirmRect(finalRect);
+  }, [drawing, start, toVideoCoords, autoStart, confirmRect]);
+
+  const handleConfirm = useCallback(() => {
+    if (rect) confirmRect(rect);
+  }, [rect, confirmRect]);
 
   const hasValidRect = rect && rect.width >= 10 && rect.height >= 10;
 
@@ -117,10 +134,9 @@ export function CropOverlay({ stream, onConfirm, onCancel }: Props) {
           <div
             ref={overlayRef}
             style={{ position: "relative", cursor: "crosshair", display: videoReady ? "block" : "none" }}
-            onMouseDown={onMouseDown}
-            onMouseMove={onMouseMove}
-            onMouseUp={onMouseUp}
-            onMouseLeave={onMouseUp}
+            onPointerDown={onMouseDown}
+            onPointerMove={onMouseMove}
+            onPointerUp={onMouseUp}
           >
             <video
               ref={videoRef}
@@ -159,15 +175,17 @@ export function CropOverlay({ stream, onConfirm, onCancel }: Props) {
           </div>
           <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <p style={{ flex: 1, margin: 0, fontSize: 12, color: "var(--text-faint)" }}>
-              Click and drag to select the recording area
+              {autoStart ? "Draw a region — recording starts on release" : "Click and drag to select the recording area"}
             </p>
-            <button
-              className="btn btn-primary"
-              disabled={!hasValidRect}
-              onClick={handleConfirm}
-            >
-              Start recording
-            </button>
+            {!autoStart && (
+              <button
+                className="btn btn-primary"
+                disabled={!hasValidRect}
+                onClick={handleConfirm}
+              >
+                Start recording
+              </button>
+            )}
           </div>
         </div>
       </div>

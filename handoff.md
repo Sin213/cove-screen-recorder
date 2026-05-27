@@ -2,20 +2,36 @@
 
 ## Scope
 
-Fix the global GIF hotkey path so the CropOverlay modal never appears in captured GIF frames. Bounded to `confirmCrop` in `src/App.tsx` only.
+Fix the global GIF hotkey path so:
+1. One drag-to-select auto-starts recording on mouse release (no confirm click)
+2. CropOverlay never appears in captured frames
+
+Manual crop mode (non-GIF) is unchanged: draw region, click "Start recording."
 
 ## Problem
 
-When the GIF hotkey fires, it calls `beginCrop("gif")` which on Wayland acquires a portal stream and shows the CropOverlay. On confirm, `setPendingCrop(null)` unmounts the overlay in React, but recording starts immediately — before React renders the removal and before the compositor removes it from the screen. The portal stream captures the entire screen including the Cove window, so the first GIF frames contain the crop-selection modal.
+The GIF hotkey calls `beginCrop("gif")` which on Wayland shows the CropOverlay. Two issues:
+- Recording started before React removed the overlay from the screen → overlay in first frames
+- The hotkey path required a manual "Start recording" click, breaking the one-drag flow
 
 ## Fix
 
-In `confirmCrop`, after `setPendingCrop(null)`, await one `requestAnimationFrame` (React paint) plus a 150ms `setTimeout` (compositor settle) before starting capture. This ensures the overlay is fully gone from the screen before the first frame is recorded.
+**`src/components/CropOverlay.tsx`**:
+- Added `autoStart` prop. When true, `onMouseUp` auto-confirms the drawn rectangle (no button needed). The "Start recording" button is hidden; hint text says "recording starts on release."
+- Refactored `handleConfirm` into `confirmRect(rect)` so `onMouseUp` can pass the final rect directly (avoids stale React state from batched updates).
+
+**`src/App.tsx`**:
+- `pendingCrop` state now carries `autoStart: boolean`, set to `true` when `presetId === "gif"`.
+- `confirmCrop` awaits `requestAnimationFrame` + 150ms after removing the CropOverlay, before starting capture — ensures compositor settles.
+- `autoStart` passed through to `<CropOverlay>`.
 
 ## Files changed
 
-- `src/App.tsx` — 1 line added in `confirmCrop`
+- `src/App.tsx`
+- `src/components/CropOverlay.tsx`
 
 ## Not touched
 
-- Normal GIF mode flow, replay recording, MP4 recording, export pipeline, X11 crop path, validation artifacts
+- Normal (non-GIF) crop mode manual confirm flow
+- Replay recording, MP4 recording, export pipeline
+- X11 crop path, validation artifacts
