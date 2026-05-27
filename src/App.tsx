@@ -344,33 +344,29 @@ export function App() {
             customQuality,
             withSystemAudio,
           });
-          if (autoStart) {
-            setLastError(null);
-            try {
-              const dir = outputDir ?? "";
-              const session = await startCaptureFromAcquiredStream(acquired, {
-                preset: presetId,
-                customQuality,
-                outputDir: dir,
-                withMic,
-                withSystemAudio,
-                systemAudioHandledBySidecar: info.platform === "linux",
-                onAutoStop: () => void stopFlowRef.current?.(false),
-                onError: (msg) => { log("error", msg); setLastError(msg); },
-                onLog: (level, text) => log(level, text),
-              });
-              sessionRef.current = session;
-              setLivePreview(session.previewStream);
-              setRecording(session.recordingId);
-              setStatus("recording");
-              log("info", "Recording started");
-            } catch (err) {
-              acquired.sourceStream.getTracks().forEach((t) => t.stop());
-              log("error", `Failed to start: ${err instanceof Error ? err.message : String(err)}`);
-              setStatus("idle");
-            }
-          } else {
-            setPendingCrop({ stream: acquired, preset: presetId, autoStart });
+          setLastError(null);
+          try {
+            const dir = outputDir ?? "";
+            const session = await startCaptureFromAcquiredStream(acquired, {
+              preset: presetId,
+              customQuality,
+              outputDir: dir,
+              withMic,
+              withSystemAudio,
+              systemAudioHandledBySidecar: info.platform === "linux",
+              onAutoStop: () => void stopFlowRef.current?.(false),
+              onError: (msg) => { log("error", msg); setLastError(msg); },
+              onLog: (level, text) => log(level, text),
+            });
+            sessionRef.current = session;
+            setLivePreview(session.previewStream);
+            setRecording(session.recordingId);
+            setStatus("recording");
+            log("info", "Recording started");
+          } catch (err) {
+            acquired.sourceStream.getTracks().forEach((t) => t.stop());
+            log("error", `Failed to start: ${err instanceof Error ? err.message : String(err)}`);
+            setStatus("idle");
           }
         } catch (err) {
           if (err instanceof DOMException && err.name === "NotAllowedError") {
