@@ -51,6 +51,7 @@ fn handle_list_sources(id: Option<serde_json::Value>) -> Response {
     let descriptor = CaptureSourceDescriptor {
         modes: vec![CaptureMode::Monitor],
         known_restore_tokens: vec![],
+        monitors: vec![],
     };
     Response::result(id, serde_json::to_value(descriptor).unwrap_or(json!(null)))
 }

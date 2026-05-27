@@ -73,6 +73,31 @@ pub struct RestoreTokenInfo {
 pub struct CaptureSourceDescriptor {
     pub modes: Vec<CaptureMode>,
     pub known_restore_tokens: Vec<RestoreTokenInfo>,
+    /// Per-monitor DXGI metadata. Populated on Windows when enumeration is available; always empty on Linux.
+    #[serde(default)]
+    pub monitors: Vec<WindowsMonitorInfo>,
+}
+
+/// Per-monitor metadata from DXGI adapter enumeration.
+/// Fields are zero-valued until real DXGI enumeration lands (T-051).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WindowsMonitorInfo {
+    /// DXGI_OUTPUT_DESC DeviceName, e.g. `\\.\DISPLAY1`
+    pub device_name: String,
+    /// IDXGIFactory::EnumAdapters ordinal
+    pub adapter_index: u32,
+    /// IDXGIAdapter::EnumOutputs ordinal
+    pub output_index: u32,
+    pub width_px: u32,
+    pub height_px: u32,
+    /// Rational refresh rate numerator (e.g. 60000 for 59.97 Hz)
+    pub refresh_rate_num: u32,
+    /// Rational refresh rate denominator (e.g. 1001 for 59.97 Hz)
+    pub refresh_rate_den: u32,
+    pub is_primary: bool,
+    /// DPI scale: 1.0 = 96 DPI (100%), 1.5 = 144 DPI (150%), etc.
+    pub scale_factor: f64,
+    pub hdr_capable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

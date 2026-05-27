@@ -28,6 +28,26 @@ export interface CaptureSourceInfo {
   title: string;
 }
 
+export interface WindowsMonitorInfo {
+  device_name: string;
+  adapter_index: number;
+  output_index: number;
+  width_px: number;
+  height_px: number;
+  refresh_rate_num: number;
+  refresh_rate_den: number;
+  is_primary: boolean;
+  scale_factor: number;
+  hdr_capable: boolean;
+}
+
+// Wire shape of capture.listSources response (matches CaptureSourceDescriptor in types.rs).
+export interface CaptureSourceDescriptorResult {
+  modes: string[];
+  known_restore_tokens: unknown[];
+  monitors?: WindowsMonitorInfo[];
+}
+
 // ── Internal types ────────────────────────────────────────────────────────────
 
 type NotificationHandler = (params: unknown) => void;
@@ -211,8 +231,8 @@ export class EngineRpc extends EventEmitter {
     return this.call("engine.diagnosticsBundlePath");
   }
 
-  captureListSources(): Promise<{ sources: CaptureSourceInfo[] }> {
-    return this.call("capture.listSources");
+  captureListSources(): Promise<CaptureSourceDescriptorResult> {
+    return this.call<CaptureSourceDescriptorResult>("capture.listSources");
   }
 
   captureRequestSession(params: unknown): Promise<unknown> {

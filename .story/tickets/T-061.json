@@ -1,0 +1,13 @@
+{
+  "blockedBy": [],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": "2026-05-27",
+  "createdDate": "2026-05-27",
+  "description": "Implement display enumeration for the source picker on Windows. Use Electron's screen.getAllDisplays() augmented with native DXGI adapter/output info from the helper (resolution, refresh rate, HDR capability, scaling factor). Map Electron display IDs to DXGI output indices for capture backend targeting. Handle display hotplug (connect/disconnect monitor during recording), DPI scaling differences per monitor, and virtual desktop arrangements.",
+  "id": "T-061",
+  "order": 20,
+  "phase": "p7-win-electron",
+  "status": "complete",
+  "title": "Windows display and monitor enumeration",
+  "type": "task"
+}

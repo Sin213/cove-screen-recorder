@@ -431,7 +431,7 @@ function resolveSelection(value: CropSelectionResult | null): void {
 function makeCaptureSource(
   s: import("electron").DesktopCapturerSource,
 ): CaptureSource {
-  return {
+  const base: CaptureSource = {
     id: s.id,
     name: s.name,
     kind: s.id.startsWith("screen") ? "screen" : "window",
@@ -439,6 +439,37 @@ function makeCaptureSource(
     appIconDataUrl: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : undefined,
     display_id: s.display_id || undefined,
   };
+  if (process.platform === "win32" && s.display_id) {
+    const disp = screen.getAllDisplays().find((d) => String(d.id) === s.display_id);
+    if (disp) {
+      base.scale_factor = disp.scaleFactor;
+      base.refresh_rate_hz = (disp as { displayFrequency?: number }).displayFrequency ?? undefined;
+    }
+  }
+  return base;
+}
+
+// Windows-only: best-effort augment sources with DXGI adapter/output indices and HDR capability.
+// No-op while the Rust stubs return an empty monitors array (T-051 will populate them).
+async function tryAugmentWithDxgi(sources: CaptureSource[]): Promise<void> {
+  if (process.platform !== "win32") return;
+  const rpc = supervisor?.rpcClient;
+  if (!rpc?.connected) return;
+  try {
+    const desc = await rpc.captureListSources();
+    const monitors = desc.monitors ?? [];
+    if (monitors.length === 0) return;
+    let monIdx = 0;
+    for (const src of sources) {
+      if (src.kind !== "screen" || monIdx >= monitors.length) continue;
+      const mon = monitors[monIdx++];
+      src.dxgi_adapter_index = mon.adapter_index;
+      src.dxgi_output_index = mon.output_index;
+      src.hdr_capable = mon.hdr_capable;
+    }
+  } catch {
+    // non-fatal: DXGI info is best-effort
+  }
 }
 
 async function startCropSelection(): Promise<CropSelectionResult | null> {
@@ -538,7 +569,9 @@ async function listSources(kind: "screen" | "window" | "all"): Promise<CaptureSo
   const types: Array<"screen" | "window"> =
     kind === "all" ? ["screen", "window"] : [kind];
   const raw = await getSourcesCached(types, kind !== "screen");
-  return raw.map<CaptureSource>(makeCaptureSource);
+  const result = raw.map<CaptureSource>(makeCaptureSource);
+  await tryAugmentWithDxgi(result);
+  return result;
 }
 
 // Non-Wayland getDisplayMedia path: the renderer can hint which source kind it
@@ -1281,6 +1314,12 @@ app.whenReady().then(() => {
     app.commandLine.appendSwitch("disable-features", "OverlayScrollbar");
   }
   createWindow();
+
+  if (process.platform === "win32") {
+    screen.on("display-added", invalidateSourceCache);
+    screen.on("display-removed", invalidateSourceCache);
+    screen.on("display-metrics-changed", invalidateSourceCache);
+  }
 
   // Default-pick output dir if nothing is set yet — done lazily in IPC handler.
   // Pre-warm: nothing.

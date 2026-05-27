@@ -9,7 +9,7 @@
 use async_trait::async_trait;
 
 #[cfg(windows)]
-use crate::protocol::types::{CaptureSourceDescriptor, CursorMode, Rect, RequestSessionOpts};
+use crate::protocol::types::{CaptureMode, CaptureSourceDescriptor, CursorMode, Rect, RequestSessionOpts};
 
 #[cfg(windows)]
 use super::CaptureSource;
@@ -81,7 +81,12 @@ impl Default for DxgiCaptureSource {
 #[async_trait]
 impl CaptureSource for DxgiCaptureSource {
     async fn list_sources(&self) -> anyhow::Result<CaptureSourceDescriptor> {
-        anyhow::bail!("not-implemented-yet: dxgi-capture list_sources")
+        // Real DXGI adapter enumeration deferred to T-051 (Windows cross-compile + SDK).
+        Ok(CaptureSourceDescriptor {
+            modes: vec![CaptureMode::Monitor],
+            known_restore_tokens: vec![],
+            monitors: vec![],
+        })
     }
 
     async fn request_session(&self, _opts: RequestSessionOpts) -> anyhow::Result<()> {

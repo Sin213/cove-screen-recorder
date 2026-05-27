@@ -39,6 +39,18 @@ pub async fn dispatch(
             crate::capture::pipewire::dispatch_capture(req, state, notifier, cancel_rx).await,
         );
     }
+    #[cfg(windows)]
+    if req.method == "capture.listSources" {
+        use crate::capture::{dxgi::DxgiCaptureSource, CaptureSource};
+        let backend = DxgiCaptureSource::new();
+        return Some(match backend.list_sources().await {
+            Ok(desc) => Response::result(req.id, serde_json::to_value(desc).unwrap_or(json!(null))),
+            Err(e) => Response::error(
+                req.id,
+                RpcError::invalid_request(format!("capture.listSources: {e}")),
+            ),
+        });
+    }
     if req.method.starts_with("replay.") {
         return Some(crate::export::dispatch_replay(req, state, notifier).await);
     }

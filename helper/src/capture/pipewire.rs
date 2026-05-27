@@ -883,6 +883,7 @@ impl CaptureSource for PipeWireSource {
         Ok(CaptureSourceDescriptor {
             modes: vec![CaptureMode::Monitor, CaptureMode::Window],
             known_restore_tokens: self.restore_store.list_tokens(),
+            monitors: vec![],
         })
     }
 
@@ -2151,6 +2152,7 @@ pub async fn dispatch_capture(
             let desc = CaptureSourceDescriptor {
                 modes: vec![CaptureMode::Monitor, CaptureMode::Window],
                 known_restore_tokens: RestoreStore::new().list_tokens(),
+                monitors: vec![],
             };
             Response::result(id, serde_json::to_value(desc).unwrap_or(json!(null)))
         }

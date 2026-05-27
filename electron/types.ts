@@ -25,6 +25,12 @@ export interface CaptureSource {
   thumbnailDataUrl: string;
   appIconDataUrl?: string;
   display_id?: string;
+  // Windows-only display metadata (populated from screen.getAllDisplays() and DXGI)
+  scale_factor?: number;
+  refresh_rate_hz?: number;
+  dxgi_adapter_index?: number;
+  dxgi_output_index?: number;
+  hdr_capable?: boolean;
 }
 
 export interface Preset {
