@@ -280,7 +280,7 @@ pub struct NV_ENC_REGISTER_RESOURCE {
     pub reserved2: [*mut c_void; 59],
 }
 
-pub const NV_ENC_REGISTER_RESOURCE_VER: u32 = nvencapi_struct_version(4);
+pub const NV_ENC_REGISTER_RESOURCE_VER: u32 = nvencapi_struct_version(3);
 const _: () = assert!(std::mem::size_of::<NV_ENC_REGISTER_RESOURCE>() == 1512);
 
 /// `NV_ENC_MAP_INPUT_RESOURCE` — sent to nvEncMapInputResource.
@@ -301,7 +301,7 @@ pub struct NV_ENC_MAP_INPUT_RESOURCE {
     pub reserved2: [*mut c_void; 64],
 }
 
-pub const NV_ENC_MAP_INPUT_RESOURCE_VER: u32 = nvencapi_struct_version(4);
+pub const NV_ENC_MAP_INPUT_RESOURCE_VER: u32 = nvencapi_struct_version(1);
 const _: () = assert!(std::mem::size_of::<NV_ENC_MAP_INPUT_RESOURCE>() == 1544);
 
 // Typed function pointer aliases for D3D11 path.

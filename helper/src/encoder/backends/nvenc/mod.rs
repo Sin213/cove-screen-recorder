@@ -1500,7 +1500,17 @@ impl EncoderBackend for NvencBackend {
     }
 
     async fn teardown(&mut self) -> Result<(), EncoderError> {
-        if let Some(sess) = self.session.take() {
+        if let Some(mut sess) = self.session.take() {
+            // Destroy unflushed output buffers before encoder destruction to satisfy the
+            // NVENC SDK requirement that all resources are freed before nvEncDestroyEncoder.
+            let destroy_bs_raw = sess.fn_list.nvEncDestroyBitstreamBuffer;
+            if !destroy_bs_raw.is_null() && !sess.pending_frames.is_empty() {
+                let destroy_out: FnNvEncDestroyBitstreamBuffer =
+                    unsafe { std::mem::transmute(destroy_bs_raw) };
+                for pf in sess.pending_frames.drain(..) {
+                    unsafe { destroy_out(sess.encoder, pf.output_buf) };
+                }
+            }
             if let Some(destroy) = sess.fn_list.nvEncDestroyEncoder {
                 unsafe { destroy(sess.encoder) };
             }
@@ -1530,6 +1540,19 @@ impl NvencBackend {
         let sess = self.session.as_mut()
             .ok_or_else(|| EncoderError::Runtime("push_frame before configure".into()))?;
 
+        // Guard against null fn pointers — older drivers may not export all D3D11 interop fns.
+        if sess.fn_list.nvEncRegisterResource.is_null() {
+            return Err(EncoderError::Runtime("nvEncRegisterResource-not-exported".into()));
+        }
+        if sess.fn_list.nvEncUnregisterResource.is_null() {
+            return Err(EncoderError::Runtime("nvEncUnregisterResource-not-exported".into()));
+        }
+        if sess.fn_list.nvEncMapInputResource.is_null() {
+            return Err(EncoderError::Runtime("nvEncMapInputResource-not-exported".into()));
+        }
+        if sess.fn_list.nvEncUnmapInputResource.is_null() {
+            return Err(EncoderError::Runtime("nvEncUnmapInputResource-not-exported".into()));
+        }
         let register_fn: FnNvEncRegisterResource = unsafe {
             std::mem::transmute(sess.fn_list.nvEncRegisterResource)
         };
@@ -1543,9 +1566,10 @@ impl NvencBackend {
             std::mem::transmute(sess.fn_list.nvEncUnmapInputResource)
         };
 
-        // DXGI_FORMAT_B8G8R8A8_UNORM = 87 maps to NV_ENC_BUFFER_FORMAT_ARGB.
-        // All other formats fall back to NV12 (encoder performs CSC internally).
-        let buf_fmt: NV_ENC_BUFFER_FORMAT = if dxgi_format == 87 {
+        // DXGI_FORMAT_B8G8R8A8_UNORM (87) and DXGI_FORMAT_B8G8R8X8_UNORM (88) both map
+        // to NV_ENC_BUFFER_FORMAT_ARGB. 88 is common on Intel/AMD iGPUs and would produce
+        // corrupt video if treated as NV12. All other formats fall back to NV12.
+        let buf_fmt: NV_ENC_BUFFER_FORMAT = if dxgi_format == 87 || dxgi_format == 88 {
             NV_ENC_BUFFER_FORMAT_ARGB
         } else {
             NV_ENC_BUFFER_FORMAT_NV12
