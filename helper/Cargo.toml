@@ -45,3 +45,7 @@ path = "tests/qsv_windows.rs"
 [[test]]
 name = "windows_pacing"
 path = "tests/windows_pacing.rs"
+
+[[test]]
+name = "libvpx_encoder"
+path = "tests/libvpx_encoder.rs"
