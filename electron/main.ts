@@ -179,6 +179,8 @@ function wireHelperNotifications(rpc: EngineRpc): void {
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let trayRecordingStartedAt: number | null = null;
+let trayDurationInterval: NodeJS.Timeout | null = null;
 
 interface WindowBounds {
   width: number;
@@ -228,6 +230,74 @@ function debounce<T extends (...args: unknown[]) => void>(fn: T, ms: number): T 
     if (t) clearTimeout(t);
     t = setTimeout(() => fn(...args), ms);
   }) as T;
+}
+
+// ── Tray helpers ─────────────────────────────────────────────────────────────
+
+function updateTrayMenu(): void {
+  if (!tray) return;
+  const items: Electron.MenuItemConstructorOptions[] = [
+    { label: "Show Cove", click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+  ];
+  if (trayRecordingStartedAt !== null) {
+    items.push({
+      label: "Stop Recording",
+      click: () => {
+        mainWindow?.show();
+        mainWindow?.webContents.send("cove:hotkey", "toggle");
+      },
+    });
+  }
+  items.push({ type: "separator" });
+  items.push({ label: "Quit", click: () => { app.quit(); } });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+}
+
+function updateTrayTooltip(): void {
+  if (!tray) return;
+  if (trayRecordingStartedAt === null) {
+    tray.setToolTip("Cove Screen Recorder");
+    return;
+  }
+  const elapsedSec = Math.floor((Date.now() - trayRecordingStartedAt) / 1000);
+  const mm = String(Math.floor(elapsedSec / 60)).padStart(2, "0");
+  const ss = String(elapsedSec % 60).padStart(2, "0");
+  tray.setToolTip(`Cove — Recording ${mm}:${ss}`);
+}
+
+function onTrayRecordingStart(): void {
+  trayRecordingStartedAt = Date.now();
+  trayDurationInterval = setInterval(updateTrayTooltip, 1_000);
+  updateTrayMenu();
+  updateTrayTooltip();
+  const recIcon = path.join(app.getAppPath(), "cove_icon_recording.png");
+  if (fs.existsSync(recIcon)) tray?.setImage(recIcon);
+}
+
+function onTrayRecordingStop(outputPath?: string): void {
+  trayRecordingStartedAt = null;
+  if (trayDurationInterval) { clearInterval(trayDurationInterval); trayDurationInterval = null; }
+  updateTrayMenu();
+  updateTrayTooltip();
+  const iconPath = path.join(app.getAppPath(), "cove_icon.png");
+  tray?.setImage(iconPath);
+  if (process.platform === "win32" && tray && outputPath) {
+    tray.displayBalloon({
+      icon: "info",
+      title: "Recording saved",
+      content: path.basename(outputPath),
+    });
+  }
+}
+
+function createTray(): void {
+  if (tray) return;
+  const iconPath = path.join(app.getAppPath(), "cove_icon.png");
+  tray = new Tray(iconPath);
+  tray.setToolTip("Cove Screen Recorder");
+  updateTrayMenu();
+  tray.on("click", () => { mainWindow?.show(); mainWindow?.focus(); });
+  tray.on("double-click", () => { mainWindow?.show(); mainWindow?.focus(); });
 }
 
 function createWindow(): void {
@@ -311,6 +381,7 @@ function createWindow(): void {
   mainWindow.on("move", debounce(persist, 250));
 
   mainWindow.on("closed", () => {
+    if (trayDurationInterval) { clearInterval(trayDurationInterval); trayDurationInterval = null; }
     tray?.destroy();
     tray = null;
     mainWindow = null;
@@ -321,18 +392,7 @@ function createWindow(): void {
   // is minimized, killing any active replay buffer or recording.
   mainWindow.on("minimize", () => {
     mainWindow?.hide();
-    if (!tray) {
-      const iconPath = path.join(app.getAppPath(), "cove_icon.png");
-      tray = new Tray(iconPath);
-      tray.setToolTip("Cove Screen Recorder");
-      const menu = Menu.buildFromTemplate([
-        { label: "Show", click: () => { mainWindow?.show(); mainWindow?.focus(); } },
-        { type: "separator" },
-        { label: "Quit", click: () => { app.quit(); } },
-      ]);
-      tray.setContextMenu(menu);
-      tray.on("click", () => { mainWindow?.show(); mainWindow?.focus(); });
-    }
+    createTray();
   });
 }
 
@@ -912,6 +972,7 @@ function registerIpc(): void {
     // session sees the current state of the desktop, not a stale snapshot.
     invalidateSourceCache();
     sendProgress({ recordingId, stage: "encoding", percent: 0, message: "recording" });
+    onTrayRecordingStart();
     return { recordingId };
   });
 
@@ -942,11 +1003,13 @@ function registerIpc(): void {
         message: result.error,
       });
     }
+    onTrayRecordingStop(result.outputPath);
     return result;
   });
 
   ipcMain.handle("cove:cancel-recording", async (_e, recordingId: string) => {
     cancel(recordingId);
+    onTrayRecordingStop();
   });
 
   ipcMain.handle("cove:register-hotkeys", async (_e, enabled: boolean) => {
@@ -1343,6 +1406,7 @@ app.whenReady().then(() => {
     app.commandLine.appendSwitch("disable-features", "OverlayScrollbar");
   }
   createWindow();
+  if (process.platform === "win32") createTray();
 
   if (process.platform === "win32") {
     screen.on("display-added", invalidateSourceCache);
