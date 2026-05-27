@@ -58,6 +58,10 @@ pub struct HelperState {
     pub active_capture: tokio::sync::Mutex<
         Option<std::sync::Arc<crate::capture::pipewire::PipeWireSource>>,
     >,
+    #[cfg(windows)]
+    pub active_capture_windows: tokio::sync::Mutex<
+        Option<Box<dyn crate::capture::CaptureSource>>,
+    >,
     pub recoverable_sessions: tokio::sync::Mutex<Vec<RecoverableSessionInfo>>,
     /// Buffer from the most-recently-started encoder session. Kept alive after
     /// the encoder session ends so `replay.save` can still pin segments.

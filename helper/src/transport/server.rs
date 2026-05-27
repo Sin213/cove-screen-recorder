@@ -102,6 +102,8 @@ pub async fn run_with_config(
         ffmpeg_available,
         #[cfg(target_os = "linux")]
         active_capture: tokio::sync::Mutex::new(None),
+        #[cfg(windows)]
+        active_capture_windows: tokio::sync::Mutex::new(None),
         recoverable_sessions: tokio::sync::Mutex::new(recovered),
         active_segment_buffer: tokio::sync::Mutex::new(None),
         active_snapshots: tokio::sync::Mutex::new(std::collections::HashMap::new()),
