@@ -29,3 +29,7 @@ windows-sys = { version = "0.52", features = [
 
 [dev-dependencies]
 tempfile = "3"
+
+[[test]]
+name = "nvenc_windows"
+path = "tests/nvenc_windows.rs"

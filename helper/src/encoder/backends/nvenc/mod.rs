@@ -1219,6 +1219,55 @@ fn find_nal_end(data: &[u8], from: usize) -> Option<usize> {
 unsafe impl Send for NvencBackend {}
 unsafe impl Sync for NvencBackend {}
 
+// ── Windows stub impl ─────────────────────────────────────────────────────────
+
+#[cfg(windows)]
+#[async_trait]
+impl EncoderBackend for NvencBackend {
+    fn name(&self) -> &'static str { "nvenc" }
+    fn codec(&self) -> &'static str { "h264" }
+
+    async fn probe(&self, _format: &CaptureFormat) -> ProbeOutcome {
+        if std::env::var("COVE_NVENC_FORCE_UNAVAILABLE").is_ok() {
+            return ProbeOutcome::Unavailable {
+                reason: "force-unavailable-by-env".into(),
+                details: serde_json::Value::Null,
+            };
+        }
+        // Real probe (load nvEncodeAPI64.dll, test CUDA context) deferred.
+        ProbeOutcome::Unavailable {
+            reason: "not-implemented-yet: nvenc-windows-probe".into(),
+            details: serde_json::json!({
+                "eventual_capabilities": {
+                    "accepts_d3d11": true,
+                    "accepts_dmabuf": false,
+                    "accepts_shm": false,
+                    "supported_codecs": ["h264"]
+                }
+            }),
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    async fn configure(&mut self, _cfg: EncoderConfig) -> Result<(), EncoderError> {
+        Err(EncoderError::NotImplementedYet("nvenc-windows-configure".into()))
+    }
+
+    #[cfg(any(unix, windows))]
+    async fn push_frame(&mut self, _frame: FrameHandle) -> Result<(), EncoderError> {
+        Err(EncoderError::NotImplementedYet("nvenc-windows-push-frame".into()))
+    }
+
+    #[cfg(any(unix, windows))]
+    async fn drain(&mut self) -> Result<Vec<EncodedFragment>, EncoderError> {
+        Err(EncoderError::NotImplementedYet("nvenc-windows-drain".into()))
+    }
+
+    async fn teardown(&mut self) -> Result<(), EncoderError> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
