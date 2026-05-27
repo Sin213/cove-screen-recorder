@@ -776,9 +776,50 @@ function ensureSocketDir(dir: string): void {
   }
 }
 
+/**
+ * Windows process-tree teardown.  Uses `taskkill /F /T /PID <pid>` to
+ * forcefully terminate the helper and all its child processes.
+ *
+ * On Windows, `proc.kill("SIGTERM")` wraps TerminateProcess() which kills only
+ * the direct process — child processes become orphans.  `taskkill /T` kills the
+ * entire process tree.
+ *
+ * The RPC engine.shutdown is always attempted first (in doShutdown); this
+ * function is the final escalation for processes that do not exit cleanly.
+ */
+async function killWithEscalationWindows(
+  proc: child_process.ChildProcess,
+): Promise<void> {
+  const pid = proc.pid;
+  if (pid == null) return;
+  const exited = new Promise<void>((r) => proc.once("exit", () => r()));
+  // Give the RPC-shutdown path a moment to complete before taskkill.
+  const result = await Promise.race([
+    exited.then(() => "exited" as const),
+    sleep(SIGTERM_DELAY_MS).then(() => "timeout" as const),
+  ]);
+  if (result === "exited") return;
+  try {
+    child_process
+      .spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
+        stdio: "ignore",
+        detached: true,
+      })
+      .unref();
+  } catch {
+    // best-effort; if taskkill is unavailable fall back to direct kill
+    try {
+      proc.kill();
+    } catch {}
+  }
+}
+
 async function killWithEscalation(
   proc: child_process.ChildProcess,
 ): Promise<void> {
+  if (process.platform === "win32") {
+    return killWithEscalationWindows(proc);
+  }
   const exited = new Promise<void>((r) => proc.once("exit", () => r()));
   const result1 = await Promise.race([
     exited.then(() => "exited" as const),
