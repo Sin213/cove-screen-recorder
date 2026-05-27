@@ -9,8 +9,10 @@
 //!
 //! VAAPI / QSV / AMF land in follow-up tickets per T-017 out-of-scope.
 
+pub mod amf;
 pub mod nvenc;
 pub mod x264;
 
+pub use amf::AmfBackend;
 pub use nvenc::NvencBackend;
 pub use x264::X264Backend;

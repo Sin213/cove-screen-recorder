@@ -1,0 +1,16 @@
+{
+  "blockedBy": [
+    "T-046",
+    "T-048"
+  ],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Implement EncoderBackend using AMD Advanced Media Framework (AMF) for H.264/H.265 hardware encoding on AMD GPUs. Uses AMF's DX11 surface submission for zero-copy from DXGI capture. Handles: AMFFactory init, encoder component creation, surface allocation from DX11 textures, rate control (CBR/VBR), and async output polling. Critical for AMD GPU users — no NVENC available.",
+  "id": "T-054",
+  "order": 20,
+  "phase": "p6-win-perf",
+  "status": "inprogress",
+  "title": "AMD AMF encoder backend",
+  "type": "feature"
+}

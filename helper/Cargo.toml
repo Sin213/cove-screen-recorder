@@ -33,3 +33,7 @@ tempfile = "3"
 [[test]]
 name = "nvenc_windows"
 path = "tests/nvenc_windows.rs"
+
+[[test]]
+name = "amf_windows"
+path = "tests/amf_windows.rs"
