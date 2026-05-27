@@ -3,6 +3,7 @@ pub mod pipewire;
 pub mod dxgi;
 pub mod selector;
 pub mod wgc;
+pub mod windows_pacing;
 
 use tokio::sync::mpsc;
 

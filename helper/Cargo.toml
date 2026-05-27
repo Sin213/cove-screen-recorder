@@ -41,3 +41,7 @@ path = "tests/amf_windows.rs"
 [[test]]
 name = "qsv_windows"
 path = "tests/qsv_windows.rs"
+
+[[test]]
+name = "windows_pacing"
+path = "tests/windows_pacing.rs"
