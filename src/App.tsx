@@ -372,12 +372,13 @@ export function App() {
     async (cropRect: CropRect) => {
       if (!pendingCrop) return;
       const { stream: acquired, preset: presetId } = pendingCrop;
+      // Step 1: unmount the overlay — nothing else changes this render.
       setPendingCrop(null);
+      // Step 2: wait for React to paint the removal + compositor settle.
+      await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 200)));
+      // Step 3: now transition to recording state.
       setStatus("preparing");
       setLastError(null);
-      // Let React flush the CropOverlay removal and the compositor
-      // settle so the overlay never appears in the first captured frames.
-      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 150)));
       try {
         const dir = outputDir ?? "";
         const session = await startCaptureFromAcquiredStream(acquired, {
