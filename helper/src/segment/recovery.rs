@@ -192,9 +192,19 @@ pub fn discard_recovered_session(session_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the segments root path per XDG conventions.
-/// Prefers `$XDG_RUNTIME_DIR/cove-screen-recorder/segments/`.
-/// Falls back to `$XDG_CACHE_HOME/cove-screen-recorder/segments/`.
+/// Resolve the segments root path.
+///
+/// On Windows: `%LOCALAPPDATA%\Cove\segments` (falls back to `%TEMP%\Cove\segments`).
+/// On Linux/macOS: XDG conventions — `$XDG_RUNTIME_DIR`, then `$XDG_CACHE_HOME`, then
+/// `~/.cache/cove-screen-recorder/segments`.
+#[cfg(windows)]
+pub fn resolve_segments_root() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+    PathBuf::from(base).join("Cove").join("segments")
+}
+
+#[cfg(not(windows))]
 pub fn resolve_segments_root() -> PathBuf {
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         return PathBuf::from(runtime_dir)

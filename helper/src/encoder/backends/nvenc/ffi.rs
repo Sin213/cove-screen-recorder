@@ -240,3 +240,76 @@ pub const NV_ENC_BUFFER_FORMAT_ARGB: u32 = 0x01000000;
 /// Returned by nvEncEncodePicture when the encoder is buffering B-frames;
 /// not an error, just means no output is ready yet.
 pub const NV_ENC_ERR_NEED_MORE_INPUT: NVENCSTATUS = 17;
+
+// ── D3D11 interop types and structs (SDK 12.1) ────────────────────────────────
+
+/// `NV_ENC_DEVICE_TYPE_DIRECTX` — pass D3D11 device to nvEncOpenEncodeSessionEx.
+pub const NV_ENC_DEVICE_TYPE_DIRECTX: NV_ENC_DEVICE_TYPE = 0;
+
+pub type NV_ENC_INPUT_RESOURCE_TYPE = u32;
+pub const NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX: NV_ENC_INPUT_RESOURCE_TYPE = 1;
+
+/// Type alias for buffer format constants already defined above.
+pub type NV_ENC_BUFFER_FORMAT = u32;
+
+pub type NV_ENC_BUFFER_USAGE = u32;
+pub const NV_ENC_INPUT_IMAGE: NV_ENC_BUFFER_USAGE = 0;
+
+/// `NV_ENC_REGISTER_RESOURCE` — sent to nvEncRegisterResource.
+///
+/// Sized per SDK 12.1.  pInputFencePoint/pOutputFencePoint are SDK 12.2-only
+/// and must NOT appear here.
+///
+/// Layout (x86-64, repr(C)):
+///   named fields = 48 bytes, reserved1[247] = 988 bytes → offset 1036.
+///   4-byte padding to align pointer array → reserved2 starts at 1040.
+///   59 × 8 = 472 bytes → total 1512 bytes.
+#[repr(C)]
+pub struct NV_ENC_REGISTER_RESOURCE {
+    pub version: u32,
+    pub resourceType: NV_ENC_INPUT_RESOURCE_TYPE,
+    pub width: u32,
+    pub height: u32,
+    pub pitch: u32,
+    pub subResourceIndex: u32,
+    pub resourceToRegister: *mut c_void,  // ID3D11Texture2D*
+    pub registeredResource: *mut c_void,  // out: NV_ENC_REGISTERED_PTR
+    pub bufferFormat: NV_ENC_BUFFER_FORMAT,
+    pub bufferUsage: NV_ENC_BUFFER_USAGE,
+    pub reserved1: [u32; 247],
+    pub reserved2: [*mut c_void; 59],
+}
+
+pub const NV_ENC_REGISTER_RESOURCE_VER: u32 = nvencapi_struct_version(4);
+const _: () = assert!(std::mem::size_of::<NV_ENC_REGISTER_RESOURCE>() == 1512);
+
+/// `NV_ENC_MAP_INPUT_RESOURCE` — sent to nvEncMapInputResource.
+///
+/// Layout (x86-64, repr(C)):
+///   named fields = 28 bytes, reserved1[251] = 1004 bytes → offset 1032 (8-aligned).
+///   No padding needed → reserved2 starts at 1032.
+///   64 × 8 = 512 bytes → total 1544 bytes.
+///   (Matches NV_ENC_LOCK_INPUT_BUFFER which has the same layout.)
+#[repr(C)]
+pub struct NV_ENC_MAP_INPUT_RESOURCE {
+    pub version: u32,
+    pub subResourceIndex: u32,
+    pub inputResource: *mut c_void,   // NV_ENC_REGISTERED_PTR (from register)
+    pub mappedResource: *mut c_void,  // out: NV_ENC_INPUT_PTR
+    pub mappedBufferFmt: NV_ENC_BUFFER_FORMAT,
+    pub reserved1: [u32; 251],
+    pub reserved2: [*mut c_void; 64],
+}
+
+pub const NV_ENC_MAP_INPUT_RESOURCE_VER: u32 = nvencapi_struct_version(4);
+const _: () = assert!(std::mem::size_of::<NV_ENC_MAP_INPUT_RESOURCE>() == 1544);
+
+// Typed function pointer aliases for D3D11 path.
+pub type FnNvEncRegisterResource =
+    unsafe extern "C" fn(*mut c_void, *mut NV_ENC_REGISTER_RESOURCE) -> NVENCSTATUS;
+pub type FnNvEncUnregisterResource =
+    unsafe extern "C" fn(*mut c_void, *mut c_void) -> NVENCSTATUS;
+pub type FnNvEncMapInputResource =
+    unsafe extern "C" fn(*mut c_void, *mut NV_ENC_MAP_INPUT_RESOURCE) -> NVENCSTATUS;
+pub type FnNvEncUnmapInputResource =
+    unsafe extern "C" fn(*mut c_void, *mut c_void) -> NVENCSTATUS;

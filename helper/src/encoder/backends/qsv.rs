@@ -113,7 +113,7 @@ impl EncoderBackend for QsvBackend {
 
     #[cfg(any(unix, windows))]
     async fn push_frame(&mut self, _frame: FrameHandle) -> Result<(), EncoderError> {
-        Err(EncoderError::NotImplementedYet("qsv-windows-push-frame".into()))
+        Err(EncoderError::NotImplementedYet("qsv-d3d11-interop-deferred".into()))
     }
 
     #[cfg(any(unix, windows))]

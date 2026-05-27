@@ -42,15 +42,15 @@
 
 pub mod backend;
 pub mod backends;
+#[cfg(windows)]
+pub mod d3d11_device;
 pub mod fragment;
 pub mod gpu_detect;
 pub mod h264;
 pub mod probe;
 // `session` consumes `crate::capture::FrameReceiver` and exercises the
-// `EncoderBackend::push_frame` / `drain` / `configure` methods, all of which
-// are `#[cfg(unix)]`.  Matching that boundary keeps Windows helper builds
-// green; the real encoder pipeline only runs on unix targets today.
-#[cfg(unix)]
+// `EncoderBackend::push_frame` / `drain` / `configure` methods.
+#[cfg(any(unix, windows))]
 pub mod session;
 
 pub use backend::{
@@ -58,7 +58,7 @@ pub use backend::{
 };
 pub use fragment::{CountingFragmentSink, EncodedFragment, FragmentSink, FragmentSinkError};
 pub use probe::{build_probe_event, run_probes, NegativeProbeCache, ProbeSession};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub use session::{EncoderSession, SessionCounters, SessionExit};
 
 use crate::protocol::events::{EncoderFallbackEvent, EncoderSelectedEvent, SessionLostEvent};
@@ -243,20 +243,23 @@ pub async fn run_session(
     }
 }
 
-/// Drive a single encoder session on Windows (T-056).
+/// Drive a single encoder session on Windows (T-056/T-057).
 ///
 /// Enumerates DXGI adapters to determine GPU vendor, orders backends with the
-/// vendor-native encoder first, runs probes, and emits `encoder.probeResult` +
-/// `encoder.selected`.  Actual encoding (configure/push_frame/drain) is T-057.
+/// vendor-native encoder first, runs probes, emits `encoder.probeResult` +
+/// `encoder.selected`, then runs the full EncoderSession encode loop.
 #[cfg(windows)]
 pub async fn run_session(
     mut rx: crate::capture::FrameReceiver,
     notifier: Notifier,
     stream_id: String,
-    _session_id: String,   // TODO(T-057): wire SegmentBuffer (replay.save non-functional until then)
+    session_id: String,
     format: CaptureFormat,
-    _state: crate::engine::SharedState,  // TODO(T-057): set active_segment_buffer
+    state: crate::engine::SharedState,
 ) {
+    // Clear stale segment buffer from previous session.
+    *state.active_segment_buffer.lock().await = None;
+
     // Emit GPU adapter diagnostics.
     let adapters = gpu_detect::detect_gpu_adapters();
     if let Ok(v) = serde_json::to_value(&adapters) {
@@ -292,7 +295,7 @@ pub async fn run_session(
 
             let selected_evt = EncoderSelectedEvent {
                 backend: selected_name.clone(),
-                codec: selected_codec,
+                codec: selected_codec.clone(),
                 parameters: serde_json::json!({
                     "stream_id": stream_id,
                     "width": format.width,
@@ -306,8 +309,61 @@ pub async fn run_session(
             if let Ok(v) = serde_json::to_value(&selected_evt) {
                 let _ = notifier.notify("encoder.selected", v).await;
             }
-            // Encoding pipeline (configure/push_frame/drain) deferred to T-057.
-            while rx.recv().await.is_some() {}
+
+            let backend = backends.swap_remove(idx);
+            drop(backends);
+
+            let segments_root = crate::segment::recovery::resolve_segments_root();
+            let session_dir = segments_root.join(&session_id);
+            let sink = match crate::segment::buffer::SegmentBuffer::new(
+                session_id.clone(),
+                Some(stream_id.clone()),
+                &session_dir,
+                crate::segment::buffer::SegmentBufferConfig::default(),
+                notifier.clone(),
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to create segment buffer");
+                    let evt = crate::protocol::events::SessionLostEvent {
+                        session_id: session_id.clone(),
+                        stream_id: Some(stream_id.clone()),
+                        reason: "segment-sink-state-dir-unwritable".into(),
+                        details: e.to_string(),
+                        diagnostics_path: String::new(),
+                    };
+                    if let Ok(v) = serde_json::to_value(&evt) {
+                        let _ = notifier.try_notify("capture.sessionLost", v);
+                    }
+                    while rx.recv().await.is_some() {}
+                    return;
+                }
+            };
+
+            let cfg = EncoderConfig {
+                format: format.clone(),
+                target_bitrate_bps: 5_000_000,
+                gop_seconds: 2.0,
+            };
+
+            let buffer_handle = sink.clone_handle();
+            let codec = match selected_codec.as_str() {
+                "hevc" => crate::protocol::types::VideoCodec::Hevc,
+                _ => crate::protocol::types::VideoCodec::H264,
+            };
+            *state.active_segment_buffer.lock().await = Some(crate::engine::SessionBufferInfo {
+                buffer: buffer_handle,
+                session_id: session_id.clone(),
+                codec,
+                width: format.width,
+                height: format.height,
+                fps_num: format.fps_num,
+                fps_den: format.fps_den,
+            });
+
+            let _ = EncoderSession::new(backend, sink, notifier, cfg)
+                .run(rx)
+                .await;
         }
         None => {
             while rx.recv().await.is_some() {}

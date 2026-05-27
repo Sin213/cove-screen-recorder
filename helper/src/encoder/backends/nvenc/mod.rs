@@ -166,11 +166,13 @@ fn convert_packed_bgra_to_nv12(
 
 struct EncodeSession {
     /// Loaded libraries kept alive for the lifetime of the session.
-    _cuda_lib: Library,
+    /// Option because the D3D11 path does not load CUDA; None = skip drop.
+    _cuda_lib: Option<Library>,
     _nvenc_lib: Library,
 
     cuda_ctx: CUcontext,
-    cu_ctx_destroy: FnCuCtxDestroy,
+    /// None on the D3D11 path (no CUDA context to destroy).
+    cu_ctx_destroy: Option<FnCuCtxDestroy>,
 
     encoder: *mut c_void,
     fn_list: NV_ENCODE_API_FUNCTION_LIST,
@@ -755,10 +757,10 @@ impl EncoderBackend for NvencBackend {
         }
 
         self.session = Some(Box::new(EncodeSession {
-            _cuda_lib: cuda_lib,
+            _cuda_lib: Some(cuda_lib),
             _nvenc_lib: nvenc_lib,
             cuda_ctx,
-            cu_ctx_destroy,
+            cu_ctx_destroy: Some(cu_ctx_destroy),
             encoder,
             fn_list,
             cfg,
@@ -1091,7 +1093,10 @@ impl EncoderBackend for NvencBackend {
             let lock_status = unsafe { lock_bs(sess.encoder, &mut lock_params) };
             if lock_status != NV_ENC_SUCCESS {
                 // Destroy buffers even on failure.
-                unsafe { destroy_in(sess.encoder, pf.input_buf) };
+                // input_buf is null for D3D11 frames (texture unmap/unregister already done).
+                if !pf.input_buf.is_null() {
+                    unsafe { destroy_in(sess.encoder, pf.input_buf) };
+                }
                 unsafe { destroy_out(sess.encoder, pf.output_buf) };
                 return Err(EncoderError::Runtime(format!("lock-bitstream-failed:{lock_status}")));
             }
@@ -1123,7 +1128,9 @@ impl EncoderBackend for NvencBackend {
             }
 
             unsafe { unlock_bs(sess.encoder, pf.output_buf) };
-            unsafe { destroy_in(sess.encoder, pf.input_buf) };
+            if !pf.input_buf.is_null() {
+                unsafe { destroy_in(sess.encoder, pf.input_buf) };
+            }
             unsafe { destroy_out(sess.encoder, pf.output_buf) };
 
             if au_bytes.is_empty() {
@@ -1160,7 +1167,9 @@ impl EncoderBackend for NvencBackend {
             if let Some(destroy) = sess.fn_list.nvEncDestroyEncoder {
                 unsafe { destroy(sess.encoder) };
             }
-            unsafe { (sess.cu_ctx_destroy)(sess.cuda_ctx) };
+            if let Some(destroy_ctx) = sess.cu_ctx_destroy {
+                unsafe { destroy_ctx(sess.cuda_ctx) };
+            }
         }
         Ok(())
     }
@@ -1219,7 +1228,7 @@ fn find_nal_end(data: &[u8], from: usize) -> Option<usize> {
 unsafe impl Send for NvencBackend {}
 unsafe impl Sync for NvencBackend {}
 
-// ── Windows stub impl ─────────────────────────────────────────────────────────
+// ── Windows impl ──────────────────────────────────────────────────────────────
 
 #[cfg(windows)]
 #[async_trait]
@@ -1309,22 +1318,347 @@ impl EncoderBackend for NvencBackend {
         }
     }
 
-    #[cfg(any(unix, windows))]
-    async fn configure(&mut self, _cfg: EncoderConfig) -> Result<(), EncoderError> {
-        Err(EncoderError::NotImplementedYet("nvenc-windows-configure".into()))
+    async fn configure(&mut self, cfg: EncoderConfig) -> Result<(), EncoderError> {
+        use crate::encoder::d3d11_device::shared_device;
+        use windows::core::Interface as _;
+
+        let d3d = shared_device()
+            .map_err(|e| EncoderError::Runtime(format!("d3d11-device-failed:{e}")))?;
+
+        let nvenc_lib = unsafe { Library::new("nvEncodeAPI64.dll") }
+            .map_err(|e| EncoderError::Runtime(format!("nvenc-load-failed:{e}")))?;
+        let fn_list = load_nvenc(&nvenc_lib)
+            .map_err(EncoderError::Runtime)?;
+
+        let open_session = fn_list.nvEncOpenEncodeSessionEx
+            .ok_or_else(|| EncoderError::Runtime("null-open-fn".into()))?;
+
+        // Pass the D3D11 device COM pointer; use DIRECTX device type.
+        let device_ptr: *mut c_void = d3d.device.as_raw() as *mut c_void;
+        let mut params = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS {
+            version: NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER,
+            deviceType: NV_ENC_DEVICE_TYPE_DIRECTX,
+            device: device_ptr,
+            reserved: ptr::null_mut(),
+            apiVersion: NVENCAPI_VERSION,
+            reserved1: [0u32; 253],
+            reserved2: [ptr::null_mut(); 64],
+        };
+
+        let mut encoder: *mut c_void = ptr::null_mut();
+        let status = unsafe { open_session(&mut params, &mut encoder) };
+        if status != NV_ENC_SUCCESS {
+            return Err(EncoderError::Runtime(format!("session-create-failed:{status}")));
+        }
+
+        let init_fn: FnNvEncInitializeEncoder = unsafe {
+            std::mem::transmute(fn_list.nvEncInitializeEncoder)
+        };
+        let enc_width = align16(cfg.format.width);
+        let enc_height = align16(cfg.format.height);
+        let fps_num = nominal_fps_num(cfg.format.fps_num);
+        let fps_den = cfg.format.fps_den.max(1);
+        let gop_size = ((fps_num as f32 / fps_den as f32) * cfg.gop_seconds).round() as u32;
+
+        let mut init_params = unsafe { std::mem::zeroed::<NV_ENC_INITIALIZE_PARAMS>() };
+        init_params.version = NV_ENC_INITIALIZE_PARAMS_VER;
+        init_params.encodeGUID = GUID::from_bytes(NV_ENC_CODEC_H264_GUID);
+        init_params.presetGUID = GUID::from_bytes(NV_ENC_PRESET_P4_GUID);
+        init_params.encodeWidth = enc_width;
+        init_params.encodeHeight = enc_height;
+        init_params.darWidth = cfg.format.width;
+        init_params.darHeight = cfg.format.height;
+        init_params.frameRateNum = fps_num;
+        init_params.frameRateDen = fps_den;
+        init_params.enablePTD = 1;
+        init_params.maxEncodeWidth = enc_width;
+        init_params.maxEncodeHeight = enc_height;
+        init_params.tuningInfo = NV_ENC_TUNING_INFO_LOW_LATENCY;
+
+        let init_status = unsafe { init_fn(encoder, &mut init_params) };
+        if init_status != NV_ENC_SUCCESS {
+            if let Some(destroy) = fn_list.nvEncDestroyEncoder {
+                unsafe { destroy(encoder) };
+            }
+            return Err(EncoderError::Runtime(format!("nvenc-init-failed:{init_status}")));
+        }
+
+        self.session = Some(Box::new(EncodeSession {
+            _cuda_lib: None,            // D3D11 path: no CUDA
+            _nvenc_lib: nvenc_lib,
+            cuda_ctx: ptr::null_mut(),
+            cu_ctx_destroy: None,       // D3D11 path: no CUDA context to destroy
+            encoder,
+            fn_list,
+            cfg,
+            seq: 0,
+            dts_90k: 0,
+            sps: None,
+            pps: None,
+            pending_frames: Vec::new(),
+            enc_width,
+            enc_height,
+            gop_size: gop_size.max(1),
+            frame_count: 0,
+            conv_total_us: 0,
+            conv_max_us: 0,
+            conv_gop_frames: 0,
+        }));
+        Ok(())
     }
 
-    #[cfg(any(unix, windows))]
-    async fn push_frame(&mut self, _frame: FrameHandle) -> Result<(), EncoderError> {
-        Err(EncoderError::NotImplementedYet("nvenc-windows-push-frame".into()))
+    async fn push_frame(&mut self, frame: FrameHandle) -> Result<(), EncoderError> {
+        match &frame.payload {
+            crate::capture::FramePayload::D3D11Texture {
+                texture_ptr, width: _, height: _, dxgi_format, subresource,
+            } => {
+                self.push_frame_d3d11(*texture_ptr, *dxgi_format, *subresource, &frame)
+            }
+            crate::capture::FramePayload::Shm { .. } => {
+                Err(EncoderError::NotImplementedYet("nvenc-windows-shm-path".into()))
+            }
+        }
     }
 
-    #[cfg(any(unix, windows))]
     async fn drain(&mut self) -> Result<Vec<EncodedFragment>, EncoderError> {
-        Err(EncoderError::NotImplementedYet("nvenc-windows-drain".into()))
+        let sess = self.session.as_mut()
+            .ok_or_else(|| EncoderError::Runtime("drain before configure".into()))?;
+
+        let lock_bs: FnNvEncLockBitstream = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncLockBitstream)
+        };
+        let unlock_bs: FnNvEncUnlockBitstream = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncUnlockBitstream)
+        };
+        let destroy_out: FnNvEncDestroyBitstreamBuffer = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncDestroyBitstreamBuffer)
+        };
+
+        let mut fragments = Vec::new();
+        let pending = std::mem::take(&mut sess.pending_frames);
+
+        for pf in pending {
+            let mut lock_params = unsafe { std::mem::zeroed::<NV_ENC_LOCK_BITSTREAM>() };
+            lock_params.version = NV_ENC_LOCK_BITSTREAM_VER;
+            lock_params.outputBitstream = pf.output_buf;
+
+            let lock_status = unsafe { lock_bs(sess.encoder, &mut lock_params) };
+            if lock_status != NV_ENC_SUCCESS {
+                unsafe { destroy_out(sess.encoder, pf.output_buf) };
+                return Err(EncoderError::Runtime(format!("lock-bitstream-failed:{lock_status}")));
+            }
+
+            let bs_ptr = lock_params.bitstreamBufferPtr as *const u8;
+            let bs_size = lock_params.bitstreamSizeInBytes as usize;
+            let au_bytes = if !bs_ptr.is_null() && bs_size > 0 {
+                unsafe { std::slice::from_raw_parts(bs_ptr, bs_size).to_vec() }
+            } else {
+                Vec::new()
+            };
+
+            let picture_type_raw: u32 = lock_params.pictureType;
+            let nal_counts = scan_nal_types(&au_bytes);
+            let nal_is_keyframe = nal_counts.idr > 0;
+
+            if sess.sps.is_none() {
+                if let Some((sps, pps)) = extract_sps_pps(&au_bytes) {
+                    sess.sps = Some(sps);
+                    sess.pps = Some(pps);
+                }
+            }
+
+            unsafe { unlock_bs(sess.encoder, pf.output_buf) };
+            unsafe { destroy_out(sess.encoder, pf.output_buf) };
+
+            if au_bytes.is_empty() {
+                continue;
+            }
+
+            sess.seq += 1;
+            let frag_bytes = fmp4::build_fragment(
+                sess.seq,
+                pf.pts_90k,
+                pf.duration_90k,
+                nal_is_keyframe,
+                &au_bytes,
+            );
+
+            fragments.push(EncodedFragment {
+                seq: sess.seq,
+                pts_90k: pf.pts_90k,
+                duration_90k: pf.duration_90k,
+                is_keyframe: nal_is_keyframe,
+                bytes: frag_bytes,
+                diagnostics: FragmentDiagnostics {
+                    nal_counts,
+                    picture_type: picture_type_raw,
+                },
+            });
+        }
+
+        Ok(fragments)
     }
 
     async fn teardown(&mut self) -> Result<(), EncoderError> {
+        if let Some(sess) = self.session.take() {
+            if let Some(destroy) = sess.fn_list.nvEncDestroyEncoder {
+                unsafe { destroy(sess.encoder) };
+            }
+            // cu_ctx_destroy is None on the D3D11 path; no CUDA context to clean up.
+        }
+        Ok(())
+    }
+}
+
+// ── D3D11 zero-copy push helper ────────────────────────────────────────────────
+
+#[cfg(windows)]
+impl NvencBackend {
+    /// Register, map, encode, unmap, and unregister one D3D11 texture.
+    ///
+    /// The input texture is NOT owned by NVENC; we borrow it for one frame submission.
+    /// After `nvEncEncodePicture` returns the GPU has ingested the surface data, so it is
+    /// safe to unmap/unregister immediately.  The output bitstream buffer is kept alive
+    /// in `pending_frames` for `drain()` to retrieve.
+    fn push_frame_d3d11(
+        &mut self,
+        texture_ptr: *mut c_void,
+        dxgi_format: u32,
+        subresource: u32,
+        frame: &FrameHandle,
+    ) -> Result<(), EncoderError> {
+        let sess = self.session.as_mut()
+            .ok_or_else(|| EncoderError::Runtime("push_frame before configure".into()))?;
+
+        let register_fn: FnNvEncRegisterResource = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncRegisterResource)
+        };
+        let unregister_fn: FnNvEncUnregisterResource = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncUnregisterResource)
+        };
+        let map_fn: FnNvEncMapInputResource = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncMapInputResource)
+        };
+        let unmap_fn: FnNvEncUnmapInputResource = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncUnmapInputResource)
+        };
+
+        // DXGI_FORMAT_B8G8R8A8_UNORM = 87 maps to NV_ENC_BUFFER_FORMAT_ARGB.
+        // All other formats fall back to NV12 (encoder performs CSC internally).
+        let buf_fmt: NV_ENC_BUFFER_FORMAT = if dxgi_format == 87 {
+            NV_ENC_BUFFER_FORMAT_ARGB
+        } else {
+            NV_ENC_BUFFER_FORMAT_NV12
+        };
+
+        // 1. Register the D3D11 texture as an NVENC input resource.
+        let mut reg = NV_ENC_REGISTER_RESOURCE {
+            version: NV_ENC_REGISTER_RESOURCE_VER,
+            resourceType: NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX,
+            width: sess.enc_width,
+            height: sess.enc_height,
+            pitch: 0,
+            subResourceIndex: subresource,
+            resourceToRegister: texture_ptr,
+            registeredResource: ptr::null_mut(),
+            bufferFormat: buf_fmt,
+            bufferUsage: NV_ENC_INPUT_IMAGE,
+            reserved1: [0u32; 247],
+            reserved2: [ptr::null_mut(); 59],
+        };
+        let reg_status = unsafe { register_fn(sess.encoder, &mut reg) };
+        if reg_status != NV_ENC_SUCCESS {
+            return Err(EncoderError::Runtime(
+                format!("nvenc-register-resource-failed:{reg_status}")
+            ));
+        }
+        let registered = reg.registeredResource;
+
+        // 2. Map the registered resource to get a NV_ENC_INPUT_PTR.
+        let mut map_params = NV_ENC_MAP_INPUT_RESOURCE {
+            version: NV_ENC_MAP_INPUT_RESOURCE_VER,
+            subResourceIndex: 0,
+            inputResource: registered,
+            mappedResource: ptr::null_mut(),
+            mappedBufferFmt: buf_fmt,
+            reserved1: [0u32; 251],
+            reserved2: [ptr::null_mut(); 64],
+        };
+        let map_status = unsafe { map_fn(sess.encoder, &mut map_params) };
+        if map_status != NV_ENC_SUCCESS {
+            unsafe { unregister_fn(sess.encoder, registered) };
+            return Err(EncoderError::Runtime(
+                format!("nvenc-map-resource-failed:{map_status}")
+            ));
+        }
+        let mapped = map_params.mappedResource;
+
+        // 3. Allocate an output bitstream buffer.
+        let create_bs_buf: FnNvEncCreateBitstreamBuffer = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncCreateBitstreamBuffer)
+        };
+        let mut create_out = unsafe { std::mem::zeroed::<NV_ENC_CREATE_BITSTREAM_BUFFER>() };
+        create_out.version = NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
+        let bs_status = unsafe { create_bs_buf(sess.encoder, &mut create_out) };
+        if bs_status != NV_ENC_SUCCESS {
+            unsafe { unmap_fn(sess.encoder, mapped) };
+            unsafe { unregister_fn(sess.encoder, registered) };
+            return Err(EncoderError::Runtime(
+                format!("create-bitstream-buffer-failed:{bs_status}")
+            ));
+        }
+        let output_buf = create_out.bitstreamBuffer;
+
+        // 4. Submit the frame to the encoder.
+        let encode_pic: FnNvEncEncodePicture = unsafe {
+            std::mem::transmute(sess.fn_list.nvEncEncodePicture)
+        };
+        let fps_num = nominal_fps_num(sess.cfg.format.fps_num);
+        let fps_den = sess.cfg.format.fps_den.max(1);
+        let duration_90k = ((90_000 * fps_den) / fps_num) as u32;
+        let candidate = ns_to_pts_90k(frame.pts_ns);
+        let pts_90k = next_monotonic_pts(candidate, sess.dts_90k);
+        let is_idr_boundary = sess.frame_count % sess.gop_size as u64 == 0;
+
+        let mut pic_params = unsafe { std::mem::zeroed::<NV_ENC_PIC_PARAMS>() };
+        pic_params.version = NV_ENC_PIC_PARAMS_VER;
+        pic_params.inputWidth = sess.enc_width;
+        pic_params.inputHeight = sess.enc_height;
+        pic_params.inputPitch = 0; // pitch derived from registered resource
+        pic_params.inputBuffer = mapped;
+        pic_params.outputBitstream = output_buf;
+        pic_params.bufferFmt = buf_fmt;
+        pic_params.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
+        pic_params.inputTimeStamp = pts_90k;
+        if is_idr_boundary {
+            pic_params.encodePicFlags |= NV_ENC_PIC_FLAG_FORCEIDR;
+        }
+
+        let enc_status = unsafe { encode_pic(sess.encoder, &mut pic_params) };
+
+        // 5. Unmap and unregister regardless of encode status (texture is no longer needed).
+        unsafe { unmap_fn(sess.encoder, mapped) };
+        unsafe { unregister_fn(sess.encoder, registered) };
+
+        if enc_status != NV_ENC_SUCCESS {
+            unsafe {
+                let destroy_out: FnNvEncDestroyBitstreamBuffer =
+                    std::mem::transmute(sess.fn_list.nvEncDestroyBitstreamBuffer);
+                destroy_out(sess.encoder, output_buf);
+            }
+            return Err(EncoderError::Runtime(format!("encode-picture-failed:{enc_status}")));
+        }
+
+        // input_buf is null: D3D11 texture was already unregistered above; drain() skips
+        // nvEncDestroyInputBuffer for null input_buf.
+        sess.pending_frames.push(PendingFrame {
+            input_buf: ptr::null_mut(),
+            output_buf,
+            pts_90k,
+            duration_90k,
+        });
+        sess.dts_90k = pts_90k;
+        sess.frame_count += 1;
         Ok(())
     }
 }

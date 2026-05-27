@@ -83,7 +83,7 @@ impl EncoderBackend for AmfBackend {
 
     #[cfg(any(unix, windows))]
     async fn push_frame(&mut self, _frame: FrameHandle) -> Result<(), EncoderError> {
-        Err(EncoderError::NotImplementedYet("amf-windows-push-frame".into()))
+        Err(EncoderError::NotImplementedYet("amf-d3d11-interop-deferred".into()))
     }
 
     #[cfg(any(unix, windows))]
