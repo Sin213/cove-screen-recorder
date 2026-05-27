@@ -38,17 +38,64 @@ impl EncoderBackend for QsvBackend {
                 details: serde_json::Value::Null,
             };
         }
-        // Real probe (MFXCreateSession / VPL dispatcher init) deferred.
-        ProbeOutcome::Unavailable {
-            reason: "not-implemented-yet: qsv-windows-probe".into(),
-            details: serde_json::json!({
-                "eventual_capabilities": {
-                    "accepts_d3d11": true,
-                    "accepts_dmabuf": false,
-                    "accepts_shm": false,
-                    "supported_codecs": ["h264", "hevc"]
+
+        // Path 1: Intel oneVPL dispatcher ("vpl.dll" on Windows).
+        if let Ok(lib) = unsafe { libloading::Library::new("vpl.dll") } {
+            type MfxLoadFn = unsafe extern "C" fn() -> *mut std::ffi::c_void;
+            type MfxCreateSessionFn =
+                unsafe extern "C" fn(*mut std::ffi::c_void, u32, *mut *mut std::ffi::c_void) -> i32;
+            type MfxUnloadFn = unsafe extern "C" fn(*mut std::ffi::c_void);
+            if let (Ok(mfx_load), Ok(mfx_create), Ok(mfx_unload)) = (
+                unsafe { lib.get::<MfxLoadFn>(b"MFXLoad\0") },
+                unsafe { lib.get::<MfxCreateSessionFn>(b"MFXCreateSession\0") },
+                unsafe { lib.get::<MfxUnloadFn>(b"MFXUnload\0") },
+            ) {
+                let loader = unsafe { mfx_load() };
+                if !loader.is_null() {
+                    let mut session: *mut std::ffi::c_void = std::ptr::null_mut();
+                    let status = unsafe { mfx_create(loader, 0, &mut session) };
+                    unsafe { mfx_unload(loader) };
+                    if status == 0 {
+                        return ProbeOutcome::Available {
+                            capabilities: crate::encoder::backend::EncoderCapabilities {
+                                accepts_dmabuf: false,
+                                accepts_shm: true,
+                                accepts_d3d11: true,
+                                supported_codecs: vec!["h264".into(), "hevc".into()],
+                            },
+                            details: serde_json::json!({ "platform": "windows", "api": "vpl" }),
+                        };
+                    }
                 }
-            }),
+            }
+        }
+
+        // Path 2: Legacy Intel Media SDK ("libmfxhw64.dll" exports MFXInit, not MFXLoad).
+        if let Ok(lib) = unsafe { libloading::Library::new("libmfxhw64.dll") } {
+            type MfxInitFn =
+                unsafe extern "C" fn(i32, *mut [u16; 2], *mut *mut std::ffi::c_void) -> i32;
+            if let Ok(mfx_init) = unsafe { lib.get::<MfxInitFn>(b"MFXInit\0") } {
+                let mut ver: [u16; 2] = [0, 1]; // [minor=0, major=1]
+                let mut session: *mut std::ffi::c_void = std::ptr::null_mut();
+                const MFX_IMPL_AUTO_ANY: i32 = 3;
+                let status = unsafe { mfx_init(MFX_IMPL_AUTO_ANY, &mut ver, &mut session) };
+                if status == 0 {
+                    return ProbeOutcome::Available {
+                        capabilities: crate::encoder::backend::EncoderCapabilities {
+                            accepts_dmabuf: false,
+                            accepts_shm: true,
+                            accepts_d3d11: true,
+                            supported_codecs: vec!["h264".into()],
+                        },
+                        details: serde_json::json!({ "platform": "windows", "api": "msdk" }),
+                    };
+                }
+            }
+        }
+
+        ProbeOutcome::Unavailable {
+            reason: "qsv-not-available-on-this-system".into(),
+            details: serde_json::Value::Null,
         }
     }
 

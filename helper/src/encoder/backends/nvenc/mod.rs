@@ -1234,16 +1234,77 @@ impl EncoderBackend for NvencBackend {
                 details: serde_json::Value::Null,
             };
         }
-        // Real probe (load nvEncodeAPI64.dll, test CUDA context) deferred.
-        ProbeOutcome::Unavailable {
-            reason: "not-implemented-yet: nvenc-windows-probe".into(),
+
+        // 1. Load nvcuda.dll (CUDA runtime on Windows).
+        let cuda_lib = match unsafe { libloading::Library::new("nvcuda.dll") } {
+            Ok(l) => l,
+            Err(e) => return ProbeOutcome::Unavailable {
+                reason: format!("cuda-load-failed:{e}"),
+                details: serde_json::Value::Null,
+            },
+        };
+
+        // 2. Call cuInit to confirm CUDA is initializable.
+        let cu_init: libloading::Symbol<unsafe extern "C" fn(u32) -> i32> =
+            match unsafe { cuda_lib.get(b"cuInit\0") } {
+                Ok(s) => s,
+                Err(e) => return ProbeOutcome::Unavailable {
+                    reason: format!("cuInit-symbol-missing:{e}"),
+                    details: serde_json::Value::Null,
+                },
+            };
+        let status = unsafe { cu_init(0) };
+        if status != 0 {
+            return ProbeOutcome::Unavailable {
+                reason: format!("cuInit-failed:{status}"),
+                details: serde_json::Value::Null,
+            };
+        }
+
+        // 3. Check at least one CUDA device is present.
+        let cu_device_get_count: libloading::Symbol<unsafe extern "C" fn(*mut i32) -> i32> =
+            match unsafe { cuda_lib.get(b"cuDeviceGetCount\0") } {
+                Ok(s) => s,
+                Err(_) => return ProbeOutcome::Unavailable {
+                    reason: "cuDeviceGetCount-missing".into(),
+                    details: serde_json::Value::Null,
+                },
+            };
+        let mut count: i32 = 0;
+        if unsafe { cu_device_get_count(&mut count) } != 0 || count == 0 {
+            return ProbeOutcome::Unavailable {
+                reason: "no-cuda-device".into(),
+                details: serde_json::Value::Null,
+            };
+        }
+
+        // 4. Load nvEncodeAPI64.dll and confirm NvEncodeAPICreateInstance is exported.
+        let nvenc_lib = match unsafe { libloading::Library::new("nvEncodeAPI64.dll") } {
+            Ok(l) => l,
+            Err(e) => return ProbeOutcome::Unavailable {
+                reason: format!("nvenc-load-failed:{e}"),
+                details: serde_json::Value::Null,
+            },
+        };
+        let _create: libloading::Symbol<unsafe extern "C" fn(*mut std::ffi::c_void) -> u32> =
+            match unsafe { nvenc_lib.get(b"NvEncodeAPICreateInstance\0") } {
+                Ok(s) => s,
+                Err(e) => return ProbeOutcome::Unavailable {
+                    reason: format!("NvEncodeAPICreateInstance-missing:{e}"),
+                    details: serde_json::Value::Null,
+                },
+            };
+
+        ProbeOutcome::Available {
+            capabilities: crate::encoder::backend::EncoderCapabilities {
+                accepts_dmabuf: false,
+                accepts_shm: true,
+                accepts_d3d11: true,
+                supported_codecs: vec!["h264".into()],
+            },
             details: serde_json::json!({
-                "eventual_capabilities": {
-                    "accepts_d3d11": true,
-                    "accepts_dmabuf": false,
-                    "accepts_shm": false,
-                    "supported_codecs": ["h264"]
-                }
+                "platform": "windows",
+                "accepts_d3d11": true,
             }),
         }
     }

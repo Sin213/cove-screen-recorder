@@ -43,6 +43,7 @@
 pub mod backend;
 pub mod backends;
 pub mod fragment;
+pub mod gpu_detect;
 pub mod h264;
 pub mod probe;
 // `session` consumes `crate::capture::FrameReceiver` and exercises the
@@ -73,6 +74,31 @@ pub fn default_backends() -> Vec<Box<dyn EncoderBackend>> {
         Box::new(backends::NvencBackend::new()),
         Box::new(backends::X264Backend::new()),
     ]
+}
+
+/// Windows probe order (T-056): vendor-native HW first, then cross-vendor HW, then software.
+#[cfg(windows)]
+fn windows_default_backends() -> Vec<Box<dyn EncoderBackend>> {
+    use backends::{AmfBackend, NvencBackend, QsvBackend, X264Backend};
+    let mut v: Vec<Box<dyn EncoderBackend>> = match gpu_detect::primary_gpu_vendor() {
+        gpu_detect::GpuVendor::Nvidia => vec![
+            Box::new(NvencBackend::new()),
+            Box::new(AmfBackend::new()),
+            Box::new(QsvBackend::new()),
+        ],
+        gpu_detect::GpuVendor::Amd => vec![
+            Box::new(AmfBackend::new()),
+            Box::new(NvencBackend::new()),
+            Box::new(QsvBackend::new()),
+        ],
+        gpu_detect::GpuVendor::Intel | gpu_detect::GpuVendor::Unknown => vec![
+            Box::new(QsvBackend::new()),
+            Box::new(NvencBackend::new()),
+            Box::new(AmfBackend::new()),
+        ],
+    };
+    v.push(Box::new(X264Backend::new()));
+    v
 }
 
 /// Drive a single encoder session attached to one PipeWire capture stream.
@@ -212,6 +238,78 @@ pub async fn run_session(
             // No backend available — preserve T-022 behaviour exactly.  No
             // `encoder.selected`, no `encoder.fallbackEngaged`, no encoder
             // diagnostics; just drain the receiver.
+            while rx.recv().await.is_some() {}
+        }
+    }
+}
+
+/// Drive a single encoder session on Windows (T-056).
+///
+/// Enumerates DXGI adapters to determine GPU vendor, orders backends with the
+/// vendor-native encoder first, runs probes, and emits `encoder.probeResult` +
+/// `encoder.selected`.  Actual encoding (configure/push_frame/drain) is T-057.
+#[cfg(windows)]
+pub async fn run_session(
+    mut rx: crate::capture::FrameReceiver,
+    notifier: Notifier,
+    stream_id: String,
+    _session_id: String,
+    format: CaptureFormat,
+    _state: crate::engine::SharedState,
+) {
+    // Emit GPU adapter diagnostics.
+    let adapters = gpu_detect::detect_gpu_adapters();
+    if let Ok(v) = serde_json::to_value(&adapters) {
+        let _ = notifier.notify("capture.gpuAdapters", v).await;
+    }
+
+    let mut backends = windows_default_backends();
+    let mut cache = NegativeProbeCache::new();
+    let session = run_probes(&backends, &format, &mut cache).await;
+
+    let probe_event = build_probe_event(&session, &backends);
+    if let Ok(v) = serde_json::to_value(&probe_event) {
+        let _ = notifier.notify("encoder.probeResult", v).await;
+    }
+
+    match session.selected {
+        Some(idx) => {
+            let selected_name = backends[idx].name().to_string();
+            let selected_codec = backends[idx].codec().to_string();
+
+            if let Some(ref from) = session.fallback_from {
+                if from != &selected_name {
+                    let evt = EncoderFallbackEvent {
+                        reason: "probe-failed".into(),
+                        from_backend: from.clone(),
+                        to_backend: selected_name.clone(),
+                    };
+                    if let Ok(v) = serde_json::to_value(&evt) {
+                        let _ = notifier.notify("encoder.fallbackEngaged", v).await;
+                    }
+                }
+            }
+
+            let selected_evt = EncoderSelectedEvent {
+                backend: selected_name.clone(),
+                codec: selected_codec,
+                parameters: serde_json::json!({
+                    "stream_id": stream_id,
+                    "width": format.width,
+                    "height": format.height,
+                    "fps_num": format.fps_num,
+                    "fps_den": format.fps_den,
+                    "fourcc": format.fourcc,
+                }),
+                reason_for_choice: "first-available".into(),
+            };
+            if let Ok(v) = serde_json::to_value(&selected_evt) {
+                let _ = notifier.notify("encoder.selected", v).await;
+            }
+            // Encoding pipeline (configure/push_frame/drain) deferred to T-057.
+            while rx.recv().await.is_some() {}
+        }
+        None => {
             while rx.recv().await.is_some() {}
         }
     }
