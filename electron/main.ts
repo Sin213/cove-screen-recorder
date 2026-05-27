@@ -603,8 +603,21 @@ async function startCropSelection(): Promise<CropSelectionResult | null> {
       // not supported on every platform — ignore
     }
 
+    // Windows: start click-through (WS_EX_LAYERED | WS_EX_TRANSPARENT) so the overlay
+    // doesn't block the underlying window until the user begins a drag. The renderer
+    // calls cove:set-ignore-mouse-events(false) on mousedown to take exclusive control.
+    if (process.platform === "win32") {
+      overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
+
     const overlayHtml = path.join(app.getAppPath(), "dist", "overlay.html");
     overlayWindow.loadFile(overlayHtml);
+
+    // Push the display's exact scale factor to the renderer so it can use it for
+    // coordinate normalisation on mixed-DPI multi-monitor setups.
+    overlayWindow.webContents.once("did-finish-load", () => {
+      overlayWindow?.webContents.send("overlay-scale-factor", display.scaleFactor ?? 1);
+    });
 
     overlayWindow.once("ready-to-show", () => {
       try {
@@ -947,6 +960,12 @@ function registerIpc(): void {
 
   ipcMain.on("cove:selection-cancel", () => {
     resolveSelection(null);
+  });
+
+  ipcMain.on("cove:set-ignore-mouse-events", (_e, ignore: boolean) => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.setIgnoreMouseEvents(ignore, { forward: true });
+    }
   });
 
   ipcMain.handle("cove:pick-output-dir", async () => {

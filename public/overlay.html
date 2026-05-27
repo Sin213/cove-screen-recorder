@@ -97,7 +97,12 @@
         const selection = document.getElementById("selection");
         const sizeTag = document.getElementById("sizeTag");
         const help = document.getElementById("help");
-        const dpr = window.devicePixelRatio || 1;
+        // scaleFactor is updated by main process via did-finish-load IPC push.
+        // Defaults to devicePixelRatio so non-Windows platforms work unchanged.
+        let scaleFactor = window.devicePixelRatio || 1;
+        if (window.cove && window.cove.onScaleFactor) {
+          window.cove.onScaleFactor(function (sf) { scaleFactor = sf; });
+        }
 
         let dragging = false;
         let startX = 0;
@@ -131,6 +136,11 @@
 
         window.addEventListener("mousedown", function (e) {
           if (committed || e.button !== 0) return;
+          // On Windows the overlay starts click-through so the user can see what
+          // they want to capture. Take exclusive mouse control for the drag.
+          if (window.cove && window.cove.setIgnoreMouseEvents) {
+            window.cove.setIgnoreMouseEvents(false);
+          }
           dragging = true;
           startX = e.clientX;
           startY = e.clientY;
@@ -171,7 +181,7 @@
             y: Math.round(y),
             width: Math.max(2, Math.round(w / 2) * 2),
             height: Math.max(2, Math.round(h / 2) * 2),
-            dpr,
+            dpr: scaleFactor,
           };
           window.cove.commitSelection(rect);
         });
