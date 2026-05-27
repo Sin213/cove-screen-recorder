@@ -136,11 +136,6 @@
 
         window.addEventListener("mousedown", function (e) {
           if (committed || e.button !== 0) return;
-          // On Windows the overlay starts click-through so the user can see what
-          // they want to capture. Take exclusive mouse control for the drag.
-          if (window.cove && window.cove.setIgnoreMouseEvents) {
-            window.cove.setIgnoreMouseEvents(false);
-          }
           dragging = true;
           startX = e.clientX;
           startY = e.clientY;
@@ -172,10 +167,6 @@
             selection.style.display = "none";
             backdrop.classList.remove("dragging");
             help.classList.remove("fade");
-            // Restore click-through so the user can retry (Windows only; no-op elsewhere).
-            if (window.cove && window.cove.setIgnoreMouseEvents) {
-              window.cove.setIgnoreMouseEvents(true);
-            }
             return;
           }
           committed = true;

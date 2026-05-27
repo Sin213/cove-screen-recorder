@@ -603,13 +603,6 @@ async function startCropSelection(): Promise<CropSelectionResult | null> {
       // not supported on every platform — ignore
     }
 
-    // Windows: start click-through (WS_EX_LAYERED | WS_EX_TRANSPARENT) so the overlay
-    // doesn't block the underlying window until the user begins a drag. The renderer
-    // calls cove:set-ignore-mouse-events(false) on mousedown to take exclusive control.
-    if (process.platform === "win32") {
-      overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-    }
-
     const overlayHtml = path.join(app.getAppPath(), "dist", "overlay.html");
     overlayWindow.loadFile(overlayHtml);
 
