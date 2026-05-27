@@ -16,9 +16,14 @@ fn qpc_to_ns_zero_input_returns_zero() {
 
 #[test]
 fn qpc_to_ns_no_overflow_for_large_ticks() {
-    // ~292 years at 10 MHz — should not overflow i64
-    let result = qpc_to_ns(i64::MAX / 10, 10_000_000);
-    assert!(result > 0, "large tick must not overflow to negative");
+    // Values large enough to overflow i64 if computed in i64 are clamped to i64::MAX.
+    let result = qpc_to_ns(i64::MAX, 1);
+    assert_eq!(result, i64::MAX, "large tick must clamp to i64::MAX");
+}
+
+#[test]
+fn qpc_to_ns_zero_freq_returns_zero() {
+    assert_eq!(qpc_to_ns(1_000_000, 0), 0);
 }
 
 #[test]
