@@ -1,0 +1,15 @@
+{
+  "blockedBy": [
+    "T-047"
+  ],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": "2026-05-27",
+  "createdDate": "2026-05-27",
+  "description": "Implement AudioCaptureBackend for Windows using WASAPI in loopback mode. Captures system audio from any output device. Handles: device enumeration via IMMDeviceEnumerator, shared-mode loopback stream, sample rate conversion to match encoder expectations, device-change notifications (IMMNotificationClient), and mixed mic+system capture for commentary mode. Target: < 5ms audio latency, zero-glitch under sustained recording.",
+  "id": "T-050",
+  "order": 60,
+  "phase": "p5-win-foundation",
+  "status": "complete",
+  "title": "WASAPI loopback audio capture",
+  "type": "feature"
+}
