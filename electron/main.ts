@@ -962,8 +962,12 @@ function registerIpc(): void {
     resolveSelection(null);
   });
 
-  ipcMain.on("cove:set-ignore-mouse-events", (_e, ignore: boolean) => {
-    if (overlayWindow && !overlayWindow.isDestroyed()) {
+  ipcMain.on("cove:set-ignore-mouse-events", (e, ignore: boolean) => {
+    if (
+      overlayWindow &&
+      !overlayWindow.isDestroyed() &&
+      e.sender === overlayWindow.webContents
+    ) {
       overlayWindow.setIgnoreMouseEvents(ignore, { forward: true });
     }
   });
