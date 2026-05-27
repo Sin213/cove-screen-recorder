@@ -1,0 +1,79 @@
+name: Windows Draft Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 3.0.0)"
+        required: true
+        default: "3.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows (Setup + Portable)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Bump version in package.json
+        shell: bash
+        run: npm version ${{ github.event.inputs.version }} --no-git-tag-version
+
+      - name: Build renderer + electron
+        run: npm run build
+
+      - name: Build Rust helper
+        run: npm run build:helper:win
+
+      - name: Package Windows targets
+        run: npx electron-builder --win --publish never
+
+      - name: Generate checksums
+        shell: bash
+        run: npm run dist:sha
+
+      - name: List release artifacts
+        shell: bash
+        run: ls -la release/
+
+      - name: Create Draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version }}-win-draft
+          name: "v${{ github.event.inputs.version }} Windows (Draft)"
+          draft: true
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Windows draft build for v${{ github.event.inputs.version }}.
+
+            **Artifacts:**
+            - `Cove-Screen-Recorder-${{ github.event.inputs.version }}-Setup.exe` — NSIS installer
+            - `Cove-Screen-Recorder-${{ github.event.inputs.version }}-Portable.exe` — portable executable
+            - `.sha256` sidecar files for both executables
+
+            This is a draft release for testing only. Do not publish.
+          files: |
+            release/*.exe
+            release/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
