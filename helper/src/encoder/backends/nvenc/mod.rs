@@ -1163,7 +1163,22 @@ impl EncoderBackend for NvencBackend {
     }
 
     async fn teardown(&mut self) -> Result<(), EncoderError> {
-        if let Some(sess) = self.session.take() {
+        if let Some(mut sess) = self.session.take() {
+            // Drain unflushed output buffers before encoder destruction (R2-002 fix).
+            let destroy_bs_raw = sess.fn_list.nvEncDestroyBitstreamBuffer;
+            let destroy_in_raw = sess.fn_list.nvEncDestroyInputBuffer;
+            if !destroy_bs_raw.is_null() && !sess.pending_frames.is_empty() {
+                let destroy_out: FnNvEncDestroyBitstreamBuffer =
+                    unsafe { std::mem::transmute(destroy_bs_raw) };
+                for pf in sess.pending_frames.drain(..) {
+                    if !pf.input_buf.is_null() && !destroy_in_raw.is_null() {
+                        let destroy_in: FnNvEncDestroyInputBuffer =
+                            unsafe { std::mem::transmute(destroy_in_raw) };
+                        unsafe { destroy_in(sess.encoder, pf.input_buf) };
+                    }
+                    unsafe { destroy_out(sess.encoder, pf.output_buf) };
+                }
+            }
             if let Some(destroy) = sess.fn_list.nvEncDestroyEncoder {
                 unsafe { destroy(sess.encoder) };
             }
@@ -1410,9 +1425,9 @@ impl EncoderBackend for NvencBackend {
     async fn push_frame(&mut self, frame: FrameHandle) -> Result<(), EncoderError> {
         match &frame.payload {
             crate::capture::FramePayload::D3D11Texture {
-                texture_ptr, width: _, height: _, dxgi_format, subresource,
+                texture_ptr, width, height, dxgi_format, subresource,
             } => {
-                self.push_frame_d3d11(*texture_ptr, *dxgi_format, *subresource, &frame)
+                self.push_frame_d3d11(*texture_ptr, *width, *height, *dxgi_format, *subresource, &frame)
             }
             crate::capture::FramePayload::Shm { .. } => {
                 Err(EncoderError::NotImplementedYet("nvenc-windows-shm-path".into()))
@@ -1533,6 +1548,8 @@ impl NvencBackend {
     fn push_frame_d3d11(
         &mut self,
         texture_ptr: *mut c_void,
+        tex_width: u32,
+        tex_height: u32,
         dxgi_format: u32,
         subresource: u32,
         frame: &FrameHandle,
@@ -1576,11 +1593,13 @@ impl NvencBackend {
         };
 
         // 1. Register the D3D11 texture as an NVENC input resource.
+        // Use the texture's actual dimensions here — enc_width/enc_height are the
+        // align16-padded encoder dimensions and must NOT be used for RegisterResource.
         let mut reg = NV_ENC_REGISTER_RESOURCE {
             version: NV_ENC_REGISTER_RESOURCE_VER,
             resourceType: NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX,
-            width: sess.enc_width,
-            height: sess.enc_height,
+            width: tex_width,
+            height: tex_height,
             pitch: 0,
             subResourceIndex: subresource,
             resourceToRegister: texture_ptr,
