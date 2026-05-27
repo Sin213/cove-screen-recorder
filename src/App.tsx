@@ -813,7 +813,7 @@ export function App() {
                 onChange={(e) =>
                   setReplay({ ...replay, quality: e.target.value as ReplayQuality })
                 }
-                style={{ padding: "4px 8px", fontSize: 12, flex: 1 }}
+                style={{ padding: "4px 8px", fontSize: 12, flex: 1, minWidth: 0 }}
               >
                 {REPLAY_QUALITY_LIST.map((q) => (
                   <option key={q.id} value={q.id}>

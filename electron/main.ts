@@ -10,6 +10,7 @@ import {
   screen,
   session,
   shell,
+  Tray,
 } from "electron";
 import { autoUpdater } from "electron-updater";
 import * as path from "node:path";
@@ -176,6 +177,7 @@ function wireHelperNotifications(rpc: EngineRpc): void {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 
 interface WindowBounds {
   width: number;
@@ -308,7 +310,28 @@ function createWindow(): void {
   mainWindow.on("move", debounce(persist, 250));
 
   mainWindow.on("closed", () => {
+    tray?.destroy();
+    tray = null;
     mainWindow = null;
+  });
+
+  // Hide to tray on minimize so PipeWire screen-share sessions survive.
+  // Without this, KDE/Wayland revokes the portal token when the window
+  // is minimized, killing any active replay buffer or recording.
+  mainWindow.on("minimize", () => {
+    mainWindow?.hide();
+    if (!tray) {
+      const iconPath = path.join(app.getAppPath(), "cove_icon.png");
+      tray = new Tray(iconPath);
+      tray.setToolTip("Cove Screen Recorder");
+      const menu = Menu.buildFromTemplate([
+        { label: "Show", click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+        { type: "separator" },
+        { label: "Quit", click: () => { app.quit(); } },
+      ]);
+      tray.setContextMenu(menu);
+      tray.on("click", () => { mainWindow?.show(); mainWindow?.focus(); });
+    }
   });
 }
 

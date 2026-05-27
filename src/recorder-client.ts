@@ -914,6 +914,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
   let stopped = false;
   let saving = false;
   let targetLost = false;
+  let suppressTrackEndedUntil = 0;
   let activeRecording: ReplayRecording;
   try {
     activeRecording = await beginReplayRecording();
@@ -937,13 +938,14 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
   // closed, portal session ended).
   for (const t of sourceStream.getVideoTracks()) {
     t.addEventListener("ended", () => {
+      if (Date.now() < suppressTrackEndedUntil) return;
       if (opts.sourceKind === "window") markTargetLost();
       else void handleStop();
     });
     if (opts.sourceKind === "window") {
       t.addEventListener("mute", () => {
         window.setTimeout(() => {
-          if (!stopped && t.muted) markTargetLost();
+          if (!stopped && t.muted && Date.now() >= suppressTrackEndedUntil) markTargetLost();
         }, 3000);
       });
     }
@@ -1042,6 +1044,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
       });
       if (!stopped) {
         try {
+          suppressTrackEndedUntil = Date.now() + 4000;
           activeRecording = await beginReplayRecording();
         } catch (err) {
           stopped = true;

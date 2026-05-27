@@ -376,8 +376,9 @@ export async function finalize(
       const sz = fs.statSync(s.audioPath).size;
       activeLogger(`audio sidecar ok — captured ${(sz / 1024).toFixed(0)} KB`);
     } catch { /* dropped already */ }
-  } else if (process.platform === "linux") {
+  } else if (process.platform === "linux" && params.format !== "gif") {
     // Only mention this on Linux where we actually try to capture.
+    // GIF has no audio track so silence is expected.
     activeLogger("audio sidecar produced no audio (file missing or empty)");
   }
 
