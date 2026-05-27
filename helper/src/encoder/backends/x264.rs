@@ -15,9 +15,9 @@ use serde_json::json;
 use crate::encoder::backend::{EncoderBackend, EncoderConfig, EncoderError, ProbeOutcome};
 use crate::protocol::types::CaptureFormat;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use crate::capture::FrameHandle;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use crate::encoder::fragment::EncodedFragment;
 
 pub struct X264Backend;
@@ -54,17 +54,17 @@ impl EncoderBackend for X264Backend {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     async fn configure(&mut self, _cfg: EncoderConfig) -> Result<(), EncoderError> {
         Err(EncoderError::NotImplementedYet("libx264.configure".into()))
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     async fn push_frame(&mut self, _frame: FrameHandle) -> Result<(), EncoderError> {
         Err(EncoderError::NotImplementedYet("libx264.push_frame".into()))
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     async fn drain(&mut self) -> Result<Vec<EncodedFragment>, EncoderError> {
         Err(EncoderError::NotImplementedYet("libx264.drain".into()))
     }

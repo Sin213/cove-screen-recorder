@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::protocol::types::CaptureFormat;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use super::fragment::EncodedFragment;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use crate::capture::FrameHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,24 +73,28 @@ pub trait EncoderBackend: Send + Sync + 'static {
     async fn probe(&self, format: &CaptureFormat) -> ProbeOutcome;
 
     /// Configure the encoder before any `push_frame` call.  Must be idempotent.
-    #[cfg(unix)]
+    ///
+    /// Windows backends must implement this under `#[cfg(any(unix, windows))]` and
+    /// return `Err(EncoderError::NotImplementedYet)` until the real path lands (e.g. T-053
+    /// for NVENC DX11 interop, T-054 for AMF, T-055 for QSV).
+    #[cfg(any(unix, windows))]
     async fn configure(&mut self, cfg: EncoderConfig) -> Result<(), EncoderError>;
 
     /// Return the fMP4 init segment (ftyp + moov) after `configure()` succeeds.
     /// Real backends produce this from the negotiated codec parameters; stubs
     /// return `None`.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn init_segment(&self) -> Option<Vec<u8>> {
         None
     }
 
     /// Submit one captured frame for encoding.  Producers MUST hold the frame's
-    /// `ReleaseToken` until `push_frame` returns so DMA-BUF imports stay valid.
-    #[cfg(unix)]
+    /// `ReleaseToken` until `push_frame` returns so the backing buffer stays valid.
+    #[cfg(any(unix, windows))]
     async fn push_frame(&mut self, frame: FrameHandle) -> Result<(), EncoderError>;
 
     /// Pull any fragments the encoder has flushed since the last call.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     async fn drain(&mut self) -> Result<Vec<EncodedFragment>, EncoderError>;
 
     /// Release all encoder resources.  After this returns, the backend instance is

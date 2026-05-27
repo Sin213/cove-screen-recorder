@@ -1,0 +1,13 @@
+{
+  "blockedBy": [],
+  "claimedBySession": "0d892316-3f98-4a6b-973f-9a400c597754",
+  "completedDate": "2026-05-27",
+  "createdDate": "2026-05-27",
+  "description": "Extract the PipeWire-specific capture interface into a platform-agnostic `CaptureBackend` trait in helper/src/capture/. The trait must cover: open stream, frame callback (with GPU buffer handle), dynamic resolution change, and graceful stop. PipeWire becomes one impl behind `#[cfg(target_os = \"linux\")]`. This unblocks all Windows capture work.",
+  "id": "T-045",
+  "order": 10,
+  "phase": "p5-win-foundation",
+  "status": "complete",
+  "title": "Platform capture trait abstraction",
+  "type": "task"
+}

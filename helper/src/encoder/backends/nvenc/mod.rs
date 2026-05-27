@@ -799,8 +799,13 @@ impl EncoderBackend for NvencBackend {
             crate::capture::FramePayload::Shm { data, width, height, format, stride } => {
                 (data.as_ptr(), data.len(), *stride, *width, *height, *format)
             }
+            #[cfg(unix)]
             crate::capture::FramePayload::DmaBuf { .. } => {
                 return Err(EncoderError::Runtime("DMA-BUF not implemented in NVENC backend yet".into()));
+            }
+            #[cfg(windows)]
+            crate::capture::FramePayload::D3D11Texture { .. } => {
+                return Err(EncoderError::Runtime("D3D11Texture requires DX11 interop path (T-053)".into()));
             }
         };
 

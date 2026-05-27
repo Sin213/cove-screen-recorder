@@ -1,16 +1,15 @@
 #[cfg(target_os = "linux")]
 pub mod pipewire;
 
-#[cfg(unix)]
 use tokio::sync::mpsc;
 
 use crate::protocol::types::{
     CaptureSourceDescriptor, CursorMode, Rect, RequestSessionOpts,
 };
 
-// ── Frame types (Unix-only — DmaBufPlane uses std::os::fd::OwnedFd) ──────────
+// ── Frame types ───────────────────────────────────────────────────────────────
 
-/// One DMA-BUF memory plane.  T-016a fills this out when negotiating DMA-BUF buffers.
+/// One DMA-BUF memory plane.  Unix-only — uses OwnedFd.
 #[cfg(unix)]
 #[derive(Debug)]
 pub struct DmaBufPlane {
@@ -20,9 +19,16 @@ pub struct DmaBufPlane {
 }
 
 /// Payload carried by a captured frame.
-#[cfg(unix)]
 #[derive(Debug)]
 pub enum FramePayload {
+    Shm {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+        format: u32,
+        stride: u32,
+    },
+    #[cfg(unix)]
     DmaBuf {
         planes: Vec<DmaBufPlane>,
         width: u32,
@@ -31,17 +37,35 @@ pub enum FramePayload {
         format: u32,
         modifier: u64,
     },
-    Shm {
-        data: Vec<u8>,
+    #[cfg(windows)]
+    D3D11Texture {
+        /// Raw *mut ID3D11Texture2D. Valid only while the FrameHandle is alive.
+        /// The encoder must register or copy it before push_frame returns.
+        texture_ptr: *mut std::ffi::c_void,
         width: u32,
         height: u32,
-        format: u32,
-        stride: u32,
+        /// DXGI_FORMAT integer (e.g. DXGI_FORMAT_B8G8R8A8_UNORM = 87)
+        dxgi_format: u32,
+        /// Subresource index within the texture array
+        subresource: u32,
     },
 }
 
+// SAFETY: `D3D11Texture::texture_ptr` is a raw pointer to an ID3D11Texture2D created
+// and owned by the DXGI capture backend. The backend guarantees:
+//   1. The texture is kept alive until `ReleaseToken` fires (RAII drop on FrameHandle).
+//   2. The D3D11 device was created with D3D11_CREATE_DEVICE_BGRA_SUPPORT and the
+//      default multi-threaded protection flag, making concurrent reads safe.
+//   3. Only one thread (the encoder) calls push_frame at a time; no aliased mutation.
+// `Shm` and `DmaBuf` variants are trivially Send/Sync and would derive it were it not
+// for the raw pointer in this variant. Adding the impl for the whole enum is the
+// standard pattern when a raw-pointer variant is known-safe under stated invariants.
+#[cfg(windows)]
+unsafe impl Send for FramePayload {}
+#[cfg(windows)]
+unsafe impl Sync for FramePayload {}
+
 /// Cursor position and bitmap metadata embedded with the frame.
-#[cfg(unix)]
 #[derive(Debug)]
 pub struct CursorMeta {
     pub x: i32,
@@ -54,8 +78,7 @@ pub struct CursorMeta {
     pub bitmap: Option<Vec<u8>>,
 }
 
-/// A captured video frame.  Dropping `release` returns the backing PipeWire buffer.
-#[cfg(unix)]
+/// A captured video frame.  Dropping `release` returns the backing capture buffer.
 #[derive(Debug)]
 pub struct FrameHandle {
     pub seq: u64,
@@ -65,13 +88,11 @@ pub struct FrameHandle {
     pub release: ReleaseToken,
 }
 
-/// Drops the closure registered at construction, which re-queues the PipeWire buffer.
-#[cfg(unix)]
+/// Drops the closure registered at construction, which re-queues the capture buffer.
 pub struct ReleaseToken {
     inner: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
-#[cfg(unix)]
 impl ReleaseToken {
     pub fn new(f: impl FnOnce() + Send + 'static) -> Self {
         ReleaseToken { inner: Some(Box::new(f)) }
@@ -82,7 +103,6 @@ impl ReleaseToken {
     }
 }
 
-#[cfg(unix)]
 impl Drop for ReleaseToken {
     fn drop(&mut self) {
         if let Some(f) = self.inner.take() {
@@ -91,7 +111,6 @@ impl Drop for ReleaseToken {
     }
 }
 
-#[cfg(unix)]
 impl std::fmt::Debug for ReleaseToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReleaseToken").finish_non_exhaustive()
@@ -101,30 +120,34 @@ impl std::fmt::Debug for ReleaseToken {
 /// Multiplexes video frames and in-band control markers on the same ordered
 /// channel so the encoder always sees format changes in causal order relative
 /// to the frames that follow them.
-#[cfg(unix)]
 #[derive(Debug)]
 pub enum FrameOrControl {
     Frame(FrameHandle),
     FormatChanged,
 }
 
-#[cfg(unix)]
 pub type FrameSender = mpsc::Sender<FrameOrControl>;
-#[cfg(unix)]
 pub type FrameReceiver = mpsc::Receiver<FrameOrControl>;
 
-#[cfg(unix)]
 pub fn frame_channel(capacity: usize) -> (FrameSender, FrameReceiver) {
     mpsc::channel(capacity)
 }
 
 // ── Session lost reason ───────────────────────────────────────────────────────
 
+// NOTE: `SessionLostReason` has platform-gated variants. Any `match` on this type in
+// cross-platform code must either use a catch-all arm or duplicate `#[cfg]` guards on
+// match arms to stay exhaustive on all platforms (e.g. Linux code won't see DxgiAccessLost).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionLostReason {
     UserRevoked,
     CompositorClosed,
+    #[cfg(target_os = "linux")]
     PipeWireDisconnected,
+    #[cfg(windows)]
+    DxgiAccessLost,
+    #[cfg(windows)]
+    WgcSessionEnded,
     PortalError(String),
     InternalError(String),
 }
@@ -144,8 +167,8 @@ pub trait CaptureSource: Send + Sync + 'static {
     /// stored internally.  Call `start_stream` next.
     async fn request_session(&self, opts: RequestSessionOpts) -> anyhow::Result<()>;
 
-    /// Opens the PipeWire stream.  On real hardware, `capture.sessionReady` fires
-    /// once the stream reaches the Streaming state (deferred to T-016a with format pods).
+    /// Opens the capture stream.  On Linux, `capture.sessionReady` fires once the
+    /// PipeWire stream reaches Streaming state.
     async fn start_stream(&self) -> anyhow::Result<()>;
 
     async fn pause_stream(&self) -> anyhow::Result<()>;

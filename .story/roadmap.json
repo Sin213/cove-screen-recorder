@@ -43,6 +43,34 @@
       "label": "PHASE 4",
       "name": "v2.0.0 Release",
       "summary": "v2.0.0 release checklist, validation, packaging, and publish"
+    },
+    {
+      "description": "Platform abstraction layer in the Rust helper, Windows capture backends (DXGI Desktop Duplication + Windows Graphics Capture), and WASAPI audio loopback capture",
+      "id": "p5-win-foundation",
+      "label": "PHASE 5",
+      "name": "v3.0.0 Windows Foundation",
+      "summary": "Platform traits, DXGI/WGC capture, WASAPI audio"
+    },
+    {
+      "description": "Windows encoder backends (NVENC DX interop, AMD AMF, Intel QSV), zero-copy GPU capture-to-encode pipeline, and performance-critical optimizations targeting equal or better than Linux throughput",
+      "id": "p6-win-perf",
+      "label": "PHASE 6",
+      "name": "v3.0.0 Windows Performance Pipeline",
+      "summary": "NVENC/AMF/QSV encoders, zero-copy GPU pipeline, perf parity"
+    },
+    {
+      "description": "Electron main-process wiring for Windows helper, display/monitor enumeration, global hotkey registration, system tray, crop overlay, and renderer UI adaptations for Windows UX conventions",
+      "id": "p7-win-electron",
+      "label": "PHASE 7",
+      "name": "v3.0.0 Windows Electron Integration",
+      "summary": "Electron wiring, display enum, hotkeys, tray, UI polish"
+    },
+    {
+      "description": "Windows build pipeline (CI/CD), NSIS installer, portable exe, code signing, auto-updater, FFmpeg bundling, full validation matrix (1080p/1440p/4K60 on NVIDIA/AMD/Intel), and release packaging",
+      "id": "p8-win-release",
+      "label": "PHASE 8",
+      "name": "v3.0.0 Windows Release",
+      "summary": "CI/CD, installer, signing, validation matrix, release"
     }
   ],
   "title": "cove-screen-recorder"
