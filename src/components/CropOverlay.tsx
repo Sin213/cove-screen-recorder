@@ -147,10 +147,20 @@ export function CropOverlay({ stream, autoStart, onConfirm, onCancel }: Props) {
             {rect && (
               <>
                 <div style={{
-                  position: "absolute", inset: 0,
-                  background: "rgba(0,0,0,0.45)",
-                  clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${rect.x}px ${rect.y}px, ${rect.x}px ${rect.y + rect.height}px, ${rect.x + rect.width}px ${rect.y + rect.height}px, ${rect.x + rect.width}px ${rect.y}px, ${rect.x}px ${rect.y}px)`,
-                  pointerEvents: "none",
+                  position: "absolute", top: 0, left: 0, right: 0,
+                  height: rect.y, background: "rgba(0,0,0,0.45)", pointerEvents: "none",
+                }} />
+                <div style={{
+                  position: "absolute", top: rect.y + rect.height, left: 0, right: 0,
+                  bottom: 0, background: "rgba(0,0,0,0.45)", pointerEvents: "none",
+                }} />
+                <div style={{
+                  position: "absolute", top: rect.y, left: 0,
+                  width: rect.x, height: rect.height, background: "rgba(0,0,0,0.45)", pointerEvents: "none",
+                }} />
+                <div style={{
+                  position: "absolute", top: rect.y, left: rect.x + rect.width,
+                  right: 0, height: rect.height, background: "rgba(0,0,0,0.45)", pointerEvents: "none",
                 }} />
                 <div style={{
                   position: "absolute",

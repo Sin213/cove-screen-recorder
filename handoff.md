@@ -25,6 +25,15 @@ Fix the global GIF hotkey crop overlay teardown ordering so:
 - Pointer capture ensures release outside overlay still confirms
 - Manual mode unchanged: draw region, click "Start recording"
 
+## CropOverlay compositor fix (2026-05-26)
+
+Replaced single clip-path polygon dim layer with four deterministic absolute-positioned
+rectangles (top/bottom/left/right). The bridge-donut `clipPath: polygon(...)` caused dark
+vertical bands on Wayland Ozone under Electron/Chromium GPU compositor. Four plain rects
+with `position: absolute` + `background: rgba(0,0,0,0.45)` are compositor-safe.
+
+No coordinate, interaction, timing, or lifecycle changes.
+
 ## Files changed
 
 - `src/App.tsx`

@@ -344,7 +344,34 @@ export function App() {
             customQuality,
             withSystemAudio,
           });
-          setPendingCrop({ stream: acquired, preset: presetId, autoStart });
+          if (autoStart) {
+            setLastError(null);
+            try {
+              const dir = outputDir ?? "";
+              const session = await startCaptureFromAcquiredStream(acquired, {
+                preset: presetId,
+                customQuality,
+                outputDir: dir,
+                withMic,
+                withSystemAudio,
+                systemAudioHandledBySidecar: info.platform === "linux",
+                onAutoStop: () => void stopFlowRef.current?.(false),
+                onError: (msg) => { log("error", msg); setLastError(msg); },
+                onLog: (level, text) => log(level, text),
+              });
+              sessionRef.current = session;
+              setLivePreview(session.previewStream);
+              setRecording(session.recordingId);
+              setStatus("recording");
+              log("info", "Recording started");
+            } catch (err) {
+              acquired.sourceStream.getTracks().forEach((t) => t.stop());
+              log("error", `Failed to start: ${err instanceof Error ? err.message : String(err)}`);
+              setStatus("idle");
+            }
+          } else {
+            setPendingCrop({ stream: acquired, preset: presetId, autoStart });
+          }
         } catch (err) {
           if (err instanceof DOMException && err.name === "NotAllowedError") {
             log("info", "Capture cancelled");
@@ -365,7 +392,7 @@ export function App() {
       if (result.source) await startWithSource(result.source, presetId, result.rect);
       else log("error", "Crop selection returned no source.");
     },
-    [status, getCurrentAppInfo, setStatus, startWithSource, log, customQuality, withSystemAudio],
+    [status, getCurrentAppInfo, setStatus, startWithSource, log, customQuality, withSystemAudio, outputDir, withMic, setRecording, setLastError, setLivePreview],
   );
 
   const confirmCrop = useCallback(
