@@ -54,6 +54,8 @@ impl EncoderBackend for QsvBackend {
                 if !loader.is_null() {
                     let mut session: *mut std::ffi::c_void = std::ptr::null_mut();
                     let status = unsafe { mfx_create(loader, 0, &mut session) };
+                    // MFXUnload invalidates all sessions from this loader.
+                    // T-057 configure() must create a fresh loader+session.
                     unsafe { mfx_unload(loader) };
                     if status == 0 {
                         return ProbeOutcome::Available {
@@ -74,12 +76,17 @@ impl EncoderBackend for QsvBackend {
         if let Ok(lib) = unsafe { libloading::Library::new("libmfxhw64.dll") } {
             type MfxInitFn =
                 unsafe extern "C" fn(i32, *mut [u16; 2], *mut *mut std::ffi::c_void) -> i32;
-            if let Ok(mfx_init) = unsafe { lib.get::<MfxInitFn>(b"MFXInit\0") } {
+            type MfxCloseFn = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
+            if let (Ok(mfx_init), Ok(mfx_close)) = (
+                unsafe { lib.get::<MfxInitFn>(b"MFXInit\0") },
+                unsafe { lib.get::<MfxCloseFn>(b"MFXClose\0") },
+            ) {
                 let mut ver: [u16; 2] = [0, 1]; // [minor=0, major=1]
                 let mut session: *mut std::ffi::c_void = std::ptr::null_mut();
                 const MFX_IMPL_AUTO_ANY: i32 = 3;
                 let status = unsafe { mfx_init(MFX_IMPL_AUTO_ANY, &mut ver, &mut session) };
                 if status == 0 {
+                    unsafe { mfx_close(session) };
                     return ProbeOutcome::Available {
                         capabilities: crate::encoder::backend::EncoderCapabilities {
                             accepts_dmabuf: false,

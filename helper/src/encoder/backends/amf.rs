@@ -49,13 +49,14 @@ impl EncoderBackend for AmfBackend {
             },
         };
 
-        // AMF_FULL_VERSION = major(1)<<48 | minor(4)<<32 | release(0)<<16 | build(0)
-        const AMF_FULL_VERSION: u64 =
-            (1u64 << 48) | (4u64 << 32) | (0u64 << 16) | 0u64;
-
+        // Verify AMFInit is exported — sufficient proof that the AMF runtime is
+        // installed.  We do NOT call AMFInit here: calling it returns a factory
+        // COM object that requires Terminate() before the DLL is unloaded, and
+        // there is no platform-agnostic way to drive that cleanup without the
+        // full AMF C++ vtable.  Symbol presence is enough for a probe.
         type AmfInitFn =
             unsafe extern "C" fn(u64, *mut *mut std::ffi::c_void) -> i32;
-        let amf_init: libloading::Symbol<AmfInitFn> =
+        let _amf_init: libloading::Symbol<AmfInitFn> =
             match unsafe { lib.get(b"AMFInit\0") } {
                 Ok(s) => s,
                 Err(e) => return ProbeOutcome::Unavailable {
@@ -63,15 +64,6 @@ impl EncoderBackend for AmfBackend {
                     details: serde_json::Value::Null,
                 },
             };
-
-        let mut factory: *mut std::ffi::c_void = std::ptr::null_mut();
-        let result = unsafe { amf_init(AMF_FULL_VERSION, &mut factory) };
-        if result != 0 {
-            return ProbeOutcome::Unavailable {
-                reason: format!("AMFInit-failed:{result}"),
-                details: serde_json::Value::Null,
-            };
-        }
 
         ProbeOutcome::Available {
             capabilities: crate::encoder::backend::EncoderCapabilities {

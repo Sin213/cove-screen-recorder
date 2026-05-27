@@ -253,9 +253,9 @@ pub async fn run_session(
     mut rx: crate::capture::FrameReceiver,
     notifier: Notifier,
     stream_id: String,
-    _session_id: String,
+    _session_id: String,   // TODO(T-057): wire SegmentBuffer (replay.save non-functional until then)
     format: CaptureFormat,
-    _state: crate::engine::SharedState,
+    _state: crate::engine::SharedState,  // TODO(T-057): set active_segment_buffer
 ) {
     // Emit GPU adapter diagnostics.
     let adapters = gpu_detect::detect_gpu_adapters();

@@ -1286,7 +1286,7 @@ impl EncoderBackend for NvencBackend {
                 details: serde_json::Value::Null,
             },
         };
-        let _create: libloading::Symbol<unsafe extern "C" fn(*mut std::ffi::c_void) -> u32> =
+        let _create: libloading::Symbol<ffi::FnNvEncodeAPICreateInstance> =
             match unsafe { nvenc_lib.get(b"NvEncodeAPICreateInstance\0") } {
                 Ok(s) => s,
                 Err(e) => return ProbeOutcome::Unavailable {
