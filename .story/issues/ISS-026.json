@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-026",
+  "impact": "Positional monitor mapping in tryAugmentWithDxgi is fragile; when real DXGI enumeration lands (T-051), use device_name matching instead",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[design] Positional monitor mapping in tryAugmentWithDxgi is fragile; when real DXGI enum"
+}

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Verify compatibility across Windows versions: Win10 21H2+ and Win11 22H2+. DXGI DD available on both. WGC requires Win10 1903+. Test on both with and without latest updates. Verify Windows Defender doesn't flag unsigned dev builds. Test with common AV software (Defender, Avast, Kaspersky) for false positive detection. Document minimum Windows version requirements.",
+  "id": "T-076",
+  "order": 80,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "Windows 10/11 compatibility testing",
+  "type": "task"
+}

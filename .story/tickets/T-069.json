@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Add Windows build job to CI: windows-latest runner, install Rust + MSVC toolchain, cargo build the helper, npm install + electron-builder for Windows targets. Run clippy and cargo test on Windows. Cache cargo registry and target/ for build speed. Matrix: x64 only initially. Produce artifacts: Setup.exe (NSIS), Portable.exe, and helper .exe with sha256 sidecars.",
+  "id": "T-069",
+  "order": 10,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "Windows CI/CD pipeline (GitHub Actions)",
+  "type": "task"
+}

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Configure electron-builder NSIS target for Windows installer. Include: custom install directory, desktop shortcut option, start menu entry, file association for .cove project files (if applicable), uninstaller with clean registry removal, install-time VC++ redistributable check, and optional \"launch after install\" checkbox. Per-user install by default (no UAC needed). Include app icon in .ico format.",
+  "id": "T-070",
+  "order": 20,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "NSIS installer configuration",
+  "type": "task"
+}

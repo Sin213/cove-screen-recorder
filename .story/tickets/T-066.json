@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Bundle FFmpeg binaries for Windows in the app package. Extend ffmpeg.ts discovery to find bundled ffmpeg.exe in vendor/win32/ or app.asar.unpacked. Include only needed codecs (libx264, libvpx, aac, pcm) to minimize bundle size. Handle PATH-installed FFmpeg as fallback. Verify ffmpeg probe works correctly with Windows paths (backslashes, spaces in Program Files).",
+  "id": "T-066",
+  "order": 70,
+  "phase": "p7-win-electron",
+  "status": "open",
+  "title": "Windows FFmpeg bundling and discovery",
+  "type": "task"
+}

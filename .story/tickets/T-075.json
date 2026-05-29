@@ -1,0 +1,15 @@
+{
+  "blockedBy": [
+    "T-060",
+    "T-052"
+  ],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Adapt the v2.0.0 smoke test suite for Windows. Cover: app launch, helper spawn, capture start/stop (DXGI path), audio capture (WASAPI), encoder selection, export pipeline (MP4/WebM/GIF), hotkeys, tray icon, crop overlay, multi-monitor, save dialog, and clean shutdown. Include Windows-specific edge cases: UAC prompt during recording, display sleep/wake, remote desktop session, and Game Bar coexistence.",
+  "id": "T-075",
+  "order": 70,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "Windows smoke test suite",
+  "type": "task"
+}

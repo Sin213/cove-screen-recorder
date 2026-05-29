@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-031",
+  "impact": "DedicatedVideoMemory truncation on 32-bit Windows",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[portability] DedicatedVideoMemory truncation on 32-bit Windows"
+}

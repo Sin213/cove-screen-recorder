@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-032",
+  "impact": "OnceLock double-device creation race in shared_device(). Two threads racing the None branch both create a D3D11 device; loser is dropped. Behavior correct but wasteful. Deferred — can use OnceLock::get_or_init in implementation.",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[race condition] OnceLock double-device creation race in shared_device(). Two threads racing the "
+}

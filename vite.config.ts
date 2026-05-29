@@ -16,6 +16,14 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, "dist"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom"],
+          state: ["zustand"],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Update all release documentation for v3.0.0: CHANGELOG.md with Windows feature list, RELEASE_NOTES.md with asset names (Setup.exe, Portable.exe, AppImage, deb), README.md with Windows install instructions and system requirements (Win10 1903+, GPU recommendations per vendor). Include performance comparison table (Linux vs Windows). Bump version to 3.0.0 in package.json and Cargo.toml.",
+  "id": "T-077",
+  "order": 90,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "v3.0.0 release notes, README, and CHANGELOG",
+  "type": "chore"
+}

@@ -80,14 +80,14 @@ async function rpcEnv<T>(fn: () => Promise<T>): Promise<RpcEnvelope<T>> {
 let exportLogPath: string | null = null;
 function exportLog(line: string): void {
   console.log(line);
-  try {
-    if (!exportLogPath) {
-      exportLogPath = path.join(app.getPath("logs"), "export-lifecycle.log");
-    }
-    fs.appendFileSync(exportLogPath, `${new Date().toISOString()} ${line}\n`);
-  } catch {
-    // Best-effort diagnostics; never let a log-sink failure disrupt forwarding.
+  if (!exportLogPath) {
+    exportLogPath = path.join(app.getPath("logs"), "export-lifecycle.log");
   }
+  fs.promises
+    .appendFile(exportLogPath, `${new Date().toISOString()} ${line}\n`)
+    .catch(() => {
+      // Best-effort diagnostics; never let a log-sink failure disrupt forwarding.
+    });
 }
 
 // Attaches helper RPC notification → webContents.send forwarding.

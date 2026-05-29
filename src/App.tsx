@@ -3,6 +3,7 @@ import { SourceModal } from "./components/SourceModal";
 import { CropOverlay } from "./components/CropOverlay";
 import { HotkeysDialog } from "./components/HotkeysDialog";
 import { useStore } from "./store";
+import { shallow } from "zustand/shallow";
 import {
   initV2Engine,
   saveReplay as v2SaveReplay,
@@ -59,52 +60,93 @@ interface PendingStart {
 }
 
 export function App() {
-  const status = useStore((s) => s.status);
-  const setStatus = useStore((s) => s.setStatus);
-  const setRecording = useStore((s) => s.setRecording);
-  const tickElapsed = useStore((s) => s.tickElapsed);
-  const elapsedMs = useStore((s) => s.elapsedMs);
-  const setLastOutput = useStore((s) => s.setLastOutput);
-  const setLastError = useStore((s) => s.setLastError);
-  const log = useStore((s) => s.log);
-  const setAppInfo = useStore((s) => s.setAppInfo);
-
-  const preset = useStore((s) => s.preset);
-  const setPreset = useStore((s) => s.setPreset);
-  const outputDir = useStore((s) => s.outputDir);
-  const setOutputDir = useStore((s) => s.setOutputDir);
-  const withMic = useStore((s) => s.withMic);
-  const setMic = useStore((s) => s.setMic);
-  const withSystemAudio = useStore((s) => s.withSystemAudio);
-  const setSystemAudio = useStore((s) => s.setSystemAudio);
-  const hotkeysEnabled = useStore((s) => s.hotkeysEnabled);
+  const {
+    status,
+    setStatus,
+    setRecording,
+    tickElapsed,
+    elapsedMs,
+    setLastOutput,
+    setLastError,
+    log,
+    setAppInfo,
+    preset,
+    setPreset,
+    outputDir,
+    setOutputDir,
+    withMic,
+    setMic,
+    withSystemAudio,
+    setSystemAudio,
+    hotkeysEnabled,
+    hotkeyBindings,
+    setHotkeyBindings,
+    lastOutput,
+    lastError,
+    appInfo,
+    mode,
+    setMode,
+    customQuality,
+    setCustomQuality,
+    replay,
+    setReplay,
+    logs,
+    clearLogs,
+    logCollapsed,
+    setLogCollapsed,
+    v2State,
+    // T-029 / ISS-012: render-layer diagnostics read these v2 export selectors
+    // (also surfaced by the FSM via T-026) so a stuck-EXPORTING occurrence can be
+    // correlated against the renderer's local/derived UI inputs further below.
+    v2ExportId,
+    v2SnapshotId,
+    v2SessionId,
+    v2ExportProgress,
+    v2ExportOutputPath,
+    v2SessionReadyMs,
+  } = useStore((s) => ({
+    status: s.status,
+    setStatus: s.setStatus,
+    setRecording: s.setRecording,
+    tickElapsed: s.tickElapsed,
+    elapsedMs: s.elapsedMs,
+    setLastOutput: s.setLastOutput,
+    setLastError: s.setLastError,
+    log: s.log,
+    setAppInfo: s.setAppInfo,
+    preset: s.preset,
+    setPreset: s.setPreset,
+    outputDir: s.outputDir,
+    setOutputDir: s.setOutputDir,
+    withMic: s.withMic,
+    setMic: s.setMic,
+    withSystemAudio: s.withSystemAudio,
+    setSystemAudio: s.setSystemAudio,
+    hotkeysEnabled: s.hotkeysEnabled,
+    hotkeyBindings: s.hotkeyBindings,
+    setHotkeyBindings: s.setHotkeyBindings,
+    lastOutput: s.lastOutputPath,
+    lastError: s.lastError,
+    appInfo: s.appInfo,
+    mode: s.mode,
+    setMode: s.setMode,
+    customQuality: s.customQuality,
+    setCustomQuality: s.setCustomQuality,
+    replay: s.replay,
+    setReplay: s.setReplay,
+    logs: s.logs,
+    clearLogs: s.clearLogs,
+    logCollapsed: s.logCollapsed,
+    setLogCollapsed: s.setLogCollapsed,
+    v2State: s.v2State,
+    v2ExportId: s.v2ExportId,
+    v2SnapshotId: s.v2SnapshotId,
+    v2SessionId: s.v2SessionId,
+    v2ExportProgress: s.v2ExportProgress,
+    v2ExportOutputPath: s.v2ExportOutputPath,
+    v2SessionReadyMs: s.v2SessionReadyMs,
+  }), shallow);
   const setHotkeysEnabled = useStore((s) => s.setHotkeys);
-  const hotkeyBindings = useStore((s) => s.hotkeyBindings);
-  const setHotkeyBindings = useStore((s) => s.setHotkeyBindings);
-  const lastOutput = useStore((s) => s.lastOutputPath);
-  const lastError = useStore((s) => s.lastError);
-  const appInfo = useStore((s) => s.appInfo);
-  const mode = useStore((s) => s.mode);
-  const setMode = useStore((s) => s.setMode);
-  const customQuality = useStore((s) => s.customQuality);
-  const setCustomQuality = useStore((s) => s.setCustomQuality);
-  const replay = useStore((s) => s.replay);
-  const setReplay = useStore((s) => s.setReplay);
-  const logs = useStore((s) => s.logs);
-  const clearLogs = useStore((s) => s.clearLogs);
-  const logCollapsed = useStore((s) => s.logCollapsed);
-  const setLogCollapsed = useStore((s) => s.setLogCollapsed);
-
-  const v2State = useStore((s) => s.v2State);
-  // T-029 / ISS-012: render-layer diagnostics read these v2 export selectors
-  // (also surfaced by the FSM via T-026) so a stuck-EXPORTING occurrence can be
-  // correlated against the renderer's local/derived UI inputs further below.
-  const v2ExportId = useStore((s) => s.v2ExportId);
-  const v2SnapshotId = useStore((s) => s.v2SnapshotId);
-  const v2SessionId = useStore((s) => s.v2SessionId);
-  const v2ExportProgress = useStore((s) => s.v2ExportProgress);
-  const v2ExportOutputPath = useStore((s) => s.v2ExportOutputPath);
-  const v2SessionReadyMs = useStore((s) => s.v2SessionReadyMs);
   const v2ElapsedMs = useV2ElapsedMs(v2SessionReadyMs);
 
   // Initialize v2 engine subscriptions once on mount.

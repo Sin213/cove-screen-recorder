@@ -1,0 +1,16 @@
+{
+  "blockedBy": [
+    "T-045",
+    "T-046",
+    "T-047"
+  ],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Run the full v2.0.0 Linux smoke test suite after every cross-platform refactor (trait extraction, conditional compilation gates, Electron platform dispatch changes). Covers: PipeWire capture, NVENC encoding, Unix socket RPC, Wayland/X11 crop overlay, system audio, hotkeys, export pipeline, and rolling segments. Must pass at 1080p60 and 4K60 on the same hardware baselines used for v2.0.0 validation. Any regression blocks the refactor PR. Add this as a CI matrix job alongside the new Windows build so both platforms are green on every push.",
+  "id": "T-079",
+  "order": 110,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "Linux regression suite after cross-platform refactors",
+  "type": "task"
+}

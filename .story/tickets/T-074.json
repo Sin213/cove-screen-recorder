@@ -1,0 +1,15 @@
+{
+  "blockedBy": [
+    "T-056",
+    "T-052"
+  ],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Full validation matrix on Windows hardware: 1080p60, 1440p60, 4K60 across NVIDIA (NVENC), AMD (AMF), and Intel (QSV) GPUs. Measure: capture latency, encode latency, end-to-end frame time, CPU usage, GPU usage, memory footprint, disk I/O. Compare against Linux v2.0.0 baselines — target equal or better on equivalent hardware. Test 30-minute sustained recording for thermal/memory stability. Document results per GPU vendor.",
+  "id": "T-074",
+  "order": 60,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "Windows performance validation matrix",
+  "type": "task"
+}

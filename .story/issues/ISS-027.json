@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-027",
+  "impact": "tryAugmentWithDxgi makes a second captureListSources RPC call; fold when T-051 lands",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[performance] tryAugmentWithDxgi makes a second captureListSources RPC call; fold when T-051 l"
+}

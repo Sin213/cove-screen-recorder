@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Adapt the renderer UI for Windows conventions: native window controls (min/max/close buttons), proper font rendering (Segoe UI as system font fallback), DPI-aware layout, dark/light mode following Windows system theme (via nativeTheme), smooth window resize, and taskbar progress indicator during recording/export. Ensure the dark UI works correctly with Windows 10 and 11 title bars.",
+  "id": "T-067",
+  "order": 80,
+  "phase": "p7-win-electron",
+  "status": "open",
+  "title": "Windows UI/UX adaptations",
+  "type": "task"
+}

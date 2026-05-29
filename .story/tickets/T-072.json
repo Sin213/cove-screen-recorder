@@ -1,0 +1,12 @@
+{
+  "blockedBy": [],
+  "completedDate": null,
+  "createdDate": "2026-05-27",
+  "description": "Set up Authenticode code signing for the Windows installer, portable exe, and helper binary. Options: EV certificate (hardware token) for immediate SmartScreen trust, or OV certificate (cheaper, builds reputation over time). Configure electron-builder's win.certificateFile/certificatePassword or signtool integration. CI/CD signs during build via environment secrets. Sign both the inner exe and the NSIS installer wrapper.",
+  "id": "T-072",
+  "order": 40,
+  "phase": "p8-win-release",
+  "status": "open",
+  "title": "Windows code signing",
+  "type": "chore"
+}

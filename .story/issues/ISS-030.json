@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-030",
+  "impact": "Unknown GPU vendor maps to QSV-first which is suboptimal for VMs",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[ux] Unknown GPU vendor maps to QSV-first which is suboptimal for VMs"
+}

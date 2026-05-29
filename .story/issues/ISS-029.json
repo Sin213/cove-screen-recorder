@@ -1,0 +1,16 @@
+{
+  "components": [
+    "autonomous"
+  ],
+  "discoveredDate": "2026-05-27",
+  "id": "ISS-029",
+  "impact": "app.getAppPath() icon path — same pattern used by existing tray code; build config out of scope",
+  "location": [],
+  "phase": null,
+  "relatedTickets": [],
+  "resolution": null,
+  "resolvedDate": null,
+  "severity": "medium",
+  "status": "open",
+  "title": "[build] app.getAppPath() icon path — same pattern used by existing tray code; build conf"
+}
