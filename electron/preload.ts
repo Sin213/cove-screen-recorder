@@ -21,6 +21,8 @@ const api: CoveApi = {
   pickOutputDir: () => ipcRenderer.invoke("cove:pick-output-dir") as Promise<string | null>,
   openFolder: (dir) => ipcRenderer.invoke("cove:open-folder", dir),
   revealInFolder: (p) => ipcRenderer.invoke("cove:reveal", p),
+  listRecordings: (dir, limit) =>
+    ipcRenderer.invoke("cove:list-recordings", dir, limit) as Promise<import("./types").LibraryEntry[]>,
 
   beginRecording: (params: StartRecordingParams) =>
     ipcRenderer.invoke("cove:begin-recording", params) as Promise<{ recordingId: string }>,

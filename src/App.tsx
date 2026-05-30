@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SourceModal } from "./components/SourceModal";
 import { CropOverlay } from "./components/CropOverlay";
 import { HotkeysDialog } from "./components/HotkeysDialog";
+import { Gallery } from "./components/Gallery";
 import { useStore } from "./store";
 import { shallow } from "zustand/shallow";
 import {
@@ -756,7 +757,7 @@ export function App() {
             </span>
           </div>
 
-          {(isHudActive || livePreview) && (
+          {(isHudActive || livePreview) ? (
             <CapturePreview
               mode={mode}
               preset={preset}
@@ -764,7 +765,9 @@ export function App() {
               elapsedSeconds={elapsedSeconds}
               liveStream={livePreview}
             />
-          )}
+          ) : status === "idle" ? (
+            <Gallery />
+          ) : null}
 
           <Stats preset={preset} mode={mode} elapsedSeconds={elapsedSeconds} recording={isHudActive} />
 

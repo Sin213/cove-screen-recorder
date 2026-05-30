@@ -15,6 +15,7 @@ import {
 import { autoUpdater } from "electron-updater";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
 import { EngineSupervisor } from "./engine-supervisor";
@@ -987,6 +988,57 @@ function registerIpc(): void {
   ipcMain.handle("cove:open-file", async (_e, p: string) => {
     if (p && fs.existsSync(p)) await shell.openPath(p);
   });
+
+  ipcMain.handle(
+    "cove:list-recordings",
+    async (_e, dir: string | null, limit?: number): Promise<import("./types").LibraryEntry[]> => {
+      const ALLOWED_EXTS = new Set([".mp4", ".gif", ".webm"]);
+      const cap = Math.min(typeof limit === "number" && limit > 0 ? limit : 30, 100);
+      const scanDir = (() => {
+        if (typeof dir === "string" && dir.length > 0) {
+          const home = os.homedir();
+          const expanded =
+            dir === "~" ? home
+            : dir.startsWith("~/") || dir.startsWith("~\\") ? path.join(home, dir.slice(2))
+            : dir;
+          return path.resolve(expanded);
+        }
+        return defaultOutputDir();
+      })();
+      try {
+        const names = await fs.promises.readdir(scanDir);
+        const entries: import("./types").LibraryEntry[] = [];
+        for (const name of names) {
+          if (name.startsWith(".")) continue;
+          const ext = path.extname(name).toLowerCase();
+          if (!ALLOWED_EXTS.has(ext)) continue;
+          const full = path.join(scanDir, name);
+          try {
+            const st = await fs.promises.stat(full);
+            if (!st.isFile() || st.size === 0) continue;
+            entries.push({
+              path: full,
+              name,
+              bytes: st.size,
+              modified: st.mtimeMs,
+              durationSec: null,
+              thumbDataUrl: null,
+            });
+          } catch {
+            // disappeared or unreadable — skip
+          }
+        }
+        entries.sort((a, b) => {
+          const diff = b.modified - a.modified;
+          if (diff !== 0) return diff;
+          return b.name > a.name ? 1 : b.name < a.name ? -1 : 0;
+        });
+        return entries.slice(0, cap);
+      } catch {
+        return [];
+      }
+    },
+  );
 
   ipcMain.handle("cove:begin-recording", async (_e, params: StartRecordingParams) => {
     const outDir = params.outputDir || defaultOutputDir();
