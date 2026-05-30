@@ -205,8 +205,8 @@ body {
     linear-gradient(180deg, #14141d, #0d0d14);
   box-shadow: var(--shadow-card);
   overflow: hidden;
-  min-height: 180px;
-  max-height: 260px;
+  flex: 1;
+  min-height: 200px;
 }
 .gallery-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -261,6 +261,7 @@ body {
 }
 .gallery-card-thumb:hover .gallery-card-play { opacity: 1; }
 .gallery-card-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gallery-card-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .gallery-card-ext {
   font-family: 'Geist Mono', monospace; font-size: 11px; font-weight: 600;
   color: var(--accent); letter-spacing: 0.06em;
@@ -605,10 +606,11 @@ kbd {
 }
 .foot-row .lbl { color: var(--text-faint); font-family: 'Geist Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; }
 .foot-row .keys { font-family: 'Geist Mono', monospace; font-size: 11.5px; }
-.foot-row .keys b { color: var(--text); font-weight: 500; }
+.foot-row .keys b { color: var(--accent); font-weight: 600; }
 .foot-row .sep { color: var(--text-faint); margin: 0 6px; }
 .foot-row .platform { margin-left: auto; font-family: 'Geist Mono', monospace; color: var(--text-faint); font-size: 11.5px; display: flex; gap: 6px; align-items: center; }
 .foot-row .platform .pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); }
+.replay-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 
 .log {
   padding: 0 28px 16px;

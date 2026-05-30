@@ -1016,7 +1016,7 @@ export function App() {
                 </>
               )}
               <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
-                Hotkey: <b style={{ color: "var(--text-dim)" }}>{hotkeyBindings.replay}</b>
+                Hotkey: <b style={{ color: "var(--accent)", fontWeight: 600 }}>{hotkeyBindings.replay}</b>
               </span>
             </div>
           </div>

@@ -150,6 +150,7 @@ export interface CoveApi {
   openFolder: (dir: string) => Promise<void>;
   revealInFolder: (path: string) => Promise<void>;
   listRecordings: (dir: string | null, limit?: number) => Promise<LibraryEntry[]>;
+  getThumbnail: (path: string) => Promise<string | null>;
 
   beginRecording: (params: StartRecordingParams) => Promise<{ recordingId: string }>;
   saveChunk: (recordingId: string, buffer: ArrayBuffer) => Promise<void>;

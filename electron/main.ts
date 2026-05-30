@@ -16,6 +16,7 @@ import { autoUpdater } from "electron-updater";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { spawn } from "node:child_process";
 import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
 import { EngineSupervisor } from "./engine-supervisor";
@@ -770,6 +771,33 @@ function installDisplayMediaHandler(): void {
   );
 }
 
+function extractThumbnail(ffmpegPath: string, filePath: string): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const done = (val: string | null) => { if (!settled) { settled = true; resolve(val); } };
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(ffmpegPath, [
+        "-hide_banner", "-loglevel", "error",
+        "-ss", "0", "-i", filePath,
+        "-vframes", "1", "-vf", "scale=240:-2",
+        "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
+      ]);
+    } catch {
+      return done(null);
+    }
+    const timer = setTimeout(() => { try { proc.kill(); } catch { /**/ } done(null); }, 3000);
+    proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0 || chunks.length === 0) return done(null);
+      done(`data:image/jpeg;base64,${Buffer.concat(chunks).toString("base64")}`);
+    });
+    proc.on("error", () => { clearTimeout(timer); done(null); });
+  });
+}
+
 function defaultOutputDir(): string {
   const videos = app.getPath("videos");
   const dir = path.join(videos, "Cove Recordings");
@@ -987,6 +1015,22 @@ function registerIpc(): void {
 
   ipcMain.handle("cove:open-file", async (_e, p: string) => {
     if (p && fs.existsSync(p)) await shell.openPath(p);
+  });
+
+  ipcMain.handle("cove:get-thumbnail", async (_e, filePath: unknown): Promise<string | null> => {
+    if (typeof filePath !== "string" || !filePath) return null;
+    const ALLOWED_EXTS = new Set([".mp4", ".gif", ".webm"]);
+    if (!ALLOWED_EXTS.has(path.extname(filePath).toLowerCase())) return null;
+    const home = os.homedir();
+    const expanded =
+      filePath === "~" ? home
+      : filePath.startsWith("~/") || filePath.startsWith("~\\") ? path.join(home, filePath.slice(2))
+      : filePath;
+    const resolved = path.resolve(expanded);
+    const ffInfo = detectFfmpeg();
+    if (!ffInfo.available || !ffInfo.path) return null;
+    try { await fs.promises.access(resolved); } catch { return null; }
+    return extractThumbnail(ffInfo.path, resolved);
   });
 
   ipcMain.handle(
