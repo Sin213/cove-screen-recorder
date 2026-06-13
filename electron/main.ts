@@ -31,6 +31,9 @@ import type {
   RecordingProgress,
   StartRecordingParams,
 } from "./types";
+import { setupPortableMode } from "./portable";
+
+setupPortableMode();
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 
