@@ -14,6 +14,51 @@
   </head>
   <body class="bg-bg text-text antialiased">
     <div id="root"></div>
+    <div class="edge-handle" data-edge="Top"></div>
+    <div class="edge-handle" data-edge="Right"></div>
+    <div class="edge-handle" data-edge="Bottom"></div>
+    <div class="edge-handle" data-edge="Left"></div>
+    <div class="edge-handle corner" data-edge="TopLeft"></div>
+    <div class="edge-handle corner" data-edge="TopRight"></div>
+    <div class="edge-handle corner" data-edge="BottomLeft"></div>
+    <div class="resize-grip" title="Drag to resize"></div>
     <script type="module" src="./main.tsx"></script>
+    <script>
+      // 6px-wide edge handles + 8px corners overlay the visible 4px border
+      // so the user can grab anywhere on the frame. Resize + (for Left/Top
+      // edges) reposition via window.resizeTo / moveTo.
+      (function () {
+        function startResize(edge, e) {
+          e.preventDefault();
+          var startX = e.screenX, startY = e.screenY;
+          var startW = window.outerWidth, startH = window.outerHeight;
+          var startWinX = window.screenX, startWinY = window.screenY;
+          function onMove(e2) {
+            var dx = e2.screenX - startX, dy = e2.screenY - startY;
+            var newW = startW, newH = startH, newX = startWinX, newY = startWinY;
+            if (edge.indexOf('Left')   !== -1) { newW = startW - dx; newX = startWinX - dx; }
+            if (edge.indexOf('Right')  !== -1) { newW = startW + dx; }
+            if (edge.indexOf('Top')    !== -1) { newH = startH - dy; newY = startWinY - dy; }
+            if (edge.indexOf('Bottom') !== -1) { newH = startH + dy; }
+            if (newW < 200) newW = 200;
+            if (newH < 150) newH = 150;
+            window.resizeTo(newW, newH);
+            if (newX !== startWinX || newY !== startWinY) window.moveTo(newX, newY);
+          }
+          function onUp() {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          }
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        }
+        document.querySelectorAll('.resize-grip, .edge-handle').forEach(function (el) {
+          el.addEventListener('mousedown', function (e) {
+            var edge = el.dataset.edge || 'BottomRight';
+            startResize(edge, e);
+          });
+        });
+      })();
+    </script>
   </body>
 </html>
