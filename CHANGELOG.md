@@ -2,6 +2,12 @@
 
 All notable changes to Cove Screen Recorder are documented in this file.
 
+## [3.1.3] - 2026-07-01
+
+### Fixed
+
+- Opening a recording or its folder from inside the AppImage could crash the file manager or media player. The AppImage's bundled library path leaked into external programs; they are now launched with a clean environment.
+
 ## [2.0.0] — 2026-05-27
 
 ### Summary
