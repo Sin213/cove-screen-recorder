@@ -32,8 +32,63 @@ import type {
   StartRecordingParams,
 } from "./types";
 import { setupPortableMode } from "./portable";
+import { pathToFileURL } from "node:url";
 
 setupPortableMode();
+
+// The AppImage launcher exports LD_LIBRARY_PATH pointing at the bundle's
+// libraries. shell.openPath spawns xdg-open with our environment, so the
+// launched app (file manager, player) inherits it, loads the bundle's
+// outdated libs, and crashes on startup (e.g. liblzma "version XZ_5.4 not
+// found"). Returns null when not running from an AppImage.
+function appImageChildEnv(): NodeJS.ProcessEnv | null {
+  if (process.platform !== "linux") return null;
+  if (!process.env.APPIMAGE && !process.env.APPDIR) return null;
+  const env = { ...process.env };
+  delete env.LD_LIBRARY_PATH;
+  delete env.LD_PRELOAD;
+  delete env.GSETTINGS_SCHEMA_DIR;
+  return env;
+}
+
+async function openPathExternal(target: string): Promise<string> {
+  const env = appImageChildEnv();
+  if (env) {
+    try {
+      spawn("xdg-open", [target], { env, detached: true, stdio: "ignore" }).unref();
+      return "";
+    } catch {
+      /* fall through to shell.openPath */
+    }
+  }
+  return shell.openPath(target);
+}
+
+function revealExternal(target: string): void {
+  const env = appImageChildEnv();
+  if (env) {
+    // FileManager1 keeps the file highlighted; the D-Bus-activated file
+    // manager gets the session's clean env. Fall back to the parent folder.
+    const child = spawn(
+      "dbus-send",
+      [
+        "--session", "--print-reply",
+        "--dest=org.freedesktop.FileManager1",
+        "/org/freedesktop/FileManager1",
+        "org.freedesktop.FileManager1.ShowItems",
+        `array:string:${pathToFileURL(target).href}`,
+        "string:",
+      ],
+      { env, stdio: "ignore" },
+    );
+    child.on("error", () => void openPathExternal(path.dirname(target)));
+    child.on("exit", (code) => {
+      if (code !== 0) void openPathExternal(path.dirname(target));
+    });
+    return;
+  }
+  shell.showItemInFolder(target);
+}
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 
@@ -1009,15 +1064,15 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("cove:open-folder", async (_e, dir: string) => {
-    if (dir && fs.existsSync(dir)) await shell.openPath(dir);
+    if (dir && fs.existsSync(dir)) await openPathExternal(dir);
   });
 
   ipcMain.handle("cove:reveal", async (_e, p: string) => {
-    if (p && fs.existsSync(p)) shell.showItemInFolder(p);
+    if (p && fs.existsSync(p)) revealExternal(p);
   });
 
   ipcMain.handle("cove:open-file", async (_e, p: string) => {
-    if (p && fs.existsSync(p)) await shell.openPath(p);
+    if (p && fs.existsSync(p)) await openPathExternal(p);
   });
 
   ipcMain.handle("cove:get-thumbnail", async (_e, filePath: unknown): Promise<string | null> => {
@@ -1240,7 +1295,7 @@ function registerIpc(): void {
     if (!rpc?.connected) return disconnectedEnv();
     const env = await rpcEnv(() => rpc.engineDiagnosticsBundlePath());
     if (!env.ok) return env;
-    if (env.result.path) await shell.openPath(env.result.path);
+    if (env.result.path) await openPathExternal(env.result.path);
     return { ok: true, result: null };
   });
 
