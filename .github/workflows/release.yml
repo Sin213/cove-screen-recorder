@@ -60,7 +60,7 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.sha256
-            release/*.yml
+            release/latest*.yml
           retention-days: 1
 
   build-windows:
@@ -105,7 +105,7 @@ jobs:
           path: |
             release/*.exe
             release/*.sha256
-            release/*.yml
+            release/latest*.yml
           retention-days: 1
 
   publish-release:
@@ -140,6 +140,6 @@ jobs:
             release/*.deb
             release/*.exe
             release/*.sha256
-            release/*.yml
+            release/latest*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

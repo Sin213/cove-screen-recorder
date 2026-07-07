@@ -27,7 +27,8 @@ for f in \
   "$release"/*.zip \
   "$release"/*.msi \
   "$release"/*.snap \
-  "$release"/*.rpm
+  "$release"/*.rpm \
+  "$release"/latest*.yml
 do
   [[ -f "$f" ]] || continue
   out="${f}.sha256"
