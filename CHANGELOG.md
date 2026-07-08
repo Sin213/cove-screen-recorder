@@ -2,6 +2,12 @@
 
 All notable changes to Cove Screen Recorder are documented in this file.
 
+## [3.2.1] - 2026-07-08
+
+### Fixed
+
+- Auto-update no longer fails silently when AppImageLauncher is installed (#9). electron-updater finished updates by launching the new AppImage; AppImageLauncher intercepted that launch and the install died with a swallowed EPIPE. Updates are now installed by atomically swapping the AppImage file in place - no process launch, nothing to intercept. The new version takes effect on the next start, and download/install/failure states are surfaced through the toast system. Reported by @kraibse.
+
 ## [3.2.0] - 2026-07-07
 
 ### Added

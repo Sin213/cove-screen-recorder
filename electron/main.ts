@@ -21,6 +21,7 @@ import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
 import { EngineSupervisor } from "./engine-supervisor";
 import type { EngineRpc } from "./engine-rpc";
+import { installAppImageUpdate } from "./appimage-updater";
 import type {
   AppInfo,
   CaptureSource,
@@ -30,6 +31,7 @@ import type {
   HotkeyBindFailedPayload,
   RecordingProgress,
   StartRecordingParams,
+  UpdateEvent,
 } from "./types";
 import { setupPortableMode } from "./portable";
 import { pathToFileURL } from "node:url";
@@ -103,6 +105,16 @@ let lastReadyPayload: { helperVersion: string; protocolVersion: number } | null 
 // Single transient blocked payload — cleared when engine reaches ready.
 // Re-sent on did-finish-load to cover startup race (supervisor fails before window loads).
 let lastBlockedPayload: { code: string; detail?: string } | null = null;
+
+// Last auto-update event — re-sent on did-finish-load so a fast update check
+// result (failure or cached download) isn't dropped before the renderer's
+// toast subscription is live.
+let lastUpdateEvent: UpdateEvent | null = null;
+
+function sendUpdateEvent(ev: UpdateEvent): void {
+  lastUpdateEvent = ev;
+  mainWindow?.webContents.send("cove:update-event", ev);
+}
 
 // Structured result envelope for v2 IPC handlers.
 // Returned as a plain object so Electron's structured clone serializes all fields
@@ -425,6 +437,9 @@ function createWindow(): void {
     }
     if (lastBlockedPayload) {
       mainWindow?.webContents.send("cove/engine/blocked", lastBlockedPayload);
+    }
+    if (lastUpdateEvent) {
+      mainWindow?.webContents.send("cove:update-event", lastUpdateEvent);
     }
   });
 
@@ -1552,9 +1567,51 @@ app.whenReady().then(() => {
   });
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-      console.warn("auto-update check failed:", err);
-    });
+    const appImagePath = process.platform === "linux" ? process.env.APPIMAGE : undefined;
+    if (appImagePath) {
+      // Issue #9: electron-updater's AppImageUpdater finishes an update by
+      // exec'ing the new AppImage; AppImageLauncher intercepts that exec and
+      // the child exits early, killing the update with a silent EPIPE.
+      // electron-updater still detects and downloads (verifying sha512 from
+      // latest-linux.yml); the install is a plain in-place file swap with no
+      // child process, so AppImageLauncher has nothing to intercept. The new
+      // version takes effect on next launch.
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = false;
+      autoUpdater.on("update-available", (info) => {
+        sendUpdateEvent({ kind: "downloading", version: info.version });
+      });
+      autoUpdater.on("update-downloaded", (info) => {
+        try {
+          installAppImageUpdate(info.downloadedFile, appImagePath);
+          sendUpdateEvent({ kind: "installed", version: info.version });
+        } catch (err) {
+          console.warn("auto-update install failed:", err);
+          sendUpdateEvent({
+            kind: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      });
+      autoUpdater.on("error", (err) => {
+        console.warn("auto-update failed:", err);
+        sendUpdateEvent({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.warn("auto-update check failed:", err);
+        sendUpdateEvent({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+    } else {
+      autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+        console.warn("auto-update check failed:", err);
+      });
+    }
   }
 });
 

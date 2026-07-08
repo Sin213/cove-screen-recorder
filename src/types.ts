@@ -17,6 +17,7 @@ export type {
   ReplayStartParams,
   ReplayState,
   StartRecordingParams,
+  UpdateEvent,
 } from "../electron/types";
 
 export interface LogEntry {

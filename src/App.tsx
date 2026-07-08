@@ -244,6 +244,24 @@ export function App() {
     return off;
   }, [log]);
 
+  // Auto-update lifecycle (issue #9): surface main-process update events so
+  // download/install/failure is never silent again.
+  useEffect(() => {
+    const off = window.cove.onUpdateEvent((ev) => {
+      if (ev.kind === "downloading") {
+        log("info", `Update ${ev.version} available - downloading`);
+        addToast("info", `Downloading update ${ev.version}…`);
+      } else if (ev.kind === "installed") {
+        log("good", `Update ${ev.version} installed - takes effect on next launch`);
+        addToast("success", `Update ${ev.version} installed - restart to apply`);
+      } else {
+        log("warn", `Auto-update failed: ${ev.message}`);
+        addToast("warning", `Auto-update failed: ${ev.message}`);
+      }
+    });
+    return off;
+  }, [log, addToast]);
+
   const getCurrentAppInfo = useCallback(async () => {
     if (appInfo) return appInfo;
     const info = await window.cove.getAppInfo();

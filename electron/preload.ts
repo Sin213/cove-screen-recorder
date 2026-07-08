@@ -10,6 +10,7 @@ import type {
   ReplayStartParams,
   ReplayState,
   StartRecordingParams,
+  UpdateEvent,
 } from "./types";
 
 const api: CoveApi = {
@@ -67,6 +68,11 @@ const api: CoveApi = {
     const listener = (_: unknown, p: RecordingProgress) => cb(p);
     ipcRenderer.on("cove:progress", listener);
     return () => ipcRenderer.removeListener("cove:progress", listener);
+  },
+  onUpdateEvent: (cb) => {
+    const listener = (_: unknown, ev: UpdateEvent) => cb(ev);
+    ipcRenderer.on("cove:update-event", listener);
+    return () => ipcRenderer.removeListener("cove:update-event", listener);
   },
 
   windowMinimize: () => ipcRenderer.send("cove:window-minimize"),

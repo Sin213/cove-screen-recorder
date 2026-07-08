@@ -187,11 +187,18 @@ export interface CoveApi {
 
   onHotkey: (cb: (action: "toggle" | "gif" | "preview" | "replay") => void) => () => void;
   onProgress: (cb: (p: RecordingProgress) => void) => () => void;
+  onUpdateEvent: (cb: (ev: UpdateEvent) => void) => () => void;
 
   windowMinimize: () => void;
   windowToggleMaximize: () => void;
   windowClose: () => void;
 }
+
+// Auto-update lifecycle events surfaced to the renderer toast system.
+export type UpdateEvent =
+  | { kind: "downloading"; version: string }
+  | { kind: "installed"; version: string }
+  | { kind: "error"; message: string };
 
 export interface ReplayStartParams {
   outputDir: string;
