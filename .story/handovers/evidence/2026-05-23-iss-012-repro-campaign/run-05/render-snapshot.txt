@@ -1,5 +1,0 @@
-Single save, clean:
-
-Save 5 (09:13:48, F8): v2State=RECORDING saveControlsDisabled=false after export.completed
-Progress=100 at 09:13:50, export.completed at 09:13:53 (3s gap, longer than prior runs).
-No hang. FSM transitioned EXPORTING→RECORDING→IDLE cleanly.

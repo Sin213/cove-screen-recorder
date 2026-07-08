@@ -1,5 +1,0 @@
-helper_pid=1057119
-engine_log_offset_pre_row=129049
-captured_at=2026-05-22T17:53:21Z
-engine_log_path=/home/sin/.config/Cove Screen Recorder/logs/engine.log
-note=helper PID changed from initial 1037950 to current 1057119 due to operator-driven engine.restart() (workaround for the engine.onReady subscription race investigated in ../../blocker-initial-ready-race/; not filed as a formal ISS this pass).

@@ -1,2 +1,0 @@
-?? .story/handovers/evidence/2026-05-19-t-021-mvp-smoke-rerun-11/preflight-git-status.txt
-?? .story/handovers/evidence/2026-05-19-t-021-mvp-smoke-rerun-11/preflight-head.txt

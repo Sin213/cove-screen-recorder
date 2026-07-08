@@ -1,1 +1,0 @@
-/run/user/1000/cove-screen-recorder/runner-db09869d.sock

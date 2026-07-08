@@ -1,9 +1,0 @@
-=== setV2State("RECORDING") / setState("RECORDING") callsite check ===
-Date: 2026-05-18
-
-Command: grep -RIn 'setV2State.*"RECORDING"\|setState.*"RECORDING"' src/v2 src/App.tsx
-
-Result (exactly ONE v2 callsite):
-src/v2/engine.ts:18:  gs().setV2State("RECORDING");
-
-Interpretation: PASS — single callsite invariant holds.

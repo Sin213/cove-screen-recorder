@@ -1,2 +1,0 @@
-VITE_COVE_V2_UI=1 npm run dev launched at 2026-05-22T08:11:58-07:00
-Helper socket: /run/user/1000/cove-screen-recorder/engine.sock

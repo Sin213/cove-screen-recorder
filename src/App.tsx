@@ -3,6 +3,7 @@ import { SourceModal } from "./components/SourceModal";
 import { CropOverlay } from "./components/CropOverlay";
 import { HotkeysDialog } from "./components/HotkeysDialog";
 import { Gallery } from "./components/Gallery";
+import { ToastContainer } from "./components/ToastContainer";
 import { useStore } from "./store";
 import { shallow } from "zustand/shallow";
 import {
@@ -70,6 +71,8 @@ export function App() {
     setLastOutput,
     setLastError,
     log,
+    addToast,
+    removeToast,
     setAppInfo,
     preset,
     setPreset,
@@ -114,6 +117,8 @@ export function App() {
     setLastOutput: s.setLastOutput,
     setLastError: s.setLastError,
     log: s.log,
+    addToast: s.addToast,
+    removeToast: s.removeToast,
     setAppInfo: s.setAppInfo,
     preset: s.preset,
     setPreset: s.setPreset,
@@ -164,12 +169,6 @@ export function App() {
   // Start button disabled between requestSession dispatch and the wrapper's
   // resolution so a second click cannot kick off a parallel negotiation.
   const [v2StartPending, setV2StartPending] = useState(false);
-  const [hotkeyToast, setHotkeyToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hotkeyToast) return;
-    const t = setTimeout(() => setHotkeyToast(null), 3000);
-    return () => clearTimeout(t);
-  }, [hotkeyToast]);
 
   // ISS-008 remediation: gate the visible Start/Stop replay buffer UI behind
   // VITE_COVE_V2_UI so smoke can drive the v2 helper capture path. When OFF,
@@ -197,6 +196,7 @@ export function App() {
       setAppInfo(info);
       if (!info.ffmpeg.available) {
         log("warn", "ffmpeg not found — recordings will save as raw .webm. Install ffmpeg for MP4/GIF.");
+        addToast("warning", "ffmpeg not found - recordings will save as raw .webm");
       } else if (info.ffmpeg.encoders.length > 0) {
         log("info", `ffmpeg ${info.ffmpeg.version ?? ""} · encoders: ${info.ffmpeg.encoders.slice(0, 6).join(", ")}${info.ffmpeg.encoders.length > 6 ? "…" : ""}`);
       }
@@ -205,7 +205,7 @@ export function App() {
       }
     });
     return () => { mounted = false; };
-  }, [setAppInfo, log]);
+  }, [setAppInfo, log, addToast]);
 
   useEffect(() => {
     void window.cove.registerHotkeys(hotkeysEnabled);
@@ -283,15 +283,17 @@ export function App() {
         setStatus("recording");
         const region = cropRect ? ` · ${cropRect.width}×${cropRect.height}` : "";
         log("info", `Recording ${source.name} (${PRESETS[presetId].name}${region})`);
+        addToast("info", "Recording started");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log("error", `Failed to start: ${msg}`);
+        addToast("error", `Failed to start: ${msg}`);
         setLastError(msg);
         setStatus("idle");
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, setStatus, setRecording, setLastError, log],
+    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, setStatus, setRecording, setLastError, log, addToast],
   );
 
   const startWaylandCapture = useCallback(
@@ -329,19 +331,21 @@ export function App() {
         setStatus("recording");
         const region = cropRect ? ` · ${cropRect.width}×${cropRect.height}` : "";
         log("info", `Recording ${kind} (${PRESETS[presetId].name}${region})`);
+        addToast("info", "Recording started");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (err instanceof DOMException && err.name === "NotAllowedError") {
           log("info", "Capture cancelled");
         } else {
           log("error", `Failed to start: ${msg}`);
+          addToast("error", `Failed to start: ${msg}`);
           setLastError(msg);
         }
         setStatus("idle");
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, appInfo, setStatus, setRecording, setLastError, log],
+    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, appInfo, setStatus, setRecording, setLastError, log, addToast],
   );
 
   const beginScreen = useCallback(
@@ -411,9 +415,12 @@ export function App() {
             setRecording(session.recordingId);
             setStatus("recording");
             log("info", "Recording started");
+            addToast("info", "Recording started");
           } catch (err) {
             acquired.sourceStream.getTracks().forEach((t) => t.stop());
-            log("error", `Failed to start: ${err instanceof Error ? err.message : String(err)}`);
+            const msg = err instanceof Error ? err.message : String(err);
+            log("error", `Failed to start: ${msg}`);
+            addToast("error", `Failed to start: ${msg}`);
             setStatus("idle");
           }
         } catch (err) {
@@ -436,7 +443,7 @@ export function App() {
       if (result.source) await startWithSource(result.source, presetId, result.rect);
       else log("error", "Crop selection returned no source.");
     },
-    [status, getCurrentAppInfo, setStatus, startWithSource, log, customQuality, withSystemAudio, outputDir, withMic, replay.quality, setRecording, setLastError, setLivePreview],
+    [status, getCurrentAppInfo, setStatus, startWithSource, log, addToast, customQuality, withSystemAudio, outputDir, withMic, replay.quality, setRecording, setLastError, setLivePreview],
   );
 
   const confirmCrop = useCallback(
@@ -469,13 +476,16 @@ export function App() {
         setRecording(session.recordingId);
         setStatus("recording");
         log("info", `Recording cropped region · ${cropRect.width}×${cropRect.height}`);
+        addToast("info", "Recording started");
       } catch (err) {
         acquired.sourceStream.getTracks().forEach((t) => t.stop());
-        log("error", `Failed to start: ${err instanceof Error ? err.message : String(err)}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        log("error", `Failed to start: ${msg}`);
+        addToast("error", `Failed to start: ${msg}`);
         setStatus("idle");
       }
     },
-    [pendingCrop, outputDir, customQuality, withMic, withSystemAudio, appInfo, setStatus, setRecording, setLastError, log],
+    [pendingCrop, outputDir, customQuality, withMic, withSystemAudio, appInfo, setStatus, setRecording, setLastError, log, addToast],
   );
 
   const cancelCrop = useCallback(() => {
@@ -515,15 +525,17 @@ export function App() {
       });
       if (result.ok && result.outputPath) {
         setLastOutput(result.outputPath);
+        addToast("success", `Saved → ${result.outputPath}`);
         if (result.error) log("warn", result.error);
       } else if (!result.ok) {
         log("error", result.error ?? "Finalize failed");
+        addToast("error", result.error ?? "Finalize failed");
         setLastError(result.error ?? "Finalize failed");
       }
       setRecording(null);
       setStatus("idle");
     },
-    [customQuality, log, setLastOutput, setLastError, setRecording, setStatus],
+    [customQuality, log, addToast, setLastOutput, setLastError, setRecording, setStatus],
   );
 
   // Keep ref synced so onAutoStop can call the latest stopFlow without
@@ -559,16 +571,18 @@ export function App() {
       });
       setReplayHandle(handle);
       log("good", `Replay buffer started (${Math.round(replay.lengthSeconds / 60)} min window)`);
+      addToast("success", "Replay buffer started");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (err instanceof DOMException && err.name === "NotAllowedError") {
         log("info", "Replay buffer cancelled");
       } else {
         log("error", `Couldn't start replay buffer: ${msg}`);
+        addToast("error", `Couldn't start replay buffer: ${msg}`);
         setLastError(msg);
       }
     }
-  }, [replayHandle, outputDir, preset, customQuality, withMic, withSystemAudio, replay.lengthSeconds, log, setLastError]);
+  }, [replayHandle, outputDir, preset, customQuality, withMic, withSystemAudio, replay.lengthSeconds, log, addToast, setLastError]);
 
   const startReplay = useCallback(async () => {
     if (replayHandle) return;
@@ -588,7 +602,8 @@ export function App() {
     setReplayHandle(null);
     setReplayBuffered(0);
     log("info", "Replay buffer stopped");
-  }, [log]);
+    addToast("info", "Replay buffer stopped");
+  }, [log, addToast]);
 
   const saveReplay = useCallback(async () => {
     const h = replayHandleRef.current;
@@ -605,24 +620,30 @@ export function App() {
       "info",
       `[export lifecycle][render] saveReplay start (v1): status=${useStore.getState().status} v2State=${useStore.getState().v2State}`,
     );
+    // Persistent until the save resolves - replaced by a success/error toast.
+    const savingToastId = addToast("info", "Saving replay…", { duration: 0 });
     setReplaySaving(true);
     try {
       const result = await h.save();
+      removeToast(savingToastId);
       if (result.outputPath) {
         setLastOutput(result.outputPath);
         log("good", `Replay saved → ${result.outputPath}`);
+        addToast("success", `Replay saved → ${result.outputPath}`);
       } else if (result.error) {
         log("error", `Replay save failed: ${result.error}`);
+        addToast("error", `Replay save failed: ${result.error}`);
         setLastError(result.error);
       }
     } finally {
+      removeToast(savingToastId);
       setReplaySaving(false);
       log(
         "info",
         `[export lifecycle][render] saveReplay finally (v1): replaySaving cleared status=${useStore.getState().status} v2State=${useStore.getState().v2State}`,
       );
     }
-  }, [log, setLastOutput, setLastError, replaySaving]);
+  }, [log, addToast, removeToast, setLastOutput, setLastError, replaySaving]);
 
   // Hotkey + Esc.
   useEffect(() => {
@@ -634,8 +655,6 @@ export function App() {
         if (status === "idle" && !v2Busy) void beginCrop("gif", true);
       } else if (action === "replay") {
         if (v2State === "RECORDING") {
-          const replayKey = useStore.getState().hotkeyBindings.replay.toUpperCase();
-          setHotkeyToast(`${replayKey} · Saving replay…`);
           log(
             "info",
             `[export lifecycle][render] v2SaveReplay start (hotkey): v2State=${v2State} v2SnapshotId=${useStore.getState().v2SnapshotId ?? "null"} v2ExportId=${useStore.getState().v2ExportId ?? "null"}`,
@@ -1182,7 +1201,7 @@ export function App() {
         </div>
       </div>
 
-      {hotkeyToast && <div className="hotkey-toast">{hotkeyToast}</div>}
+      <ToastContainer />
 
       {/* Existing X11/Windows source picker — restyled by the new CSS */}
       {pendingStart && (

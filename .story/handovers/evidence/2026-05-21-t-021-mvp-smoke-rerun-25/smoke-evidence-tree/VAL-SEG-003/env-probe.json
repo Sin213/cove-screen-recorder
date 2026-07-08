@@ -1,7 +1,0 @@
-{
-  "display": ":1",
-  "waylandDisplay": "wayland-0",
-  "xdgRuntimeDir": "/run/user/1000",
-  "portalRunning": true,
-  "gpuInfo": "nvidia: NVIDIA GeForce RTX 4080 SUPER, 595.71.05"
-}

@@ -2,6 +2,16 @@
 
 All notable changes to Cove Screen Recorder are documented in this file.
 
+## [3.2.0] - 2026-07-07
+
+### Added
+
+- Unified toast notification system (#8). On-screen toasts now appear for recording start, save success and failure, replay buffer start/stop, replay save progress and result, missing ffmpeg, and recording engine ready/crashed/session lost. Toasts auto-dismiss per type (info 3s, success 4s, warning 5s, error 6s), can be clicked away, and stack up to 5. Reported by @kraibse.
+
+### Fixed
+
+- Removed the runtime desktop-file installer that created a duplicate application shortcut next to AppImageLauncher's entry and left a dead shortcut behind after auto-updates replaced the AppImage (#7). Desktop integration is now left to AppImageLauncher and the packaged .deb. Reported by @kraibse.
+
 ## [3.1.3] - 2026-07-01
 
 ### Fixed

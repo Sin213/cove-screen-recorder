@@ -1,40 +1,38 @@
-# Handoff: GIF hotkey overlay lifecycle ordering fix
+# GitHub Issues #7 and #8 - Desktop-file removal + unified toast system
 
-## Scope
+## Task
 
-Fix the global GIF hotkey crop overlay teardown ordering so:
-1. Overlay unmounts completely before any recording state transition
-2. One drag auto-starts recording (no confirm click needed)
-3. Crop UI never visible during recording
+Fix the two open GitHub issues:
 
-## Root cause
+- **#7** - Duplicate desktop shortcuts: `installLinuxDesktopFile()` collides with AppImageLauncher and its hardcoded `Exec=` path breaks after electron-updater replaces the AppImage. Fix per issue: remove the function and its call site entirely.
+- **#8** - Unified toast notification system: Zustand-based toast queue, `ToastContainer` component, CSS variants, toast calls at v1 recording lifecycle points in `App.tsx`, and v2 engine lifecycle points in `src/v2/engine.ts`. Zero new dependencies.
 
-`setPendingCrop(null)` and `setStatus("preparing")` were batched in the same React render. The overlay removal and recording-HUD transition painted simultaneously, so the crop modal was still visible when capture began.
+## Scope (files changed)
 
-## Fix
+| File | Change |
+|------|--------|
+| `electron/main.ts` | #7: removed `installLinuxDesktopFile()` (former lines 1426-1477) and its call in `app.whenReady()` |
+| `src/store.ts` | #8: `Toast`/`ToastType` types, `toasts` state, `addToast` (per-type auto-dismiss defaults, stack capped at 5, oldest dropped), `removeToast` |
+| `src/components/ToastContainer.tsx` | #8: new component - stacked toasts at fixed bottom-center, per-toast auto-dismiss timer (duration 0 = persistent), click to dismiss |
+| `src/index.css` | #8: `.toast-stack` (z-index 60, below modals at 70), `.toast-item` + 4 type variants; removed now-dead `.hotkey-toast` rule (kept `toast-in` keyframes) |
+| `src/App.tsx` | #8: removed `hotkeyToast` state/effect/render, mounted `<ToastContainer />`; toasts for ffmpeg-missing, recording start (all 4 v1 start paths), start failure, finalize save success/failure, replay buffer start/stop/fail, v1 replay save (persistent while in flight, then success/error); v2 hotkey path no longer sets the old toast (engine owns it) |
+| `src/v2/engine.ts` | #8: toasts for engine ready / crashed, session lost (suppressed on user-requested stop via `stopCapture` flag), v2 recording started, persistent "Saving replay" toast in `saveReplay()` cleared on every terminal path (export completed/failed/cancelled, watchdog timeout, RPC rejection, no-snapshot, engine crash/unavailable) |
 
-**`src/App.tsx` — `confirmCrop`**: Split into three phases:
-1. `setPendingCrop(null)` — unmount overlay (this render only)
-2. `await rAF + 200ms` — React paints removal, compositor settles
-3. `setStatus("preparing")` + start capture — recording state begins after overlay is gone
+## Design decisions
 
-**`src/App.tsx` — `beginCrop`**: Accept explicit `autoStart` parameter. Only the GIF hotkey call site (`action === "gif"`) passes `true`. Manual crop mode is unchanged.
+- Toast durations per issue #8 table: info 3s, success 4s, warning 5s, error 6s, `duration: 0` persistent.
+- The persistent v2 "Saving replay" toast lives in `engine.ts` (module-level id), because the export terminal events - not the `saveReplay()` promise - mark completion.
+- `_userStopRequested` flag in `engine.ts` prevents a spurious "Capture session lost" warning toast when the operator stops capture intentionally.
+- "Recording engine ready" success toast fires on BOOTING/ENGINE_DOWN/ENGINE_UNAVAILABLE -> IDLE transitions only (guard already existed), so it cannot repeat while IDLE.
+- Existing log-panel entries, recording HUD, status pill, and `lastOutput`/`lastError` panel sections are unchanged (regression criterion in #8).
 
-**`src/components/CropOverlay.tsx`**:
-- `autoStart` prop: `onPointerUp` auto-confirms drawn region, no button click
-- Pointer capture ensures release outside overlay still confirms
-- Manual mode unchanged: draw region, click "Start recording"
+## Out of scope
 
-## CropOverlay compositor fix (2026-05-26)
+- No new npm dependencies (criterion of #8).
+- No changes to Gallery, Diagnostics, LogPanel, or release tooling.
+- Pre-existing modified `handoff.md` was replaced by this handoff (it documented a completed prior pass).
 
-Replaced single clip-path polygon dim layer with four deterministic absolute-positioned
-rectangles (top/bottom/left/right). The bridge-donut `clipPath: polygon(...)` caused dark
-vertical bands on Wayland Ozone under Electron/Chromium GPU compositor. Four plain rects
-with `position: absolute` + `background: rgba(0,0,0,0.45)` are compositor-safe.
+## Verification
 
-No coordinate, interaction, timing, or lifecycle changes.
-
-## Files changed
-
-- `src/App.tsx`
-- `src/components/CropOverlay.tsx`
+- `npm run typecheck` - PASS (renderer + electron + validation tsconfigs)
+- `npm run build:renderer` - PASS

@@ -18,6 +18,26 @@ function _enterRecording(): void {
   gs().setV2State("RECORDING");
 }
 
+// Persistent "Saving replay…" toast shown while a v2 save/export is in
+// flight. Replaced by a success/error toast on the terminal export event.
+let _replaySaveToastId: string | null = null;
+
+function _showReplaySaveToast(): void {
+  _clearReplaySaveToast();
+  _replaySaveToastId = gs().addToast("info", "Saving replay…", { duration: 0 });
+}
+
+function _clearReplaySaveToast(): void {
+  if (_replaySaveToastId !== null) {
+    gs().removeToast(_replaySaveToastId);
+    _replaySaveToastId = null;
+  }
+}
+
+// Set by stopCapture() so an operator-requested stop doesn't surface a
+// "session lost" warning toast.
+let _userStopRequested = false;
+
 // ── EXPORTING watchdog (ISS-012) ────────────────────────────────────────────
 // If the helper's export task panics, is aborted, or a terminal event is lost
 // in IPC transit, the renderer stays stuck in EXPORTING forever. This watchdog
@@ -37,6 +57,8 @@ function _startExportWatchdog(): void {
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
     _releaseCurrentSnapshot();
+    _clearReplaySaveToast();
+    gs().addToast("warning", "Replay export timed out");
     if (gs().v2SessionId !== null) {
       _enterRecording();
     } else {
@@ -83,6 +105,7 @@ async function _applyEngineReady(info: { helperVersion: string; protocolVersion:
   const cur = gs().v2State;
   if (cur === "BOOTING" || cur === "ENGINE_DOWN" || cur === "ENGINE_UNAVAILABLE") {
     gs().setV2State("IDLE");
+    gs().addToast("success", "Recording engine ready");
     try {
       const result = await window.coveApi.replay.recoverableSessions() as { sessions?: { session_id: string }[] };
       const sessions = result?.sessions ?? [];
@@ -125,6 +148,8 @@ export function initV2Engine(): Unsub {
 
   subs.push(api.engine.onCrashed(() => {
     _clearExportWatchdog();
+    _clearReplaySaveToast();
+    gs().addToast("error", "Recording engine crashed");
     gs().setV2State("ENGINE_DOWN");
     gs().setV2SessionId(null);
     gs().setV2SessionReadyMs(null);
@@ -136,6 +161,7 @@ export function initV2Engine(): Unsub {
   subs.push(api.engine.onStateChanged((state) => {
     if (state === "unavailable") {
       _clearExportWatchdog();
+      _clearReplaySaveToast();
       gs().setV2State("ENGINE_UNAVAILABLE");
       gs().setV2SessionId(null);
       gs().setV2SessionReadyMs(null);
@@ -157,6 +183,7 @@ export function initV2Engine(): Unsub {
     gs().setV2SessionReadyMs(Date.now());
     _resetSegDiagEdges();
     _enterRecording();
+    gs().addToast("info", "Recording started");
   }));
 
   subs.push(api.capture.onSessionLost(() => {
@@ -166,7 +193,11 @@ export function initV2Engine(): Unsub {
     const cur = gs().v2State;
     if (cur === "RECORDING" || cur === "SAVING") {
       gs().setV2State("IDLE");
+      if (!_userStopRequested) {
+        gs().addToast("warning", "Capture session lost");
+      }
     }
+    _userStopRequested = false;
     // If EXPORTING: keep EXPORTING — export is independent of capture lifetime.
     // The export terminal event (completed/failed/cancelled) drives state to IDLE.
     // v2SessionId is now null, so those handlers will set IDLE instead of RECORDING.
@@ -266,6 +297,8 @@ export function initV2Engine(): Unsub {
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
     _releaseCurrentSnapshot();
+    _clearReplaySaveToast();
+    gs().addToast("success", ev.final_path ? `Replay saved → ${ev.final_path}` : "Replay saved");
     if (gs().v2SessionId !== null) {
       _enterRecording();
     } else {
@@ -286,6 +319,8 @@ export function initV2Engine(): Unsub {
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
     _releaseCurrentSnapshot();
+    _clearReplaySaveToast();
+    gs().addToast("error", `Replay export failed${ev.reason_code ? `: ${ev.reason_code}` : ""}`);
     if (gs().v2State === "EXPORTING") {
       if (gs().v2SessionId !== null) {
         _enterRecording();
@@ -308,6 +343,8 @@ export function initV2Engine(): Unsub {
     gs().setV2ExportProgress(null);
     gs().setV2ExportId(null);
     _releaseCurrentSnapshot();
+    _clearReplaySaveToast();
+    gs().addToast("info", "Replay export cancelled");
     if (gs().v2State === "EXPORTING") {
       if (gs().v2SessionId !== null) {
         _enterRecording();
@@ -364,6 +401,8 @@ async function _startExport(snapshotId: string): Promise<void> {
   } catch (err) {
     gs().log("info", `[export lifecycle] _startExport RPC error: ${err instanceof Error ? err.message : String(err)} v2State=${gs().v2State}`);
     _clearExportWatchdog();
+    _clearReplaySaveToast();
+    gs().addToast("error", `Replay export failed: ${err instanceof Error ? err.message : String(err)}`);
     gs().setV2ExportId(null);
     gs().setV2ExportProgress(null);
     _releaseCurrentSnapshot();
@@ -380,6 +419,7 @@ async function _startExport(snapshotId: string): Promise<void> {
 export async function saveReplay(durationSeconds: number): Promise<void> {
   if (gs().v2State !== "RECORDING") return;
   gs().setV2State("SAVING");
+  _showReplaySaveToast();
   try {
     const result = await window.coveApi.replay.save({ duration_s: durationSeconds }) as { snapshot_id?: string } | undefined;
     // Use RPC response as authoritative fallback — if onSnapshotPinned already
@@ -398,6 +438,8 @@ export async function saveReplay(durationSeconds: number): Promise<void> {
         `[export lifecycle] v2SaveReplay no snapshot_id: hasResult=${!!result} snapshot_id=${result?.snapshot_id ?? "null"} v2State=${gs().v2State}`,
       );
       if (!result?.snapshot_id) {
+        _clearReplaySaveToast();
+        gs().addToast("error", "Replay save failed: no snapshot available");
         if (_lastSegDiag !== null) {
           const d = _lastSegDiag as { fragments_received?: number; keyframes_seen?: number; segments_committed?: number; duration_eligible?: boolean; pending_duration_90k?: number; last_keyframe_age_ms?: number; idr_nal_count_total?: number; picture_type_idr_count_total?: number };
           gs().log("warn", `[segment diagnostics] save snapshot: frags=${d.fragments_received ?? "?"} keyframes=${d.keyframes_seen ?? "?"} committed=${d.segments_committed ?? "?"} durElig=${d.duration_eligible ?? "?"} pendDur90k=${d.pending_duration_90k ?? "?"} lastKfAgeMs=${d.last_keyframe_age_ms ?? "?"} idrTotal=${d.idr_nal_count_total ?? "?"} ptIdrTotal=${d.picture_type_idr_count_total ?? "?"}`);
@@ -407,6 +449,8 @@ export async function saveReplay(durationSeconds: number): Promise<void> {
       }
     }
   } catch (err) {
+    _clearReplaySaveToast();
+    gs().addToast("error", `Replay save failed: ${err instanceof Error ? err.message : String(err)}`);
     gs().log(
       "warn",
       `[export lifecycle] v2SaveReplay RPC rejected: code=${(err as { code?: string })?.code ?? "?"} message=${err instanceof Error ? err.message : String(err)} v2State=${gs().v2State}`,
@@ -516,9 +560,13 @@ export async function startCapture(opts?: Record<string, unknown>): Promise<void
 }
 
 export async function stopCapture(): Promise<void> {
+  _userStopRequested = true;
   try {
     await window.coveApi.capture.stopSession({});
   } catch (err) {
+    // Failed stop means no session-lost event is coming for this request -
+    // reset the flag so a later unexpected loss still warns the user.
+    _userStopRequested = false;
     gs().log("warn", `v2 capture: stopSession failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

@@ -1,4 +1,0 @@
-{"timestamp":"2026-05-23T03:40:15.060838Z","level":"INFO","fields":{"message":"portal session established","session_id":"pw-session-0000-1158597-1779507615060","node_id":129},"target":"cove_replay_engine::capture::pipewire"}
-{"timestamp":"2026-05-23T03:40:15.075861Z","level":"WARN","fields":{"message":"PW stream errored during DMA-BUF-only negotiation: no more input formats; triggering SHM-only fallback retry"},"target":"cove_replay_engine::capture::pipewire"}
-{"timestamp":"2026-05-23T03:40:15.075938Z","level":"INFO","fields":{"message":"PW: DMA-BUF negotiation hard-failed; reconnecting with SHM-only fallback"},"target":"cove_replay_engine::capture::pipewire"}
-{"timestamp":"2026-05-23T03:40:15.097696Z","level":"INFO","fields":{"message":"PW stream ready","session_id":"pw-session-0000-1158597-1779507615060","stream_id":"pw-stream-0000","width":3840,"height":2160,"fourcc":"XR24"},"target":"cove_replay_engine::capture::pipewire"}

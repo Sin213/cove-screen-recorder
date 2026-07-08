@@ -1,9 +1,0 @@
-cargo test -p cove-replay-engine --lib encoder::backends::nvenc::fmp4 → 5 passed
-cargo test -p cove-replay-engine --test encoder_session → 28 passed
-cargo test -p cove-replay-engine --test segment_buffer → 7 passed
-cargo build -p cove-replay-engine → 0 errors, 70 warnings
-npm run typecheck → PASS
-npm run validate:build → PASS
-npm run build → PASS
-git diff --check → PASS
-HEAD: 2acefc3f1bdab293780df4501219d91bc336466d Fix fMP4 trun layout for exports

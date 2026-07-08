@@ -1,4 +1,0 @@
-baseline (excluded): engine=410822 ffmpeg=none pactl=none
-cove-replay-engine: 411101
-ffmpeg: none
-pactl: none

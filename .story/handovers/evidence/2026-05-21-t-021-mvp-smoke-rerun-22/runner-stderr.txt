@@ -1,7 +1,0 @@
-[runner] Helper socket not found — all scripted-local rows will skip.
-[runner] VAL-PKG-001: skip (helper-not-available)
-[runner] VAL-CAP-001: skip (manual)
-[runner] VAL-CAP-003: pass — Portal denial emitted capture.sessionLost(portal-denied); helper returned to IDLE
-[runner] VAL-CAP-004: fail — Capture quality gates failed — see thresholds (key=1080p60-nvenc, samples=60)
-[runner] Report written to /home/sin/Projects/cove-screen-recorder/validation-report-smoke-1779394449055.json
-[runner] Evidence report: /home/sin/Projects/cove-screen-recorder/validation-artifacts/smoke/2026-05-21T20-13-01-522Z/report.json

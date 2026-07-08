@@ -1,8 +1,0 @@
-=== git rev-parse HEAD ===
-b5db18b2e158ad8310893f68d7299a176e000b3e
-
-=== git status --short ===
-?? .story/handovers/evidence/2026-05-19-t-021-mvp-smoke-rerun-9/
-
-=== git diff --check ===
-(clean)

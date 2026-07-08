@@ -1,3 +1,0 @@
-{"timestamp":"2026-05-18T22:43:07.487111Z","level":"INFO","fields":{"message":"cove-replay-engine started","version":"0.1.0","protocol_version":1},"target":"cove_replay_engine"}
-{"timestamp":"2026-05-18T22:43:07.520420Z","level":"INFO","fields":{"message":"listening","socket":"/run/user/1000/cove-screen-recorder/engine.sock"},"target":"cove_replay_engine::transport::server"}
-{"timestamp":"2026-05-18T22:56:53.303786Z","level":"INFO","fields":{"message":"signal received, shutting down"},"target":"cove_replay_engine::transport::server"}

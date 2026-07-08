@@ -1,2 +1,0 @@
-# pgrep -a ffmpeg at 2026-05-22T07:05:29-07:00
-960212 /usr/bin/ffmpeg -y -hide_banner -loglevel info -f pulse -ac 2 -ar 48000 -i alsa_output.usb-Feixiang_USB_HIFI_Audio-01.analog-stereo.monitor -c:a flac -compression_level 0 /home/sin/.config/Cove Screen Recorder/recordings/rec_mpgzli7v_gz2gwx.audio.flac

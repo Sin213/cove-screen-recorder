@@ -1,4 +1,0 @@
-Session: pw-session-0000-1374276-1779553024870
-  snap-1779553088635467685-0000 → exp-1779553089636809654-0001 → completed (match) → RECORDING
-
-Clean lineage. No stale-guard, no rejection, no duplicate.

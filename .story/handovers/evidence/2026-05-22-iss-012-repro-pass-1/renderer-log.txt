@@ -1,8 +1,0 @@
-23:18:28    info    ffmpeg n8.1.1 · encoders: h264_nvenc, hevc_nvenc, av1_nvenc, h264_amf, hevc_amf, h264_qsv…
-23:18:28    info    Wayland session — pick the source in the system screen-share dialog (one prompt per recording).
-23:25:20    info    recovery.ignored count=65
-23:25:59    info    [export lifecycle] _startExport RPC call: snapshotId=snap-1779517559153511294-0000 v2State=EXPORTING
-23:25:59    info    [export lifecycle] _startExport RPC result: export_id=exp-1779517559156083846-0001 v2State=EXPORTING v2SnapshotId=snap-1779517559153511294-0000
-23:26:01    info    [export lifecycle] export.completed received: export_id=exp-1779517559156083846-0001 final_path=/run/user/1000/cove-screen-recorder/exports/exp-1779517559156083846-0001.mp4 v2State=EXPORTING v2ExportId=exp-1779517559156083846-0001
-23:26:01    info    [export lifecycle] export.completed post-transition: v2State=RECORDING
-23:26:01    info    [export lifecycle] snapshot release success: id=snap-1779517559153511294-0000 attempt=0

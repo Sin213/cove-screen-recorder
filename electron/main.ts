@@ -1423,59 +1423,6 @@ function registerIpc(): void {
   });
 }
 
-// On Linux the AppImage isn't registered with the desktop environment, so
-// Wayland compositors fall back to the generic Electron icon. Drop a tiny
-// .desktop file + icon into ~/.local/share so the WM can map our wm_class /
-// app_id back to the Cove icon. Idempotent — only writes if missing or stale.
-function installLinuxDesktopFile(): void {
-  if (process.platform !== "linux") return;
-  try {
-    const home = app.getPath("home");
-    const desktopDir = path.join(home, ".local", "share", "applications");
-    const iconDir = path.join(home, ".local", "share", "icons", "hicolor", "256x256", "apps");
-    fs.mkdirSync(desktopDir, { recursive: true });
-    fs.mkdirSync(iconDir, { recursive: true });
-
-    const wmClass = "cove-screen-recorder";
-    const desktopPath = path.join(desktopDir, `${wmClass}.desktop`);
-    const iconDestPath = path.join(iconDir, `${wmClass}.png`);
-    const iconSrcPath = path.join(app.getAppPath(), "cove_icon.png");
-
-    if (fs.existsSync(iconSrcPath)) {
-      try {
-        const srcStat = fs.statSync(iconSrcPath);
-        let needsCopy = true;
-        try {
-          const destStat = fs.statSync(iconDestPath);
-          needsCopy = destStat.size !== srcStat.size;
-        } catch { /* missing — copy */ }
-        if (needsCopy) fs.copyFileSync(iconSrcPath, iconDestPath);
-      } catch { /* best-effort */ }
-    }
-
-    // Best Exec target: the actual launched binary. For AppImage that's
-    // process.env.APPIMAGE; for unpacked dev runs it's process.execPath.
-    const execTarget = process.env.APPIMAGE || process.execPath;
-    const desktopBody =
-      `[Desktop Entry]
-Type=Application
-Name=Cove Screen Recorder
-Comment=Pick a region, hit record, save. Hardware-accelerated MP4 + one-click GIF.
-Exec=${execTarget} %U
-Icon=${wmClass}
-Terminal=false
-Categories=AudioVideo;Recorder;
-StartupWMClass=${wmClass}
-`;
-
-    let existing: string | null = null;
-    try { existing = fs.readFileSync(desktopPath, "utf8"); } catch { /* missing */ }
-    if (existing !== desktopBody) fs.writeFileSync(desktopPath, desktopBody);
-  } catch (err) {
-    console.warn("desktop file install skipped:", err);
-  }
-}
-
 // Sweep stale temp files left in <userData>/recordings/ from a previous
 // crash mid-finalize. finalize()/cancel() unlink on the happy path; this
 // just covers SIGKILL etc. Runs before begin() ever opens a fresh temp,
@@ -1554,7 +1501,6 @@ app.whenReady().then(() => {
 
   void supervisor.start();
   Menu.setApplicationMenu(null);
-  installLinuxDesktopFile();
   registerIpc();
   installDisplayMediaHandler();
   sweepStaleRecordings();

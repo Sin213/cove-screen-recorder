@@ -1,3 +1,0 @@
-# Real cove-replay-engine processes (excluding shell wrappers)
-
-(no matches)

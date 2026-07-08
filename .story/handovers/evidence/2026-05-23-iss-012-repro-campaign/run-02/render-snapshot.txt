@@ -1,4 +1,0 @@
-Decisive snapshot at completion (08:55:52):
-v2State=RECORDING v2ExportId=null saveControlsDisabled=false replaySaving=false
-
-No hang observed. FSM transitioned EXPORTING→RECORDING, controls re-enabled.

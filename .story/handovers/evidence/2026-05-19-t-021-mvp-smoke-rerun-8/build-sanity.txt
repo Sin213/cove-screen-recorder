@@ -1,8 +1,0 @@
-=== Phase B — Build/Test Sanity (2026-05-19) ===
-
-cargo build -p cove-replay-engine --release: PASS (71 warnings, 0 errors)
-NVENC probe test (nvenc_probe_available_when_hardware_present): 1 passed
-NVENC encode test (nvenc_one_frame_shm_encode_produces_fmp4_fragment): 1 passed
-npm run typecheck: PASS
-npm run validate:build: PASS
-npm run build: PASS

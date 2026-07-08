@@ -150,6 +150,26 @@ function readInitialPreset(): PresetId {
 
 export type RecorderStatus = "idle" | "preparing" | "recording" | "finalizing";
 
+export type ToastType = "info" | "success" | "warning" | "error";
+
+export interface Toast {
+  id: string;
+  type: ToastType;
+  message: string;
+  duration: number; // ms, 0 = persistent
+}
+
+// Auto-dismiss defaults per toast type. duration: 0 opts out (persistent).
+const TOAST_DURATION_MS: Record<ToastType, number> = {
+  info: 3000,
+  success: 4000,
+  warning: 5000,
+  error: 6000,
+};
+
+// Cap the visible stack; oldest toasts are dropped first.
+const MAX_TOASTS = 5;
+
 interface State {
   appInfo: AppInfo | null;
 
@@ -219,6 +239,10 @@ interface State {
 
   log: (level: LogEntry["level"], text: string) => void;
   clearLogs: () => void;
+
+  toasts: Toast[];
+  addToast: (type: ToastType, message: string, opts?: { duration?: number }) => string;
+  removeToast: (id: string) => void;
 }
 
 function makeId(): string {
@@ -287,6 +311,25 @@ export const useStore = create<State>((set, get) => ({
       return { logs: next };
     }),
   clearLogs: () => set({ logs: [] }),
+
+  toasts: [],
+  addToast: (type, message, opts) => {
+    const id = makeId();
+    const duration = opts?.duration ?? TOAST_DURATION_MS[type];
+    set((state) => {
+      const next = state.toasts.length >= MAX_TOASTS
+        ? state.toasts.slice(state.toasts.length - MAX_TOASTS + 1)
+        : state.toasts.slice();
+      next.push({ id, type, message, duration });
+      return { toasts: next };
+    });
+    return id;
+  },
+  removeToast: (id) =>
+    set((state) => {
+      if (!state.toasts.some((t) => t.id === id)) return state;
+      return { toasts: state.toasts.filter((t) => t.id !== id) };
+    }),
 
   setV2State: (v2State) => set({ v2State }),
   setV2EngineInfo: (v2EngineInfo) => set({ v2EngineInfo }),

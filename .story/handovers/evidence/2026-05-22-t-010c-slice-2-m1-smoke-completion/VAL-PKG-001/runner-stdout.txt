@@ -1,8 +1,0 @@
-
-Suite: smoke  |  Verdict: PASS  |  2026-05-22T06:28:00.081Z
-  pass=1  fail=0  skip=0  error=0
-
-ID              Status    Class           Reason / Message
---------------------------------------------------------------------------------
-VAL-PKG-001     pass      scripted-local  Helper readiness confirmed via engine.health + engine.version
-

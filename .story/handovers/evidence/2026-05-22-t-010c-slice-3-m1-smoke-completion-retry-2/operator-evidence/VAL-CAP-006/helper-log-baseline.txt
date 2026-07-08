@@ -1,4 +1,0 @@
-helper_pid=1057119
-engine_log_offset_pre_row=134695
-captured_at=2026-05-22T18:52:52Z
-note=re-baselined after operator-initiated reset (prior Region-mode attempt routed via v1 MediaRecorder per ISS-008; discarded, file remains in ~/Videos/Cove Recordings but not referenced as VAL-CAP-006 evidence)
