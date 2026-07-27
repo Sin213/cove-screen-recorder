@@ -385,13 +385,13 @@ function createWindow(): void {
   // Bumped minimum past the 980px breakpoint so the two-column layout always
   // gets to render. Saved bounds from older 1.x runs could be < 1100; we
   // ignore them in `readBounds` and fall back to the default below.
-  const defaultWidth = 1320;
-  const defaultHeight = 920;
+  const defaultWidth = 1200;
+  const defaultHeight = 875;
   const iconPath = path.join(app.getAppPath(), "cove_icon.png");
 
   mainWindow = new BrowserWindow({
-    width: saved?.width ?? defaultWidth,
-    height: saved?.height ?? defaultHeight,
+    width: defaultWidth,
+    height: defaultHeight,
     x: saved?.x,
     y: saved?.y,
     minWidth: 1100,
@@ -426,7 +426,16 @@ function createWindow(): void {
     }
   }
 
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.once("ready-to-show", () => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return;
+
+    window.show();
+    window.setSize(defaultWidth, defaultHeight, false);
+    setImmediate(() => {
+      if (!window.isDestroyed()) window.setSize(defaultWidth, defaultHeight, false);
+    });
+  });
 
   // Replay the last supervisor "ready" payload so the renderer receives
   // engine.onReady even when the helper finished booting before the window loaded.
@@ -443,8 +452,6 @@ function createWindow(): void {
       mainWindow?.webContents.send("cove:update-event", lastUpdateEvent);
     }
   });
-
-  if (saved?.maximized) mainWindow.maximize();
 
   if (DEV_URL) {
     mainWindow.loadURL(DEV_URL);

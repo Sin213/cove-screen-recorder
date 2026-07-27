@@ -133,7 +133,7 @@ body {
   overflow: hidden;
 }
 .stage { padding: 26px 28px 16px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 22px; min-width: 0; min-height: 0; overflow-y: auto; }
-.panel { padding: 26px 28px 16px; display: flex; flex-direction: column; gap: 22px; min-width: 0; min-height: 0; overflow-y: auto; background: linear-gradient(180deg, rgba(255,255,255,0.012), transparent 30%); }
+.panel { padding: 26px 28px 16px; display: flex; flex-direction: column; gap: 22px; min-width: 0; min-height: 0; overflow-y: auto; }
 
 .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .hero h1 {

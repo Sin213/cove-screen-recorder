@@ -1164,17 +1164,15 @@ export function App() {
             open={!logCollapsed}
             onToggle={(e) => {
               const open = (e.currentTarget as HTMLDetailsElement).open;
-              const wasCollapsed = logCollapsed;
               setLogCollapsed(!open);
-              // Grow / shrink the window so the log body doesn't push the
-              // app into a scrollbar — it now visibly opens "downwards".
-              const willOpen = open && wasCollapsed;
-              const willClose = !open && !wasCollapsed;
-              if (willOpen) void window.cove.adjustWindowHeight(220);
-              else if (willClose) void window.cove.adjustWindowHeight(-220);
             }}
           >
-            <summary>
+            <summary
+              onClick={(e) => {
+                const details = e.currentTarget.parentElement as HTMLDetailsElement | null;
+                if (details) void window.cove.adjustWindowHeight(details.open ? -220 : 220);
+              }}
+            >
               <span className="caret"><Icons.Caret /></span>
               <span className="lbl">Log</span>
               <span className="count">· {logs.length}</span>
