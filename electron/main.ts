@@ -1205,34 +1205,28 @@ function registerIpc(): void {
         const st = await fs.promises.stat(safe);
         if (!st.isFile()) return { ok: false, error: "Not a file" };
 
+        const name = path.basename(safe);
         const fileUri = pathToFileURL(safe).href;
 
-        // text/uri-list — the cross-platform standard for file paste.
-        // Chromium-based apps (Discord, Slack, VS Code) read this format
-        // and translate file:// URIs into File objects on paste.
-        clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
+        // Write a file bookmark to the clipboard — this atomically sets
+        // text/uri-list and text/plain so Chromium-based apps (Discord,
+        // Slack, VS Code) and GTK file managers can paste the file.
+        // clipboard.writeBuffer calls would overwrite each other on Linux;
+        // the bookmark API stacks both formats in one atomic write.
+        clipboard.write({ bookmark: name, text: fileUri });
 
-        // Plain-text fallback for apps that only read text/plain.
-        clipboard.writeBuffer("text/plain", Buffer.from(fileUri));
-
-        // Linux: GNOME / Nautilus "copy files" format.
-        // Without this, GTK file managers and some Electron apps on
-        // Wayland can't reconstruct the file drop from uri-list alone.
-        if (process.platform === "linux") {
-          clipboard.writeBuffer("x-special/gnome-copied-files", Buffer.from(`copy\n${fileUri}\n`));
-        }
-
-        // Windows: populate the full file-dropboard so the file's raw
-        // bytes land on the clipboard. Electron apps and native Win32
-        // targets (Outlook, Teams, Explorer) use CFSTR_FILEDESCRIPTORW
-        // + CFSTR_FILECONTENTS for paste. Only read the file on Windows
-        // to avoid streaming multi-MB buffers through the renderer on
-        // platforms where it's not needed.
+        // Windows: layer the full file-dropboard on top so the raw bytes
+        // land on the clipboard. Electron apps and native Win32 targets
+        // (Outlook, Teams, Explorer) use CFSTR_FILEDESCRIPTORW +
+        // CFSTR_FILECONTENTS for paste. Win32 clipboard stacks formats
+        // (unlike Linux), so these buffers augment, not replace, the
+        // bookmark written above. Only read the file on Windows to avoid
+        // streaming multi-MB buffers across IPC on other platforms.
         if (process.platform === "win32") {
           const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
           if (st.size > MAX_BYTES) return { ok: false, error: "File too large (max 500 MB)" };
           const buf = await fs.promises.readFile(safe);
-          clipboard.writeBuffer("FileNameW", Buffer.from(path.basename(safe) + "\0", "utf16le"));
+          clipboard.writeBuffer("FileNameW", Buffer.from(name + "\0", "utf16le"));
           clipboard.writeBuffer("FileContents", buf);
         }
 
