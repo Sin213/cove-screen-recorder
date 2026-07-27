@@ -336,6 +336,58 @@ body {
   border-radius: 4px; pointer-events: none;
 }
 
+/* ── v3.3.0: per-card X / checkbox + bulk bar ────────────────────────────── */
+
+/* Selected card highlight */
+.gallery-card-selected { border-color: var(--accent-ring) !important; background: var(--accent-soft); }
+
+/* Delete X — top-left of thumbnail; appears on card hover */
+.gallery-card-thumb-remove {
+  position: absolute; top: 4px; left: 4px; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(30,30,40,0.78); color: var(--text-dim);
+  border: 1px solid transparent;
+  opacity: 0; transition: opacity 120ms, color 120ms, background 120ms;
+  cursor: pointer;
+}
+.gallery-card:hover .gallery-card-thumb-remove { opacity: 1; }
+.gallery-card-thumb-remove:hover {
+  color: var(--rec); background: var(--rec-soft); border-color: var(--rec-ring);
+}
+
+/* Select circle — top-right of thumbnail */
+.gallery-card-checkbox {
+  position: absolute; top: 4px; right: 4px; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(30,30,40,0.78); color: var(--text-dim);
+  border: 1.5px solid var(--border);
+  opacity: 0; transition: opacity 120ms, border-color 120ms, background 120ms;
+  cursor: pointer;
+}
+.gallery-card:hover .gallery-card-checkbox,
+.gallery-card-checkbox-on { opacity: 1; }
+.gallery-card-checkbox-on {
+  border-color: var(--accent-ring); background: var(--accent); color: #0d0d14;
+}
+
+/* Bulk-action bar in the gallery header */
+.gallery-bulk-bar {
+  display: flex; align-items: center; gap: 6px;
+}
+.gallery-bulk-btn {
+  font-size: 12px; color: var(--text-dim);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 3px 10px; cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.gallery-bulk-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }
+.gallery-bulk-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gallery-bulk-btn-danger:hover { color: var(--rec); background: var(--rec-soft); border-color: var(--rec-ring); }
+
+/* ── end v3.3.0 gallery additions ─────────────────────────────────────────── */
+
 /* Window mock for source = window */
 .win-mock {
   position: absolute; left: 12%; top: 14%; width: 76%; height: 72%;

@@ -48,17 +48,41 @@ function PlayIcon() {
   );
 }
 
+function DeleteIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M3 7l3 3 5-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
 interface CardProps {
   entry: LibraryEntry;
   thumbDataUrl: string | null;
   onVisible: (path: string) => void;
   scrollRoot: React.RefObject<HTMLDivElement | null>;
+  // Multi-select & actions (v3.3.0)
+  selected: boolean;
+  selectionActive: boolean;
+  outputDir: string | null;
+  onSelect: (path: string) => void;
+  onDelete: (path: string) => void;
 }
 
-function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot }: CardProps) {
+function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, selectionActive, outputDir, onSelect, onDelete }: CardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "ok" | "err">("idle");
+  const [clipStatus, setClipStatus] = useState<"idle" | "ok" | "err">("idle");
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const el = cardRef.current;
@@ -99,10 +123,48 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot }: CardProps
     );
   }
 
-  useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); }, []);
+  function handleCopyFile() {
+    void window.cove.copyRecordingToClipboard(entry.path, outputDir).then(
+      (r) => {
+        if (r.ok) {
+          setClipStatus("ok");
+          if (clipTimerRef.current) clearTimeout(clipTimerRef.current);
+          clipTimerRef.current = setTimeout(() => setClipStatus("idle"), 1800);
+        } else {
+          setClipStatus("err");
+          if (clipTimerRef.current) clearTimeout(clipTimerRef.current);
+          clipTimerRef.current = setTimeout(() => setClipStatus("idle"), 2000);
+        }
+      },
+      () => {
+        setClipStatus("err");
+        if (clipTimerRef.current) clearTimeout(clipTimerRef.current);
+        clipTimerRef.current = setTimeout(() => setClipStatus("idle"), 2000);
+      },
+    );
+  }
+
+  function handleDeleteClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (window.confirm(`Delete "${entry.name}"?\n\nThis moves the file to trash.`)) {
+      onDelete(entry.path);
+    }
+  }
+
+  function handleSelectClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    onSelect(entry.path);
+  }
+
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    if (clipTimerRef.current) clearTimeout(clipTimerRef.current);
+  }, []);
+
+  const showSelect = selectionActive || selected;
 
   return (
-    <div className="gallery-card" ref={cardRef}>
+    <div className={`gallery-card${selected ? " gallery-card-selected" : ""}`} ref={cardRef}>
       <button
         className="gallery-card-thumb"
         onClick={handleOpen}
@@ -114,6 +176,29 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot }: CardProps
         )}
         {!thumbDataUrl && <span className="gallery-card-ext">{extLabel(entry.name)}</span>}
         <span className="gallery-card-play"><PlayIcon /></span>
+
+        {/* Delete X — top-left corner */}
+        <span
+          className="gallery-card-thumb-remove"
+          onClick={handleDeleteClick}
+          title="Delete recording"
+          aria-label={`Delete ${entry.name}`}
+          role="button"
+        >
+          <DeleteIcon />
+        </span>
+
+        {/* Select circle — top-right corner */}
+        <span
+          className={`gallery-card-checkbox${selected ? " gallery-card-checkbox-on" : ""}`}
+          onClick={handleSelectClick}
+          title={selected ? "Deselect" : "Select"}
+          aria-label={selected ? `Deselect ${entry.name}` : `Select ${entry.name}`}
+          role="button"
+          style={showSelect ? { opacity: 1 } : undefined}
+        >
+          {selected && <CheckIcon />}
+        </span>
       </button>
 
       <div className="gallery-card-meta">
@@ -138,6 +223,19 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot }: CardProps
             </span>
           )}
         </button>
+        <button
+          className={`gallery-action-btn${clipStatus === "ok" ? " gallery-action-copied" : clipStatus === "err" ? " gallery-action-copy-err" : ""}`}
+          onClick={handleCopyFile}
+          title={clipStatus === "ok" ? "File copied!" : clipStatus === "err" ? "Copy failed" : "Copy file to clipboard"}
+          aria-label="Copy recording to clipboard"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="2" width="11" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6l2 2 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          {clipStatus !== "idle" && (
+            <span className="gallery-action-toast">
+              {clipStatus === "ok" ? "Copied" : "Failed"}
+            </span>
+          )}
+        </button>
       </div>
     </div>
   );
@@ -151,6 +249,9 @@ export function Gallery() {
 
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+
+  // Selection state for multi-select (v3.3.0)
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Thumbnail queue state in refs (no re-render needed for bookkeeping)
   const requestedRef = useRef(new Set<string>());
@@ -175,6 +276,7 @@ export function Gallery() {
     // and will decrement the counter themselves when they complete.
     queueRef.current = [];
     setThumbs({});
+    setSelected(new Set());
     window.cove.listRecordings(outputDir, 30).then(
       (list) => { if (alive) setEntries(list); },
       () => { if (alive) setEntries([]); },
@@ -216,11 +318,105 @@ export function Gallery() {
     if (outputDir) void window.cove.openFolder(outputDir);
   }
 
+  // ── Selection handlers (v3.3.0) ──────────────────────────────────────────
+
+  function handleToggleSelect(path: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function handleDeleteOne(path: string) {
+    const r = await window.cove.deleteRecording(path, outputDir);
+    if (r.ok) {
+      // Drop from local state immediately so the card disappears
+      setEntries((prev) => prev?.filter((e) => e.path !== path) ?? null);
+      setThumbs((prev) => {
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } else if (r.error) {
+      window.alert(`Could not delete: ${r.error}`);
+    }
+  }
+
+  async function handleDeleteMany() {
+    const count = selected.size;
+    if (!window.confirm(`Delete ${count} recording${count > 1 ? "s" : ""}?\n\nThis moves files to trash.`)) return;
+    let ok = 0;
+    const remaining = [...selected];
+    for (const p of remaining) {
+      const r = await window.cove.deleteRecording(p, outputDir);
+      if (r.ok) {
+        ok++;
+        setEntries((prev) => prev?.filter((e) => e.path !== p) ?? null);
+        setThumbs((prev) => {
+          const next = { ...prev };
+          delete next[p];
+          return next;
+        });
+        setSelected((prev) => {
+          const next = new Set(prev);
+          next.delete(p);
+          return next;
+        });
+      }
+    }
+    if (ok < count) window.alert(`Deleted ${ok} of ${count} recordings.`);
+  }
+
+  async function handleCopyMany() {
+    const remaining = [...selected];
+    for (const p of remaining) {
+      await window.cove.copyRecordingToClipboard(p, outputDir);
+    }
+    clearSelection();
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const selCount = selected.size;
+  const selectionActive = selCount > 0;
+
   return (
     <div className="gallery">
       <div className="gallery-header">
         <span className="gallery-title">Recent Recordings</span>
-        {outputDir && (
+        {selectionActive && (
+          <div className="gallery-bulk-bar">
+            <button
+              className="gallery-bulk-btn gallery-bulk-btn-danger"
+              onClick={handleDeleteMany}
+              title={`Delete ${selCount} selected recording${selCount > 1 ? "s" : ""}`}
+            >
+              Delete ({selCount})
+            </button>
+            <button
+              className="gallery-bulk-btn"
+              onClick={handleCopyMany}
+              title="Copy files to clipboard (last-selected wins on paste)"
+            >
+              Copy ({selCount})
+            </button>
+            <button className="gallery-bulk-btn" onClick={clearSelection}>
+              Clear
+            </button>
+          </div>
+        )}
+        {!selectionActive && outputDir && (
           <button className="gallery-folder-btn" onClick={handleOpenFolder} title="Open recordings folder">
             Open folder
           </button>
@@ -241,6 +437,11 @@ export function Gallery() {
                 thumbDataUrl={thumbs[e.path] ?? null}
                 onVisible={onCardVisible}
                 scrollRoot={bodyRef}
+                selected={selected.has(e.path)}
+                selectionActive={selectionActive}
+                outputDir={outputDir}
+                onSelect={handleToggleSelect}
+                onDelete={handleDeleteOne}
               />
             ))}
           </div>

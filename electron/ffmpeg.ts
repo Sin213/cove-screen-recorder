@@ -535,12 +535,15 @@ export function remux(opts: RemuxOptions): Promise<void> {
     proc.stdout.on("data", (b: Buffer) => opts.onLog?.(b.toString("utf-8")));
     proc.stderr.on("data", (b: Buffer) => opts.onLog?.(b.toString("utf-8")));
     proc.once("error", (err) => reject(err));
-    proc.once("close", (code) => {
+    proc.once("close", (code, signal) => {
       if (code === 0) {
         if (provenanceTag) opts.onLog?.(provenanceTag);
         resolve();
       } else {
-        reject(new Error(`ffmpeg exited with code ${code}`));
+        const reason = signal
+          ? `killed by signal ${signal}`
+          : `exited with code ${code}`;
+        reject(new Error(`ffmpeg ${reason}`));
       }
     });
   });

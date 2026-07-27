@@ -2,6 +2,14 @@
 
 All notable changes to Cove Screen Recorder are documented in this file.
 
+## [3.3.0] - 2026-07-26
+
+### Added
+
+- **Per-card delete** — hover any recording thumbnail to reveal an X button in the top-left corner. Click to delete with a confirmation prompt. The file is permanently removed from disk and the gallery refreshes immediately.
+- **Multi-select** — click the circle checkbox in the top-right corner of any thumbnail to toggle selection. Once one or more recordings are selected, a bulk-action bar appears in the gallery header with Delete (N), Copy (N), and Clear. Select and delete many at once.
+- **Copy recording to clipboard** — new "Copy file" button on each card copies the actual video file to the OS clipboard (Win32 file-dropboard via CFSTR_FILEDESCRIPTORW / CFSTR_FILECONTENTS). Paste directly into chat apps like Slack, Discord, or Outlook on Windows. On macOS and Linux the existing "Copy path" button remains as a reliable fallback; file-paste depends on the receiving application.
+
 ## [3.2.1] - 2026-07-08
 
 ### Fixed

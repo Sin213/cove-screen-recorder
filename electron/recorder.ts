@@ -415,6 +415,23 @@ export async function finalize(
     };
   }
 
+  // Guard against empty / corrupt WebM files that would make ffmpeg exit
+  // with code 183 ("Invalid data found when processing input").  Minimum
+  // viable WebM with one frame + EBML header is >1 KB; anything smaller
+  // means the capture produced no usable data.
+  try {
+    const st = fs.statSync(s.filePath);
+    if (st.size < 1024) {
+      return preserveOnFailure(
+        s,
+        params.recordingId,
+        new Error(`Recording produced no usable video data (${st.size} bytes). The capture may have been too short or the source was unavailable.`),
+      );
+    }
+  } catch {
+    return preserveOnFailure(s, params.recordingId, new Error("Recording file is missing before finalize."));
+  }
+
   const ext = params.format;
   const outputPath = path.join(s.outputDir, `${s.baseName}.${ext}`);
   const inputHasAudio = await probeHasAudio(ff.path, s.filePath);

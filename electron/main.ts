@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   desktopCapturer,
   dialog,
   globalShortcut,
@@ -882,6 +883,15 @@ function defaultOutputDir(): string {
   return dir;
 }
 
+// Reject paths that escape outputDir via ".." or absolute-path tricks.
+// Resolves both sides before checks so "/home/../etc" is caught.
+function safeOutputPath(rawPath: string, outputDir: string): string | null {
+  const resolved = path.resolve(rawPath);
+  const root = path.resolve(outputDir || defaultOutputDir());
+  if (resolved.startsWith(root + path.sep) || resolved === root) return resolved;
+  return null;
+}
+
 interface HotkeyBindings {
   toggle: string;
   gif: string;
@@ -1153,6 +1163,76 @@ function registerIpc(): void {
         return entries.slice(0, cap);
       } catch {
         return [];
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "cove:delete-recording",
+    async (_e, rawPath: unknown, outputDir: unknown): Promise<import("./types").RecordingOperationResult> => {
+      if (typeof rawPath !== "string" || !rawPath) return { ok: false, error: "Invalid path" };
+      const dir = typeof outputDir === "string" && outputDir.length > 0 ? outputDir : defaultOutputDir();
+      const safe = safeOutputPath(rawPath, dir);
+      if (!safe) return { ok: false, error: "Path is outside the recordings folder" };
+      try {
+        const st = await fs.promises.stat(safe);
+        if (!st.isFile()) return { ok: false, error: "Not a file" };
+        await fs.promises.unlink(safe);
+        return { ok: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        if (msg.includes("ENOENT")) return { ok: false, error: "File not found" };
+        return { ok: false, error: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "cove:copy-recording-to-clipboard",
+    async (_e, rawPath: unknown, outputDir: unknown): Promise<import("./types").RecordingOperationResult> => {
+      if (typeof rawPath !== "string" || !rawPath) return { ok: false, error: "Invalid path" };
+      const dir = typeof outputDir === "string" && outputDir.length > 0 ? outputDir : defaultOutputDir();
+      const safe = safeOutputPath(rawPath, dir);
+      if (!safe) return { ok: false, error: "Path is outside the recordings folder" };
+      try {
+        const st = await fs.promises.stat(safe);
+        if (!st.isFile()) return { ok: false, error: "Not a file" };
+
+        const fileUri = pathToFileURL(safe).href;
+
+        // text/uri-list — the cross-platform standard for file paste.
+        // Chromium-based apps (Discord, Slack, VS Code) read this format
+        // and translate file:// URIs into File objects on paste.
+        clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
+
+        // Plain-text fallback for apps that only read text/plain.
+        clipboard.writeBuffer("text/plain", Buffer.from(fileUri));
+
+        // Linux: GNOME / Nautilus "copy files" format.
+        // Without this, GTK file managers and some Electron apps on
+        // Wayland can't reconstruct the file drop from uri-list alone.
+        if (process.platform === "linux") {
+          clipboard.writeBuffer("x-special/gnome-copied-files", Buffer.from(`copy\n${fileUri}\n`));
+        }
+
+        // Windows: populate the full file-dropboard so the file's raw
+        // bytes land on the clipboard. Electron apps and native Win32
+        // targets (Outlook, Teams, Explorer) use CFSTR_FILEDESCRIPTORW
+        // + CFSTR_FILECONTENTS for paste. Only read the file on Windows
+        // to avoid streaming multi-MB buffers through the renderer on
+        // platforms where it's not needed.
+        if (process.platform === "win32") {
+          const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
+          if (st.size > MAX_BYTES) return { ok: false, error: "File too large (max 500 MB)" };
+          const buf = await fs.promises.readFile(safe);
+          clipboard.writeBuffer("FileNameW", Buffer.from(path.basename(safe) + "\0", "utf16le"));
+          clipboard.writeBuffer("FileContents", buf);
+        }
+
+        return { ok: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return { ok: false, error: msg };
       }
     },
   );

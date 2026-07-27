@@ -26,6 +26,10 @@ const api: CoveApi = {
     ipcRenderer.invoke("cove:list-recordings", dir, limit) as Promise<import("./types").LibraryEntry[]>,
   getThumbnail: (p) =>
     ipcRenderer.invoke("cove:get-thumbnail", p) as Promise<string | null>,
+  deleteRecording: (rawPath, outputDir) =>
+    ipcRenderer.invoke("cove:delete-recording", rawPath, outputDir) as Promise<import("./types").RecordingOperationResult>,
+  copyRecordingToClipboard: (rawPath, outputDir) =>
+    ipcRenderer.invoke("cove:copy-recording-to-clipboard", rawPath, outputDir) as Promise<import("./types").RecordingOperationResult>,
 
   beginRecording: (params: StartRecordingParams) =>
     ipcRenderer.invoke("cove:begin-recording", params) as Promise<{ recordingId: string }>,

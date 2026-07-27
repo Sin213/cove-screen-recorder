@@ -22,6 +22,12 @@ export interface LibraryEntry {
   durationSec: number | null;  // probed via ffmpeg, null if unknown
   thumbDataUrl: string | null;  // generated lazily, may be null
 }
+
+export interface RecordingOperationResult {
+  ok: boolean;
+  error?: string;
+}
+
 export type CaptureFormat = "mp4" | "webm" | "gif";
 export type LogLevel = "info" | "good" | "warn" | "error";
 
@@ -150,6 +156,8 @@ export interface CoveApi {
   openFolder: (dir: string) => Promise<void>;
   revealInFolder: (path: string) => Promise<void>;
   listRecordings: (dir: string | null, limit?: number) => Promise<LibraryEntry[]>;
+  deleteRecording: (path: string, outputDir: string | null) => Promise<RecordingOperationResult>;
+  copyRecordingToClipboard: (path: string, outputDir: string | null) => Promise<RecordingOperationResult>;
   getThumbnail: (path: string) => Promise<string | null>;
 
   beginRecording: (params: StartRecordingParams) => Promise<{ recordingId: string }>;
