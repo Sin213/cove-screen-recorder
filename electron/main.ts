@@ -1208,20 +1208,22 @@ function registerIpc(): void {
         const name = path.basename(safe);
         const fileUri = pathToFileURL(safe).href;
 
-        // Write a file bookmark to the clipboard — this atomically sets
-        // text/uri-list and text/plain so Chromium-based apps (Discord,
-        // Slack, VS Code) and GTK file managers can paste the file.
-        // clipboard.writeBuffer calls would overwrite each other on Linux;
-        // the bookmark API stacks both formats in one atomic write.
-        clipboard.write({ bookmark: name, text: fileUri });
+        // Write text/uri-list — the format Chromium-based apps (Discord,
+        // Slack, VS Code) read to recognize a file paste. We use writeBuffer
+        // here, not clipboard.write({ bookmark }), because the bookmark
+        // property on Linux writes a Chromium-internal drag-drop format
+        // rather than the text/uri-list X11 selection target.
+        // Important: writeBuffer replaces the clipboard entirely on Linux,
+        // so we must NOT call any other clipboard method after this (single
+        // write means no overwrite).
+        clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
 
         // Windows: layer the full file-dropboard on top so the raw bytes
         // land on the clipboard. Electron apps and native Win32 targets
         // (Outlook, Teams, Explorer) use CFSTR_FILEDESCRIPTORW +
-        // CFSTR_FILECONTENTS for paste. Win32 clipboard stacks formats
-        // (unlike Linux), so these buffers augment, not replace, the
-        // bookmark written above. Only read the file on Windows to avoid
-        // streaming multi-MB buffers across IPC on other platforms.
+        // CFSTR_FILECONTENTS for paste. Win32 clipboard supports multiple
+        // simultaneous data formats (unlike Linux X11), so these buffers
+        // augment, not replace, the uri-list written above.
         if (process.platform === "win32") {
           const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
           if (st.size > MAX_BYTES) return { ok: false, error: "File too large (max 500 MB)" };
