@@ -448,6 +448,7 @@ export function Gallery() {
   const selectionActive = selCount > 0;
 
   return (
+    <>
     <div className="gallery">
       <div className="gallery-header">
         <span className="gallery-title">Recent Recordings</span>
@@ -512,5 +513,6 @@ export function Gallery() {
         onClose={() => setPlaying(null)}
       />
     )}
+    </>
   );
 }
