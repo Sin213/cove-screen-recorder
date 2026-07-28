@@ -93,7 +93,7 @@ export function detectFfmpeg(): FfmpegInfo {
         "h264_amf", "hevc_amf",
         "h264_qsv", "hevc_qsv",
         "h264_vaapi", "hevc_vaapi",
-        "libx264", "libx265", "libvpx-vp9", "libaom-av1", "libsvtav1",
+    "libx264", "libx265", "libvpx-vp9", "libaom-av1", "libsvtav1",
         "gif",
       ];
       encoders = wanted.filter((name) => new RegExp(`\\b${name}\\b`).test(e.stdout));

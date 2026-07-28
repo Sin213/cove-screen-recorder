@@ -1108,6 +1108,7 @@ function registerIpc(): void {
     if (p && fs.existsSync(p)) await openPathExternal(p);
   });
 
+
   ipcMain.handle("cove:get-thumbnail", async (_e, filePath: unknown): Promise<string | null> => {
     if (typeof filePath !== "string" || !filePath) return null;
     const ALLOWED_EXTS = new Set([".mp4", ".gif", ".webm"]);
