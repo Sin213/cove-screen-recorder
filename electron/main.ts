@@ -1208,28 +1208,21 @@ function registerIpc(): void {
         const name = path.basename(safe);
         const fileUri = pathToFileURL(safe).href;
 
-        // Write text/uri-list — the format Chromium-based apps (Discord,
-        // Slack, VS Code) read to recognize a file paste. We use writeBuffer
-        // here, not clipboard.write({ bookmark }), because the bookmark
-        // property on Linux writes a Chromium-internal drag-drop format
-        // rather than the text/uri-list X11 selection target.
-        // Important: writeBuffer replaces the clipboard entirely on Linux,
-        // so we must NOT call any other clipboard method after this (single
-        // write means no overwrite).
-        clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
-
-        // Windows: layer the full file-dropboard on top so the raw bytes
-        // land on the clipboard. Electron apps and native Win32 targets
-        // (Outlook, Teams, Explorer) use CFSTR_FILEDESCRIPTORW +
-        // CFSTR_FILECONTENTS for paste. Win32 clipboard supports multiple
-        // simultaneous data formats (unlike Linux X11), so these buffers
-        // augment, not replace, the uri-list written above.
-        if (process.platform === "win32") {
-          const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
-          if (st.size > MAX_BYTES) return { ok: false, error: "File too large (max 500 MB)" };
-          const buf = await fs.promises.readFile(safe);
-          clipboard.writeBuffer("FileNameW", Buffer.from(name + "\0", "utf16le"));
-          clipboard.writeBuffer("FileContents", buf);
+        // Platform-native file copy to clipboard.
+        //
+        // Linux: writeBuffer sets the text/uri-list X11 selection target,
+        // which Chromium-based apps (Discord, Slack, VS Code) read to
+        // recognise a file paste.  A single writeBuffer call avoids the
+        // X11 overwrite problem (each call replaces the selection).
+        //
+        // Windows / macOS: clipboard.write({ bookmark }) atomically writes
+        // the platform-native file reference (CF_HDROP on Windows,
+        // NSFilenamesPboardType on macOS) plus a text/plain fallback.
+        // Discord and Explorer read CF_HDROP and open the file from disk.
+        if (process.platform === "linux") {
+          clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
+        } else {
+          clipboard.write({ bookmark: name, text: fileUri });
         }
 
         return { ok: true };
