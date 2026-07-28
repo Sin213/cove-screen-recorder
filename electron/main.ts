@@ -8,7 +8,6 @@ import {
   ipcMain,
   Menu,
   nativeImage,
-  protocol,
   screen,
   session,
   shell,
@@ -406,6 +405,11 @@ function createWindow(): void {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // In dev mode, the page is served from http://localhost:5173 and
+      // file:// URLs are blocked by CORS. webSecurity:false allows the
+      // in-app video player to src="file:///..." in dev. In production
+      // the page loads from file:// origin so this isn't needed.
+      webSecurity: app.isPackaged,
       // sandbox: true broke Chromium's `chromeMediaSource: "desktop"` audio
       // constraint on Windows — getUserMedia returned a video-only stream
       // with no audio tracks, even with system audio toggled on. The legacy
@@ -1619,14 +1623,6 @@ app.whenReady().then(() => {
     // Avoid a console warning when Vite reloads.
     app.commandLine.appendSwitch("disable-features", "OverlayScrollbar");
   }
-  // Register custom protocol so the in-app video player can load local
-  // files without CORS issues (renderer served from http://localhost
-  // in dev, or file:// in prod, can't directly src="file:///...").
-  protocol.registerFileProtocol("cove-file", (request, callback) => {
-    const filePath = decodeURIComponent(request.url.slice("cove-file://".length));
-    callback({ path: filePath });
-  });
-
   createWindow();
   if (process.platform === "win32") createTray();
 

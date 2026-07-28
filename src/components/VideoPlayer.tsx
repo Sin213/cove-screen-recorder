@@ -1,11 +1,26 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 interface Props {
-  /** path on disk that Chromium can play (file:// or the raw path) */
+  /** absolute filesystem path to the recording */
   path: string;
   /** display name for the title bar */
   name: string;
   onClose: () => void;
+}
+
+/**
+ * Convert an absolute filesystem path to a proper file:// URL.
+ * Handles spaces, Unicode, and Windows backslashes.
+ */
+function pathToFileURL(p: string): string {
+  // Normalize Windows backslashes
+  const normalized = p.replace(/\\/g, "/");
+  // Split into segments, encode each, rejoin
+  const segments = normalized.split("/").filter(Boolean);
+  const encodedSegments = segments.map(encodeURIComponent);
+  // Windows paths like C:/Users/... need file:///C:/Users/...
+  // Linux paths like /home/... become file:///home/...
+  return `file:///${encodedSegments.join("/")}`;
 }
 
 /**
@@ -15,6 +30,8 @@ interface Props {
  */
 export function VideoPlayer({ path, name, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const fileUrl = useMemo(() => pathToFileURL(path), [path]);
 
   useEffect(() => {
     // Close on Esc
@@ -48,7 +65,7 @@ export function VideoPlayer({ path, name, onClose }: Props) {
         <video
           ref={videoRef}
           className="vp-video"
-          src={`cove-file://${encodeURIComponent(path)}`}
+          src={fileUrl}
           controls
           autoPlay
           playsInline
