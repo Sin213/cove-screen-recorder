@@ -6,42 +6,48 @@ A small, fast, hardware-accelerated desktop screen recorder. Pick a region, scre
 
 ## Features
 
-- **Three capture modes** — Crop (drag-to-select region), Screen (full monitor), Window (pick an app)
-- **Three presets** — Balanced (1080p · 30 fps · ~6 Mbps · MP4), Gaming (1080p · 60 fps · ~12 Mbps · MP4), GIF (10 s · 15 fps · palette-optimised)
-- **Instant replay buffer** — continuous rolling fMP4 segment buffer; save the last N seconds without a second capture pass
-- **GPU-aware hardware encoding** — detects vendor at startup and picks the matching encoder first (NVENC on NVIDIA, AMF on AMD, QSV on Intel). Falls back to `libx264` software so a recording is never lost
-- **Live preview** during recording — see exactly the frames being saved
-- **System audio + microphone** — independent toggles. On Linux, system audio is captured via a parallel ffmpeg PulseAudio sidecar (clean stereo, full volume) and mixed onto the video at finalize
-- **Customisable global hotkeys** — bind any combo for toggle / quick-GIF / replay save; defaults are `Ctrl+Shift+R`, `Ctrl+Shift+G`, and `F8`
-- **Wayland-native** — single xdg-desktop-portal prompt per recording, no double-dialog, no XWayland fallback
-- **Cross-platform Linux** — AppImage and deb packages for Debian, Ubuntu, Arch, and Fedora
-- **Verifiable releases** — every published binary ships with a `.sha256` sidecar
+- **Three capture modes** -- Crop (drag-to-select region), Screen (full monitor), Window (pick an app)
+- **Three presets** -- Balanced (1080p, 30 fps, ~6 Mbps, MP4), Gaming (1080p, 60 fps, ~12 Mbps, MP4), GIF (10 s, 15 fps, palette-optimised)
+- **Instant replay buffer** -- continuous rolling fMP4 segment buffer; save the last N seconds without a second capture pass
+- **GPU-aware hardware encoding** -- detects vendor at startup and picks the matching encoder first (NVENC on NVIDIA, AMF on AMD, QSV on Intel). Falls back to `libx264` software so a recording is never lost
+- **Recent recordings gallery** -- browse, play, and manage your saved recordings inline. Per-card delete, multi-select with bulk delete/copy, and copy the video file to the OS clipboard (paste directly into Discord, Slack, or Outlook)
+- **Live preview** during recording -- see exactly the frames being saved
+- **System audio + microphone** -- independent toggles. On Linux, system audio is captured via a parallel ffmpeg PulseAudio sidecar (clean stereo, full volume) and mixed onto the video at finalize
+- **Unified toast notifications** -- on-screen toasts for recording start/save/replay/lifecycle events, auto-dismissing per type
+- **Customisable global hotkeys** -- bind any combo for toggle / quick-GIF / replay save; defaults are `Ctrl+Shift+R`, `Ctrl+Shift+G`, and `F8`
+- **Auto-update** -- electron-updater keeps the AppImage current. Download integrity is verified and update lifecycle is surfaced through toasts
+- **Wayland-native** -- single xdg-desktop-portal prompt per recording, no double-dialog, no XWayland fallback
+- **Cross-platform** -- AppImage, deb, and Windows (Portable .exe + NSIS Setup.exe) from a single repo. Every published binary ships with a `.sha256` sidecar
 
 ## Install
 
-### Linux — AppImage
+### Linux -- AppImage
 
 ```bash
-chmod +x Cove-Screen-Recorder-2.0.0-x86_64.AppImage
-./Cove-Screen-Recorder-2.0.0-x86_64.AppImage
+chmod +x Cove-Screen-Recorder-3.3.0-x86_64.AppImage
+./Cove-Screen-Recorder-3.3.0-x86_64.AppImage
 ```
 
-### Linux — Debian / Ubuntu
+### Linux -- Debian / Ubuntu
 
 ```bash
-sudo dpkg -i Cove-Screen-Recorder-2.0.0-amd64.deb
+sudo dpkg -i Cove-Screen-Recorder-3.3.0-amd64.deb
 sudo apt -f install   # if dependencies are missing
 ```
 
 The deb declares `ffmpeg`, `pipewire`, and `xdg-desktop-portal` as dependencies, so `apt` pulls them in automatically.
+
+### Windows
+
+Download `Cove-Screen-Recorder-3.3.0-Setup.exe` for an NSIS installer or `Cove-Screen-Recorder-3.3.0-Portable.exe` to run without installing.
 
 ### Verify the download
 
 Each artifact has a `<filename>.sha256` sidecar published next to it. Verify with:
 
 ```bash
-sha256sum -c Cove-Screen-Recorder-2.0.0-x86_64.AppImage.sha256
-# Cove-Screen-Recorder-2.0.0-x86_64.AppImage: OK
+sha256sum -c Cove-Screen-Recorder-3.3.0-x86_64.AppImage.sha256
+# Cove-Screen-Recorder-3.3.0-x86_64.AppImage: OK
 ```
 
 ## Runtime requirements
@@ -111,8 +117,8 @@ npm run dist:sha          # regenerate SHA256 sidecars without rebuilding
 ## Stack
 
 - Electron 32 · React 18 · TypeScript · Vite · Tailwind · Zustand
-- Capture: `navigator.mediaDevices.getDisplayMedia` routed through `setDisplayMediaRequestHandler`. Wayland uses PipeWire screencast portal natively; X11 uses `desktopCapturer` source enumeration
-- Encode: `MediaRecorder` (VP9 / Opus 384k in WebM) → system `ffmpeg` remux to MP4 / GIF. Encoder candidates are GPU-vendor-filtered and iterated on failure with `libx264` as the guaranteed software fallback
+- Capture: `navigator.mediaDevices.getDisplayMedia` routed through `setDisplayMediaRequestHandler`. Wayland uses PipeWire screencast portal natively; X11 uses `desktopCapturer` source enumeration. Windows uses the native Screen Capture API
+- Encode: `MediaRecorder` (VP9 / Opus 384k in WebM) -> system `ffmpeg` remux to MP4 / GIF. Encoder candidates are GPU-vendor-filtered and iterated on failure with `libx264` as the guaranteed software fallback
 
 ## Troubleshooting
 

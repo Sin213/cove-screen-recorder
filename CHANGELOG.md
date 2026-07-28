@@ -6,9 +6,13 @@ All notable changes to Cove Screen Recorder are documented in this file.
 
 ### Added
 
-- **Per-card delete** — hover any recording thumbnail to reveal an X button in the top-left corner. Click to delete with a confirmation prompt. The file is permanently removed from disk and the gallery refreshes immediately.
-- **Multi-select** — click the circle checkbox in the top-right corner of any thumbnail to toggle selection. Once one or more recordings are selected, a bulk-action bar appears in the gallery header with Delete (N), Copy (N), and Clear. Select and delete many at once.
-- **Copy recording to clipboard** — new "Copy file" button on each card copies the actual video file to the OS clipboard (Win32 file-dropboard via CFSTR_FILEDESCRIPTORW / CFSTR_FILECONTENTS). Paste directly into chat apps like Slack, Discord, or Outlook on Windows. On macOS and Linux the existing "Copy path" button remains as a reliable fallback; file-paste depends on the receiving application.
+- **Per-card delete** -- hover any recording thumbnail to reveal an X button in the top-left corner. Click to delete with a confirmation prompt. The file is permanently removed from disk and the gallery refreshes immediately.
+- **Multi-select** -- click the circle checkbox in the top-right corner of any thumbnail to toggle selection. Once one or more recordings are selected, a bulk-action bar appears in the gallery header with Delete (N), Copy (N), and Clear. Select and delete many at once.
+- **Copy recording to clipboard** -- new "Copy file" button on each card copies the actual video file to the OS clipboard. Paste directly into chat apps like Slack, Discord, or Outlook. Uses `text/uri-list` on Linux and the platform-native bookmark format on Windows/macOS.
+
+### Fixed
+
+- Empty or near-instant recordings no longer fail with the cryptic ffmpeg exit code 183. A file-size guard now catches empty WebM output before the remux step and surfaces a clear diagnostic message.
 
 ## [3.2.1] - 2026-07-08
 
