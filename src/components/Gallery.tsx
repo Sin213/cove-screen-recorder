@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LibraryEntry } from "../../electron/types";
 import { useStore } from "../store";
+import { VideoPlayer } from "./VideoPlayer";
 
 const MAX_THUMB_CONCURRENT = 3;
 
@@ -262,6 +263,9 @@ export function Gallery() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const lastSelectedRef = useRef<string | null>(null);
 
+  // In-app video player
+  const [playing, setPlaying] = useState<{ path: string; name: string } | null>(null);
+
   // Thumbnail queue state in refs (no re-render needed for bookkeeping)
   const requestedRef = useRef(new Set<string>());
   const pendingRef = useRef(0);
@@ -376,7 +380,8 @@ export function Gallery() {
   }
 
   function handleOpen(path: string) {
-    void window.cove.openFile(path);
+    const entry = entries?.find((e) => e.path === path);
+    setPlaying({ path, name: entry?.name ?? path });
   }
 
   function clearSelection() {
@@ -500,5 +505,12 @@ export function Gallery() {
         )}
       </div>
     </div>
+    {playing && (
+      <VideoPlayer
+        path={playing.path}
+        name={playing.name}
+        onClose={() => setPlaying(null)}
+      />
+    )}
   );
 }
