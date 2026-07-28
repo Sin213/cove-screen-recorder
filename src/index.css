@@ -804,6 +804,7 @@ kbd {
 }
 .vp-header {
   display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-1);
@@ -824,14 +825,16 @@ kbd {
   background: var(--surface-3); color: var(--text);
   border-color: var(--border-strong);
 }
+/* Electron <webview> hosts an internal iframe that fills the host via flexbox.
+   `display` must stay flex (inline-flex is the only safe alternative); with
+   `display: block` the shadow iframe falls back to its intrinsic 300x150. */
 .vp-video {
+  display: flex;
   width: 100%;
-  height: 100%;
   flex: 1 1 auto;
   min-height: 0;
   background: #000;
   border: none;
-  display: block;
 }
 .vp-error, .vp-loading {
   padding: 48px 24px; text-align: center;
