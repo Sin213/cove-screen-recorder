@@ -15,6 +15,8 @@ All notable changes to Cove Screen Recorder are documented in this file.
 ### Fixed
 
 - Empty or near-instant recordings no longer fail with the cryptic ffmpeg exit code 183. A file-size guard now catches empty WebM output before the remux step and surfaces a clear diagnostic message.
+- In-app video playback no longer renders as a narrow strip in the top-left corner of the player. The player host kept a CSS rule that broke the embedded view's layout, leaving it stuck at a 300x150 fallback size. Video now fills the player, stays centred, keeps its aspect ratio, and rescales as the window resizes.
+- File paths with spaces, Unicode characters, `#`, `?`, or `%` now open correctly in the in-app player instead of failing to load. Windows drive paths are also built correctly.
 
 ## [3.2.1] - 2026-07-08
 
