@@ -30,6 +30,8 @@ const api: CoveApi = {
     ipcRenderer.invoke("cove:delete-recording", rawPath, outputDir) as Promise<import("./types").RecordingOperationResult>,
   copyRecordingToClipboard: (rawPath, outputDir) =>
     ipcRenderer.invoke("cove:copy-recording-to-clipboard", rawPath, outputDir) as Promise<import("./types").RecordingOperationResult>,
+  getMediaUrl: (rawPath, outputDir) =>
+    ipcRenderer.invoke("cove:get-media-url", rawPath, outputDir) as Promise<string | null>,
 
   beginRecording: (params: StartRecordingParams) =>
     ipcRenderer.invoke("cove:begin-recording", params) as Promise<{ recordingId: string }>,

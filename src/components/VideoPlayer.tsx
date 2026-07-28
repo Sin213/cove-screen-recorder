@@ -1,40 +1,39 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Props {
   /** absolute filesystem path to the recording */
   path: string;
   /** display name for the title bar */
   name: string;
+  /** the current output directory (for IPC path validation) */
+  outputDir: string | null;
   onClose: () => void;
 }
 
 /**
- * Convert an absolute filesystem path to a proper file:// URL.
- * Handles spaces, Unicode, and Windows backslashes.
+ * Full-screen overlay video player.  Loads the recording through a local
+ * HTTP server (started by the main process) so the <video> element can
+ * stream the file without CORS or protocol restrictions.
  */
-function pathToFileURL(p: string): string {
-  // Normalize Windows backslashes
-  const normalized = p.replace(/\\/g, "/");
-  // Split into segments, encode each, rejoin
-  const segments = normalized.split("/").filter(Boolean);
-  const encodedSegments = segments.map(encodeURIComponent);
-  // Windows paths like C:/Users/... need file:///C:/Users/...
-  // Linux paths like /home/... become file:///home/...
-  return `file:///${encodedSegments.join("/")}`;
-}
-
-/**
- * Full-screen overlay video player.  Uses a plain <video> element with
- * native controls — Chromium ships H.264 + AAC + VP8/VP9/AV1 decoders
- * so MP4 / WebM / GIF play without extra codecs.
- */
-export function VideoPlayer({ path, name, onClose }: Props) {
+export function VideoPlayer({ path, name, outputDir, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-
-  const fileUrl = useMemo(() => pathToFileURL(path), [path]);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Close on Esc
+    let alive = true;
+    window.cove.getMediaUrl(path, outputDir).then((url) => {
+      if (alive) {
+        if (url) setMediaUrl(url);
+        else setError("Could not load recording");
+      }
+    }).catch(() => {
+      if (alive) setError("Could not load recording");
+    });
+    return () => { alive = false; };
+  }, [path, outputDir]);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
@@ -42,14 +41,13 @@ export function VideoPlayer({ path, name, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Autoplay once the source is loaded
   useEffect(() => {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || !mediaUrl) return;
     v.play().catch(() => {
       /* user gesture required on some platforms — controls handle it */
     });
-  }, [path]);
+  }, [mediaUrl]);
 
   return (
     <div className="vp-overlay" onClick={onClose}>
@@ -62,16 +60,20 @@ export function VideoPlayer({ path, name, onClose }: Props) {
             </svg>
           </button>
         </div>
-        <video
-          ref={videoRef}
-          className="vp-video"
-          src={fileUrl}
-          controls
-          autoPlay
-          playsInline
-        >
-          Your browser does not support the video tag.
-        </video>
+        {error ? (
+          <div className="vp-error">{error}</div>
+        ) : mediaUrl ? (
+          <video
+            ref={videoRef}
+            className="vp-video"
+            src={mediaUrl}
+            controls
+            autoPlay
+            playsInline
+          />
+        ) : (
+          <div className="vp-loading">Loading…</div>
+        )}
       </div>
     </div>
   );

@@ -158,6 +158,7 @@ export interface CoveApi {
   listRecordings: (dir: string | null, limit?: number) => Promise<LibraryEntry[]>;
   deleteRecording: (path: string, outputDir: string | null) => Promise<RecordingOperationResult>;
   copyRecordingToClipboard: (path: string, outputDir: string | null) => Promise<RecordingOperationResult>;
+  getMediaUrl: (path: string, outputDir: string | null) => Promise<string | null>;
   getThumbnail: (path: string) => Promise<string | null>;
 
   beginRecording: (params: StartRecordingParams) => Promise<{ recordingId: string }>;

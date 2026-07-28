@@ -827,3 +827,8 @@ kbd {
   max-height: calc(100dvh - 120px);
   background: #000;
 }
+.vp-error, .vp-loading {
+  padding: 48px 24px; text-align: center;
+  color: var(--text-dim); font-size: 14px;
+}
+.vp-error { color: var(--rec); }
