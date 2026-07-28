@@ -1,37 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 interface Props {
-  /** absolute filesystem path to the recording */
   path: string;
-  /** display name for the title bar */
   name: string;
-  /** the current output directory (for IPC path validation) */
-  outputDir: string | null;
   onClose: () => void;
 }
 
 /**
- * Full-screen overlay video player.  Loads the recording through a local
- * HTTP server (started by the main process) so the <video> element can
- * stream the file without CORS or protocol restrictions.
+ * Full-screen overlay video player using an Electron <webview>.
+ * webview loads the file:// URL in its own isolated renderer process,
+ * bypassing the CORS restriction that blocks <video> from http://localhost.
  */
-export function VideoPlayer({ path, name, outputDir, onClose }: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    window.cove.getMediaUrl(path, outputDir).then((url) => {
-      if (alive) {
-        if (url) setMediaUrl(url);
-        else setError("Could not load recording");
-      }
-    }).catch(() => {
-      if (alive) setError("Could not load recording");
-    });
-    return () => { alive = false; };
-  }, [path, outputDir]);
+export function VideoPlayer({ path, name, onClose }: Props) {
+  const webviewRef = useRef<Electron.WebviewTag>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -40,14 +21,6 @@ export function VideoPlayer({ path, name, outputDir, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !mediaUrl) return;
-    v.play().catch(() => {
-      /* user gesture required on some platforms — controls handle it */
-    });
-  }, [mediaUrl]);
 
   return (
     <div className="vp-overlay" onClick={onClose}>
@@ -60,20 +33,12 @@ export function VideoPlayer({ path, name, outputDir, onClose }: Props) {
             </svg>
           </button>
         </div>
-        {error ? (
-          <div className="vp-error">{error}</div>
-        ) : mediaUrl ? (
-          <video
-            ref={videoRef}
-            className="vp-video"
-            src={mediaUrl}
-            controls
-            autoPlay
-            playsInline
-          />
-        ) : (
-          <div className="vp-loading">Loading…</div>
-        )}
+        <webview
+          ref={webviewRef}
+          src={`file://${path}`}
+          className="vp-video"
+          allowtransparency="true"
+        />
       </div>
     </div>
   );

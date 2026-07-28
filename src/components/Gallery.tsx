@@ -510,7 +510,6 @@ export function Gallery() {
       <VideoPlayer
         path={playing.path}
         name={playing.name}
-        outputDir={outputDir}
         onClose={() => setPlaying(null)}
       />
     )}

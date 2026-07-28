@@ -18,7 +18,6 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
-import * as http from "node:http";
 import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
 import { EngineSupervisor } from "./engine-supervisor";
@@ -406,11 +405,7 @@ function createWindow(): void {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      // In dev mode, the page is served from http://localhost:5173 and
-      // file:// URLs are blocked by CORS. webSecurity:false allows the
-      // in-app video player to src="file:///..." in dev. In production
-      // the page loads from file:// origin so this isn't needed.
-      webSecurity: app.isPackaged,
+      webviewTag: true,
       // sandbox: true broke Chromium's `chromeMediaSource: "desktop"` audio
       // constraint on Windows — getUserMedia returned a video-only stream
       // with no audio tracks, even with system audio toggled on. The legacy
@@ -1048,56 +1043,8 @@ function registerIpc(): void {
         return await startCropSelection();
       } catch (err) {
         console.warn("crop selection failed", err);
-  return null;
-}
-
-// ── Local media server for in-app video player ──────────────────────────
-
-let mediaServerPort: number | null = null;
-
-function ensureMediaServer(): number {
-  if (mediaServerPort !== null) return mediaServerPort;
-
-  const server = http.createServer((req, res) => {
-    // URL path is /<encoded-absolute-path>
-    const raw = decodeURIComponent(req.url?.slice(1) ?? "");
-    const filePath = path.resolve(raw);
-    const root = path.resolve(defaultOutputDir());
-
-    // Only serve files inside the recordings output directory
-    if (!filePath.startsWith(root + path.sep) && filePath !== root) {
-      res.writeHead(403);
-      res.end("Forbidden");
-      return;
-    }
-
-    try {
-      const st = fs.statSync(filePath);
-      if (!st.isFile()) { res.writeHead(404); res.end("Not found"); return; }
-
-      const ext = path.extname(filePath).toLowerCase();
-      const mime: Record<string, string> = {
-        ".mp4": "video/mp4", ".webm": "video/webm", ".gif": "image/gif",
-      };
-      res.writeHead(200, {
-        "Content-Type": mime[ext] ?? "video/mp4",
-        "Content-Length": st.size,
-        "Accept-Ranges": "bytes",
-      });
-      fs.createReadStream(filePath).pipe(res);
-    } catch {
-      res.writeHead(404);
-      res.end("Not found");
-    }
-  });
-
-  server.listen(0, "127.0.0.1", () => {
-    const addr = server.address();
-    if (addr && typeof addr === "object") mediaServerPort = addr.port;
-  });
-
-  return (server.address() as any)?.port ?? 0;
-}
+        return null;
+      }
     },
   );
 
@@ -1285,15 +1232,6 @@ function ensureMediaServer(): number {
       }
     },
   );
-
-  ipcMain.handle("cove:get-media-url", async (_e, rawPath: unknown, outputDir: unknown) => {
-    if (typeof rawPath !== "string" || !rawPath) return null;
-    const dir = typeof outputDir === "string" && outputDir.length > 0 ? outputDir : defaultOutputDir();
-    const safe = safeOutputPath(rawPath, dir);
-    if (!safe) return null;
-    const port = ensureMediaServer();
-    return `http://127.0.0.1:${port}/${encodeURIComponent(safe)}`;
-  });
 
   ipcMain.handle("cove:begin-recording", async (_e, params: StartRecordingParams) => {
     const outDir = params.outputDir || defaultOutputDir();
