@@ -17,7 +17,7 @@ import { autoUpdater } from "electron-updater";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { detectFfmpeg, setDetectedGpuVendor } from "./ffmpeg";
 import { appendChunk, begin, cancel, cancelAll, finalize, setRecorderLogger } from "./recorder";
 import { EngineSupervisor } from "./engine-supervisor";
@@ -1215,12 +1215,24 @@ function registerIpc(): void {
         // recognise a file paste.  A single writeBuffer call avoids the
         // X11 overwrite problem (each call replaces the selection).
         //
-        // Windows / macOS: clipboard.write({ bookmark }) atomically writes
-        // the platform-native file reference (CF_HDROP on Windows,
-        // NSFilenamesPboardType on macOS) plus a text/plain fallback.
-        // Discord and Explorer read CF_HDROP and open the file from disk.
+        // Windows: PowerShell's Set-Clipboard -LiteralPath sets CF_HDROP
+        // and CFSTR_FILEDESCRIPTORW / CFSTR_FILECONTENTS atomically -
+        // the proper Win32 file-dropboard that Discord, Explorer, and
+        // Outlook read.  clipboard.write({ bookmark }) only writes the
+        // Chromium-internal bookmark format, which Discord falls back to
+        // text/plain for, pasting the file:// URI as literal text.
+        //
+        // macOS: clipboard.write({ bookmark }) writes NSFilenamesPboardType.
         if (process.platform === "linux") {
           clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
+        } else if (process.platform === "win32") {
+          const escaped = safe.replace(/'/g, "''");
+          const r = spawnSync("powershell", [
+            "-NoProfile", "-Command",
+            `Set-Clipboard -LiteralPath '${escaped}'`,
+          ], { timeout: 30000 });
+          if (r.error) return { ok: false, error: `Clipboard failed: ${r.error.message}` };
+          if (r.status !== 0) return { ok: false, error: `Clipboard failed (exit ${r.status})` };
         } else {
           clipboard.write({ bookmark: name, text: fileUri });
         }
