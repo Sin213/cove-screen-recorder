@@ -8,6 +8,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  protocol,
   screen,
   session,
   shell,
@@ -1618,6 +1619,14 @@ app.whenReady().then(() => {
     // Avoid a console warning when Vite reloads.
     app.commandLine.appendSwitch("disable-features", "OverlayScrollbar");
   }
+  // Register custom protocol so the in-app video player can load local
+  // files without CORS issues (renderer served from http://localhost
+  // in dev, or file:// in prod, can't directly src="file:///...").
+  protocol.registerFileProtocol("cove-file", (request, callback) => {
+    const filePath = decodeURIComponent(request.url.slice("cove-file://".length));
+    callback({ path: filePath });
+  });
+
   createWindow();
   if (process.platform === "win32") createTray();
 

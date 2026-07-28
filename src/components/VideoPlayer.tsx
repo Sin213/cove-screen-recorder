@@ -48,7 +48,7 @@ export function VideoPlayer({ path, name, onClose }: Props) {
         <video
           ref={videoRef}
           className="vp-video"
-          src={`file://${path}`}
+          src={`cove-file://${encodeURIComponent(path)}`}
           controls
           autoPlay
           playsInline
