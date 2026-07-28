@@ -45,7 +45,6 @@ function formatPlatform(info: AppInfo): string {
   const session = info.sessionType?.toLowerCase();
   switch (info.platform) {
     case "win32": return "Windows";
-    case "darwin": return "macOS";
     case "linux": {
       if (session === "wayland") return "Linux · Wayland";
       if (session === "x11") return "Linux · X11";

@@ -745,7 +745,7 @@ function ensureSocketDir(dir: string): void {
     );
   }
 
-  // Ownership check (Linux/macOS — on Windows uid is always 0, skip)
+  // Ownership check (Linux — on Windows uid is always 0, skip)
   if (typeof process.getuid === "function") {
     const myUid = process.getuid();
     if (stat.uid !== myUid) {

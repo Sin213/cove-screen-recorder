@@ -762,7 +762,7 @@ function installDisplayMediaHandler(): void {
       // Reset for next call.
       nextDisplayMediaTypes = ["screen", "window"];
       // Always pass "loopback" when audio was requested. On Windows this
-      // captures system-audio output; on Linux/macOS it's a no-op but
+      // captures system-audio output; on Linux it's a no-op but
       // satisfies the request contract — without it (audio:undefined when
       // audioRequested:true) Chromium errors with "Error starting capture"
       // before the portal even opens. Wayland system-audio capture itself
@@ -1205,27 +1205,12 @@ function registerIpc(): void {
         const st = await fs.promises.stat(safe);
         if (!st.isFile()) return { ok: false, error: "Not a file" };
 
-        const name = path.basename(safe);
         const fileUri = pathToFileURL(safe).href;
 
-        // Platform-native file copy to clipboard.
-        //
-        // Linux: writeBuffer sets the text/uri-list X11 selection target,
-        // which Chromium-based apps (Discord, Slack, VS Code) read to
-        // recognise a file paste.  A single writeBuffer call avoids the
-        // X11 overwrite problem (each call replaces the selection).
-        //
-        // Windows: PowerShell's Set-Clipboard -LiteralPath sets CF_HDROP
-        // and CFSTR_FILEDESCRIPTORW / CFSTR_FILECONTENTS atomically -
-        // the proper Win32 file-dropboard that Discord, Explorer, and
-        // Outlook read.  clipboard.write({ bookmark }) only writes the
-        // Chromium-internal bookmark format, which Discord falls back to
-        // text/plain for, pasting the file:// URI as literal text.
-        //
-        // macOS: clipboard.write({ bookmark }) writes NSFilenamesPboardType.
-        if (process.platform === "linux") {
-          clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
-        } else if (process.platform === "win32") {
+        if (process.platform === "win32") {
+          // PowerShell Set-Clipboard -LiteralPath atomically sets CF_HDROP
+          // and CFSTR_FILEDESCRIPTORW / CFSTR_FILECONTENTS — the proper
+          // Win32 file-dropboard that Discord, Explorer, and Outlook read.
           const escaped = safe.replace(/'/g, "''");
           const r = spawnSync("powershell", [
             "-NoProfile", "-Command",
@@ -1234,7 +1219,9 @@ function registerIpc(): void {
           if (r.error) return { ok: false, error: `Clipboard failed: ${r.error.message}` };
           if (r.status !== 0) return { ok: false, error: `Clipboard failed (exit ${r.status})` };
         } else {
-          clipboard.write({ bookmark: name, text: fileUri });
+          // Linux: text/uri-list — Chromium-based apps (Discord, Slack)
+          // read this X11 selection target to recognise a file paste.
+          clipboard.writeBuffer("text/uri-list", Buffer.from(fileUri + "\r\n"));
         }
 
         return { ok: true };
@@ -1706,7 +1693,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   cancelAll();
   globalShortcut.unregisterAll();
-  if (process.platform !== "darwin") app.quit();
+  app.quit();
 });
 
 app.on("before-quit", (event) => {
