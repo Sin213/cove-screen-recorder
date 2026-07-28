@@ -73,11 +73,12 @@ interface CardProps {
   selected: boolean;
   selectionActive: boolean;
   outputDir: string | null;
-  onSelect: (path: string) => void;
+  onSelect: (path: string, e: React.MouseEvent) => void;
   onDelete: (path: string) => void;
+  onOpen: (path: string) => void;
 }
 
-function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, selectionActive, outputDir, onSelect, onDelete }: CardProps) {
+function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, selectionActive, outputDir, onSelect, onDelete, onOpen }: CardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "ok" | "err">("idle");
   const [clipStatus, setClipStatus] = useState<"idle" | "ok" | "err">("idle");
@@ -100,8 +101,13 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, s
     return () => observer.disconnect();
   }, [entry.path, onVisible, scrollRoot]);
 
-  function handleOpen() {
-    void window.cove.openFile(entry.path);
+  function handleThumbClick(e: React.MouseEvent) {
+    onSelect(entry.path, e);
+  }
+
+  function handleThumbDoubleClick(e: React.MouseEvent) {
+    e.preventDefault();
+    onOpen(entry.path);
   }
 
   function handleReveal() {
@@ -153,7 +159,8 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, s
 
   function handleSelectClick(e: React.MouseEvent) {
     e.stopPropagation();
-    onSelect(entry.path);
+    // Circle always toggles — Ctrl/Shift have no extra meaning here.
+    onSelect(entry.path, e);
   }
 
   useEffect(() => () => {
@@ -167,9 +174,10 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, s
     <div className={`gallery-card${selected ? " gallery-card-selected" : ""}`} ref={cardRef}>
       <button
         className="gallery-card-thumb"
-        onClick={handleOpen}
-        title={`Open ${entry.name}`}
-        aria-label={`Open ${entry.name}`}
+        onClick={handleThumbClick}
+        onDoubleClick={handleThumbDoubleClick}
+        title="Click to select, double-click to open"
+        aria-label={`Select ${entry.name}`}
       >
         {thumbDataUrl && (
           <img src={thumbDataUrl} alt="" aria-hidden="true" draggable={false} />
@@ -252,6 +260,7 @@ export function Gallery() {
 
   // Selection state for multi-select (v3.3.0)
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const lastSelectedRef = useRef<string | null>(null);
 
   // Thumbnail queue state in refs (no re-render needed for bookkeeping)
   const requestedRef = useRef(new Set<string>());
@@ -283,6 +292,20 @@ export function Gallery() {
     );
     return () => { alive = false; };
   }, [outputDir, lastOutputPath, v2ExportOutputPath, status]);
+
+  // Keyboard: Delete key deletes selected recordings
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Delete" && selected.size > 0) {
+        e.preventDefault();
+        void handleDeleteMany();
+      }
+    }
+    el.addEventListener("keydown", onKeyDown);
+    return () => el.removeEventListener("keydown", onKeyDown);
+  }, [selected]);
 
   // Drain the thumbnail queue, bounded to MAX_THUMB_CONCURRENT concurrent requests
   const processQueue = useCallback(() => {
@@ -320,17 +343,45 @@ export function Gallery() {
 
   // ── Selection handlers (v3.3.0) ──────────────────────────────────────────
 
-  function handleToggleSelect(path: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+  function handleSelect(path: string, e: React.MouseEvent) {
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd-click: toggle this item in/out of the set.
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path); else next.add(path);
+        return next;
+      });
+      lastSelectedRef.current = path;
+    } else if (e.shiftKey && lastSelectedRef.current && entries) {
+      // Shift-click: select the range from the last-selected item to this one.
+      const anchor = lastSelectedRef.current;
+      const paths = entries.map((en) => en.path);
+      const a = paths.indexOf(anchor);
+      const b = paths.indexOf(path);
+      if (a >= 0 && b >= 0) {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        const range = new Set(paths.slice(lo, hi + 1));
+        setSelected(range);
+      }
+    } else {
+      // Plain click: replace selection with this single item.
+      // If it's already the only selected item, deselect it.
+      setSelected((prev) => {
+        if (prev.size === 1 && prev.has(path)) return new Set();
+        return new Set([path]);
+      });
+      lastSelectedRef.current = path;
+    }
+  }
+
+  function handleOpen(path: string) {
+    void window.cove.openFile(path);
   }
 
   function clearSelection() {
     setSelected(new Set());
+    lastSelectedRef.current = null;
   }
 
   async function handleDeleteOne(path: string) {
@@ -423,7 +474,7 @@ export function Gallery() {
         )}
       </div>
 
-      <div className="gallery-body" ref={bodyRef}>
+      <div className="gallery-body" ref={bodyRef} tabIndex={-1}>
         {entries === null ? (
           <div className="gallery-empty"><span className="gallery-loading-dot" />Loading…</div>
         ) : entries.length === 0 ? (
@@ -440,8 +491,9 @@ export function Gallery() {
                 selected={selected.has(e.path)}
                 selectionActive={selectionActive}
                 outputDir={outputDir}
-                onSelect={handleToggleSelect}
+                onSelect={handleSelect}
                 onDelete={handleDeleteOne}
+                onOpen={handleOpen}
               />
             ))}
           </div>
