@@ -1096,8 +1096,6 @@ function ensureMediaServer(): number {
     if (addr && typeof addr === "object") mediaServerPort = addr.port;
   });
 
-  // Return a default that gets updated once the server is listening.
-  // The first request will be slightly delayed — acceptable for a player.
   return (server.address() as any)?.port ?? 0;
 }
     },
