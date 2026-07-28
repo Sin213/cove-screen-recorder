@@ -6,8 +6,10 @@ All notable changes to Cove Screen Recorder are documented in this file.
 
 ### Added
 
-- **Per-card delete** -- hover any recording thumbnail to reveal an X button in the top-left corner. Click to delete with a confirmation prompt. The file is permanently removed from disk and the gallery refreshes immediately.
-- **Multi-select** -- click the circle checkbox in the top-right corner of any thumbnail to toggle selection. Once one or more recordings are selected, a bulk-action bar appears in the gallery header with Delete (N), Copy (N), and Clear. Select and delete many at once.
+- **Per-card delete** -- hover any recording thumbnail to reveal an X button in the top-left corner. Click to delete with a confirmation prompt. Files are moved to the OS trash/recycle bin (not permanently deleted).
+- **Multi-select** -- click a thumbnail to select it (single click, no longer opens the video). Ctrl/Cmd+click toggles, Shift+click selects a range. A bulk-action bar appears with Delete (N), Copy (N), and Clear. Press the Delete key to trash all selected recordings at once.
+- **Double-click to open** -- double-click any thumbnail to open the video in Cove's in-app player.
+- **In-app video player** -- plays MP4, WebM, and GIF directly inside Cove with native controls (play/pause, seek, volume, fullscreen, PiP). No external media player needed.
 - **Copy recording to clipboard** -- new "Copy file" button on each card copies the actual video file to the OS clipboard. Paste directly into chat apps like Slack, Discord, or Outlook. Uses `text/uri-list` on Linux and the native Win32 file-dropboard on Windows.
 
 ### Fixed

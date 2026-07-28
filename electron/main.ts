@@ -1184,7 +1184,7 @@ function registerIpc(): void {
       try {
         const st = await fs.promises.stat(safe);
         if (!st.isFile()) return { ok: false, error: "Not a file" };
-        await fs.promises.unlink(safe);
+        await shell.trashItem(safe);
         return { ok: true };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Unknown error";

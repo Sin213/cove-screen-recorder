@@ -10,7 +10,8 @@ A small, fast, hardware-accelerated desktop screen recorder. Pick a region, scre
 - **Three presets** -- Balanced (1080p, 30 fps, ~6 Mbps, MP4), Gaming (1080p, 60 fps, ~12 Mbps, MP4), GIF (10 s, 15 fps, palette-optimised)
 - **Instant replay buffer** -- continuous rolling fMP4 segment buffer; save the last N seconds without a second capture pass
 - **GPU-aware hardware encoding** -- detects vendor at startup and picks the matching encoder first (NVENC on NVIDIA, AMF on AMD, QSV on Intel). Falls back to `libx264` software so a recording is never lost
-- **Recent recordings gallery** -- browse, play, and manage your saved recordings inline. Per-card delete, multi-select with bulk delete/copy, and copy the video file to the OS clipboard (paste directly into Discord, Slack, or Outlook)
+- **Recent recordings gallery** -- browse, play, and manage your saved recordings inline. Single-click selects (Ctrl/Shift for multi-select), double-click opens the in-app video player. Per-card delete, bulk delete/copy, and copy the video file to the OS clipboard (paste directly into Discord, Slack, or Outlook)
+- **In-app video player** -- plays MP4, WebM, and GIF directly inside Cove. No external media player needed. Native controls with fullscreen, PiP, and keyboard shortcuts
 - **Live preview** during recording -- see exactly the frames being saved
 - **System audio + microphone** -- independent toggles. On Linux, system audio is captured via a parallel ffmpeg PulseAudio sidecar (clean stereo, full volume) and mixed onto the video at finalize
 - **Unified toast notifications** -- on-screen toasts for recording start/save/replay/lifecycle events, auto-dismissing per type
