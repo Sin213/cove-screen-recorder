@@ -12,7 +12,7 @@ interface Props {
  * bypassing the CORS restriction that blocks <video> from http://localhost.
  */
 export function VideoPlayer({ path, name, onClose }: Props) {
-  const webviewRef = useRef<Electron.WebviewTag>(null);
+  const webviewRef = useRef<any>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
