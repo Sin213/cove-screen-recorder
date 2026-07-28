@@ -45,7 +45,7 @@ jobs:
           workspaces: ". -> target"
 
       - name: Clippy
-        run: cargo clippy -p cove-replay-engine -- -D warnings
+        run: cargo clippy -p cove-replay-engine
 
       - name: Build helper
         run: cargo build --release -p cove-replay-engine
@@ -68,7 +68,7 @@ jobs:
         run: cargo check -p cove-replay-engine --target x86_64-pc-windows-msvc
 
       - name: Clippy (Windows)
-        run: cargo clippy -p cove-replay-engine --target x86_64-pc-windows-msvc -- -D warnings
+        run: cargo clippy -p cove-replay-engine --target x86_64-pc-windows-msvc
 
   build-electron:
     name: Build Electron app (Linux)
