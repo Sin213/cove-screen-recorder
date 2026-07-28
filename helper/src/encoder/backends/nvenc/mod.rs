@@ -270,6 +270,7 @@ const NV_ENC_PRESET_P4_GUID: [u8; 16] = [
 /// `maxMEHintCountsPerBlockRow` is two `NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKROW`
 /// structs of 4 × `u32` each (16 bytes/element).  We don't use ME hints, so
 /// this is declared as `[u32; 8]` and zero-initialised.
+#[allow(non_snake_case)]
 #[repr(C)]
 struct NV_ENC_INITIALIZE_PARAMS {
     version: u32,
@@ -301,6 +302,7 @@ struct NV_ENC_INITIALIZE_PARAMS {
 }
 
 /// NV_ENC_CREATE_INPUT_BUFFER
+#[allow(non_snake_case)]
 #[repr(C)]
 struct NV_ENC_CREATE_INPUT_BUFFER {
     version: u32,
@@ -316,6 +318,7 @@ struct NV_ENC_CREATE_INPUT_BUFFER {
 }
 
 /// NV_ENC_CREATE_BITSTREAM_BUFFER
+#[allow(non_snake_case)]
 #[repr(C)]
 struct NV_ENC_CREATE_BITSTREAM_BUFFER {
     version: u32,
@@ -329,6 +332,7 @@ struct NV_ENC_CREATE_BITSTREAM_BUFFER {
 }
 
 /// NV_ENC_PIC_PARAMS
+#[allow(non_snake_case)]
 #[repr(C)]
 struct NV_ENC_PIC_PARAMS {
     version: u32,
@@ -360,6 +364,7 @@ struct NV_ENC_PIC_PARAMS {
 }
 
 /// NV_ENC_LOCK_BITSTREAM
+#[allow(non_snake_case)]
 #[repr(C)]
 struct NV_ENC_LOCK_BITSTREAM {
     version: u32,
@@ -434,6 +439,7 @@ type FnNvEncUnlockBitstream = unsafe extern "C" fn(
 ) -> NVENCSTATUS;
 
 /// NV_ENC_LOCK_INPUT_BUFFER — per SDK 12.1 NvEncodeAPI.h.
+#[allow(non_snake_case)]
 #[repr(C)]
 struct NV_ENC_LOCK_INPUT_BUFFER {
     version: u32,
