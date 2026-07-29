@@ -891,6 +891,16 @@ function defaultOutputDir(): string {
   return dir;
 }
 
+// Expand a leading "~" the same way cove:list-recordings does. Without this
+// a tilde output dir lists fine but fails every path check, because
+// path.resolve("~/Videos") yields a cwd-relative "./~/Videos".
+function expandUserDir(dir: string): string {
+  const home = os.homedir();
+  if (dir === "~") return home;
+  if (dir.startsWith("~/") || dir.startsWith("~\\")) return path.join(home, dir.slice(2));
+  return dir;
+}
+
 // Reject paths that escape outputDir via ".." or absolute-path tricks.
 // Resolves both sides before checks so "/home/../etc" is caught.
 function safeOutputPath(rawPath: string, outputDir: string): string | null {
@@ -1180,7 +1190,7 @@ function registerIpc(): void {
     "cove:delete-recording",
     async (_e, rawPath: unknown, outputDir: unknown): Promise<import("./types").RecordingOperationResult> => {
       if (typeof rawPath !== "string" || !rawPath) return { ok: false, error: "Invalid path" };
-      const dir = typeof outputDir === "string" && outputDir.length > 0 ? outputDir : defaultOutputDir();
+      const dir = typeof outputDir === "string" && outputDir.length > 0 ? expandUserDir(outputDir) : defaultOutputDir();
       const safe = safeOutputPath(rawPath, dir);
       if (!safe) return { ok: false, error: "Path is outside the recordings folder" };
       try {
@@ -1200,7 +1210,7 @@ function registerIpc(): void {
     "cove:copy-recording-to-clipboard",
     async (_e, rawPath: unknown, outputDir: unknown): Promise<import("./types").RecordingOperationResult> => {
       if (typeof rawPath !== "string" || !rawPath) return { ok: false, error: "Invalid path" };
-      const dir = typeof outputDir === "string" && outputDir.length > 0 ? outputDir : defaultOutputDir();
+      const dir = typeof outputDir === "string" && outputDir.length > 0 ? expandUserDir(outputDir) : defaultOutputDir();
       const safe = safeOutputPath(rawPath, dir);
       if (!safe) return { ok: false, error: "Path is outside the recordings folder" };
       try {

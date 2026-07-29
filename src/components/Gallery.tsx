@@ -79,6 +79,17 @@ interface CardProps {
   onOpen: (path: string) => void;
 }
 
+// Cap the error lines in a bulk-failure dialog so a large failed selection
+// cannot produce an unreadable alert.
+const MAX_ERROR_LINES = 5;
+
+// Display name for an error line. Handles both separators so a Windows path
+// reports "clip.mp4" rather than the whole path.
+function fileNameOf(p: string): string {
+  const parts = p.split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
 function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, selectionActive, outputDir, onSelect, onDelete, onOpen }: CardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "ok" | "err">("idle");
@@ -153,7 +164,7 @@ function RecordingCard({ entry, thumbDataUrl, onVisible, scrollRoot, selected, s
 
   function handleDeleteClick(e: React.MouseEvent) {
     e.stopPropagation();
-    if (window.confirm(`Delete "${entry.name}"?\n\nThis moves the file to trash.`)) {
+    if (window.confirm(`Move "${entry.name}" to trash?`)) {
       onDelete(entry.path);
     }
   }
@@ -404,15 +415,19 @@ export function Gallery() {
         next.delete(path);
         return next;
       });
-    } else if (r.error) {
-      window.alert(`Could not delete: ${r.error}`);
+    } else {
+      window.alert(`Could not move "${fileNameOf(path)}" to trash.\n\n${r.error || "Unknown error"}`);
     }
   }
 
   async function handleDeleteMany() {
     const count = selected.size;
-    if (!window.confirm(`Delete ${count} recording${count > 1 ? "s" : ""}?\n\nThis moves files to trash.`)) return;
+    if (!window.confirm(`Move ${count} recording${count > 1 ? "s" : ""} to trash?`)) return;
     let ok = 0;
+    // Keep each failure's reason. Reporting only a count hides the actual
+    // error (permissions, path validation, a trash backend that refused),
+    // which leaves the user with no way to tell what went wrong.
+    const failures: string[] = [];
     const remaining = [...selected];
     for (const p of remaining) {
       const r = await window.cove.deleteRecording(p, outputDir);
@@ -429,9 +444,21 @@ export function Gallery() {
           next.delete(p);
           return next;
         });
+      } else {
+        // Leave the card and the selection alone so the file stays visible.
+        failures.push(`${fileNameOf(p)}: ${r.error || "Unknown error"}`);
       }
     }
-    if (ok < count) window.alert(`Deleted ${ok} of ${count} recordings.`);
+    if (failures.length > 0) {
+      const shown = failures.slice(0, MAX_ERROR_LINES);
+      const hidden = failures.length - shown.length;
+      if (hidden > 0) shown.push(`...and ${hidden} more.`);
+      const header =
+        ok > 0
+          ? `Moved ${ok} of ${count} recordings to trash.\n\nCould not move:`
+          : `Could not move ${count} recording${count > 1 ? "s" : ""} to trash.\n`;
+      window.alert(`${header}\n${shown.join("\n")}`);
+    }
   }
 
   async function handleCopyMany() {
