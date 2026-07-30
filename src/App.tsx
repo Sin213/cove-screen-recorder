@@ -261,6 +261,19 @@ export function App() {
     return off;
   }, [log, addToast]);
 
+  // System audio was requested but the OS refused to open the loopback
+  // endpoint, so capture continued video-only. Surfaced as a warning rather
+  // than an error because the recording itself is fine and still running —
+  // some output devices (certain vendor headset endpoints) simply never
+  // support loopback capture, and failing the whole recording over it left
+  // users unable to record at all.
+  const notifySystemAudioUnavailable = useCallback(() => {
+    const msg = "System audio unavailable on this output device - recording video only. "
+      + "Try a different playback device if you need desktop audio.";
+    log("warn", msg);
+    addToast("warning", "System audio unavailable - recording video only", { duration: 8000 });
+  }, [log, addToast]);
+
   const getCurrentAppInfo = useCallback(async () => {
     if (appInfo) return appInfo;
     const info = await window.cove.getAppInfo();
@@ -293,6 +306,7 @@ export function App() {
           onAutoStop: () => void stopFlowRef.current?.(false),
           onError: (msg) => { log("error", msg); setLastError(msg); },
           onLog: (level, text) => log(level, text),
+          onSystemAudioUnavailable: notifySystemAudioUnavailable,
         });
         sessionRef.current = session;
         setLivePreview(session.previewStream);
@@ -310,7 +324,7 @@ export function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, setStatus, setRecording, setLastError, log, addToast],
+    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, setStatus, setRecording, setLastError, log, addToast, notifySystemAudioUnavailable],
   );
 
   const startWaylandCapture = useCallback(
@@ -341,6 +355,7 @@ export function App() {
           onAutoStop: () => void stopFlowRef.current?.(false),
           onError: (msg) => { log("error", msg); setLastError(msg); },
           onLog: (level, text) => log(level, text),
+          onSystemAudioUnavailable: notifySystemAudioUnavailable,
         });
         sessionRef.current = session;
         setLivePreview(session.previewStream);
@@ -362,7 +377,7 @@ export function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, appInfo, setStatus, setRecording, setLastError, log, addToast],
+    [outputDir, withMic, withSystemAudio, customQuality, replay.quality, appInfo, setStatus, setRecording, setLastError, log, addToast, notifySystemAudioUnavailable],
   );
 
   const beginScreen = useCallback(
@@ -426,6 +441,7 @@ export function App() {
               onAutoStop: () => void stopFlowRef.current?.(false),
               onError: (msg) => { log("error", msg); setLastError(msg); },
               onLog: (level, text) => log(level, text),
+              onSystemAudioUnavailable: notifySystemAudioUnavailable,
             });
             sessionRef.current = session;
             setLivePreview(session.previewStream);
@@ -487,6 +503,7 @@ export function App() {
           onAutoStop: () => void stopFlowRef.current?.(false),
           onError: (msg) => { log("error", msg); setLastError(msg); },
           onLog: (level, text) => log(level, text),
+          onSystemAudioUnavailable: notifySystemAudioUnavailable,
         });
         sessionRef.current = session;
         setLivePreview(session.previewStream);
@@ -502,7 +519,7 @@ export function App() {
         setStatus("idle");
       }
     },
-    [pendingCrop, outputDir, customQuality, withMic, withSystemAudio, appInfo, setStatus, setRecording, setLastError, log, addToast],
+    [pendingCrop, outputDir, customQuality, withMic, withSystemAudio, appInfo, setStatus, setRecording, setLastError, log, addToast, notifySystemAudioUnavailable],
   );
 
   const cancelCrop = useCallback(() => {
@@ -585,6 +602,7 @@ export function App() {
         },
         onError: (msg) => { log("error", `Replay buffer: ${msg}`); setLastError(msg); },
         onLog: (level, text) => log(level, text),
+        onSystemAudioUnavailable: notifySystemAudioUnavailable,
       });
       setReplayHandle(handle);
       log("good", `Replay buffer started (${Math.round(replay.lengthSeconds / 60)} min window)`);
@@ -599,7 +617,7 @@ export function App() {
         setLastError(msg);
       }
     }
-  }, [replayHandle, outputDir, preset, customQuality, withMic, withSystemAudio, replay.lengthSeconds, log, addToast, setLastError]);
+  }, [replayHandle, outputDir, preset, customQuality, withMic, withSystemAudio, replay.lengthSeconds, log, addToast, setLastError, notifySystemAudioUnavailable]);
 
   const startReplay = useCallback(async () => {
     if (replayHandle) return;

@@ -52,6 +52,100 @@ export interface CaptureSession {
   cancel: () => void;
 }
 
+// System-audio loopback constraints. Chromium's WASAPI loopback on Windows
+// otherwise inherits the playback device's "default format", which Windows
+// often leaves at mono — captured audio comes out 1ch and music sounds flat.
+// echoCancellation/noiseSuppression/autoGainControl default to ON for any
+// mediaDevices stream; that voice-tuned DSP chain is disastrous for music
+// (gain pumping, transient softening), so we turn it off for pure capture.
+const SYSTEM_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  channelCount: { ideal: 2 },
+  sampleRate: { ideal: 48000 },
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+};
+
+// Errors raised when the OS refuses to open the audio endpoint at all, as
+// opposed to the user cancelling the picker or the video source dying.
+//
+// Real-world case: a Logitech PRO X headset set as the default Windows
+// output device. Chromium's IAudioClient::Initialize with the loopback flag
+// fails on that endpoint no matter what — exclusive mode off, shared format
+// set to 16-bit/48k stereo, G HUB not running. Some vendor endpoints simply
+// don't service loopback capture, and no constraint we send can fix that.
+// NotReadableError / NotFoundError / NotSupportedError are all reachable
+// here depending on which layer gives up first.
+function isAudioDeviceFailure(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : "";
+  if (name === "NotAllowedError" || name === "AbortError") return false; // user cancelled
+  if (name === "NotReadableError" || name === "NotFoundError" || name === "NotSupportedError") return true;
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return msg.includes("audio source")
+    || msg.includes("audio device")
+    || msg.includes("could not start audio");
+}
+
+export interface DisplayStreamResult {
+  stream: MediaStream;
+  // True when system audio was requested but had to be dropped to get any
+  // capture at all. Callers surface this to the user and, off Linux, stop
+  // claiming the recording has system audio.
+  systemAudioDropped: boolean;
+}
+
+// Acquire a getDisplayMedia stream, degrading system audio rather than
+// failing the whole recording when the OS won't open the loopback endpoint.
+//
+// Ladder: full constraints → bare `audio: true` (drops the channel/rate/DSP
+// asks, in case one of them is what the endpoint chokes on) → `audio: false`
+// (video-only). Only audio-shaped failures are retried; a cancelled picker
+// or a dead video source still throws immediately, because retrying those
+// would re-prompt the user or spin pointlessly.
+async function acquireDisplayStream(
+  video: MediaTrackConstraints,
+  wantSystemAudio: boolean,
+  // Re-arms the main process's display-media selection. MUST be supplied by
+  // any caller that pre-selected a source: setPickedDisplayMediaSource /
+  // setNextDisplayMedia arm single-use state that the first getDisplayMedia()
+  // call consumes, so an un-rearmed retry silently captures the default
+  // screen instead of the window the user picked — recording far more than
+  // they asked for while the UI still shows the original source name.
+  rearm?: () => Promise<void>,
+  onLog?: (level: "info" | "warn" | "error" | "good", text: string) => void,
+): Promise<DisplayStreamResult> {
+  if (!wantSystemAudio) {
+    return { stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: false }), systemAudioDropped: false };
+  }
+
+  try {
+    return {
+      stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: SYSTEM_AUDIO_CONSTRAINTS }),
+      systemAudioDropped: false,
+    };
+  } catch (err) {
+    if (!isAudioDeviceFailure(err)) throw err;
+    onLog?.("warn", `System audio capture failed (${describeError(err)}); retrying without audio constraints.`);
+  }
+
+  await rearm?.();
+  try {
+    return {
+      stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: true }),
+      systemAudioDropped: false,
+    };
+  } catch (err) {
+    if (!isAudioDeviceFailure(err)) throw err;
+    onLog?.("warn", `System audio still unavailable (${describeError(err)}); capturing video only.`);
+  }
+
+  // Video-only. Deliberately not caught — if this fails too, the problem was
+  // never the audio and the caller should see the real error.
+  await rearm?.();
+  const stream = await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
+  return { stream, systemAudioDropped: true };
+}
+
 export interface StartCaptureOptions {
   source: CaptureSource;
   preset: PresetId;
@@ -71,6 +165,9 @@ export interface StartCaptureOptions {
   onAutoStop?: () => void;
   onError?: (message: string) => void;
   onLog?: (level: "info" | "warn" | "error" | "good", text: string) => void;
+  // Fired when system audio was requested but the OS wouldn't provide it and
+  // we continued with video only. Non-fatal — the recording is still running.
+  onSystemAudioUnavailable?: () => void;
 }
 
 export interface StartDisplayMediaOptions {
@@ -95,6 +192,8 @@ export interface StartDisplayMediaOptions {
   onAutoStop?: () => void;
   onError?: (message: string) => void;
   onLog?: (level: "info" | "warn" | "error" | "good", text: string) => void;
+  /** @see StartCaptureOptions.onSystemAudioUnavailable */
+  onSystemAudioUnavailable?: () => void;
 }
 
 export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSession> {
@@ -109,46 +208,39 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
   // chromeMediaSource:"desktop" audio constraint silently returned a
   // video-only stream on Electron 32+. Pre-tell the handler which source
   // the user picked from the Cove SourceModal.
-  await window.cove.setPickedDisplayMediaSource(opts.source.id);
-  await window.cove.setNextDisplayMedia(
-    opts.source.kind === "window" ? "window" : "screen",
-  );
+  const armPickedSource = async () => {
+    await window.cove.setPickedDisplayMediaSource(opts.source.id);
+    await window.cove.setNextDisplayMedia(
+      opts.source.kind === "window" ? "window" : "screen",
+    );
+  };
+  await armPickedSource();
 
   let sourceStream: MediaStream;
+  let systemAudioDropped = false;
   try {
-    // Explicit stereo / 48 kHz audio constraint. Chromium's WASAPI loopback
-    // on Windows otherwise inherits the playback device's "default format",
-    // which Windows often leaves at mono — the captured audio comes out
-    // 1ch and music sounds flat. With `channelCount: 2 (ideal)` Chromium
-    // will internally upmix to satisfy the constraint when the source is
-    // mono. On Linux this branch isn't hit when sysaudio is on (sidecar
-    // handles it), so this can't regress the Linux flow.
-    sourceStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: sourceFps, max: sourceFps } },
-      audio: opts.withSystemAudio
-        ? {
-            channelCount: { ideal: 2 },
-            sampleRate: { ideal: 48000 },
-            // WebRTC's voice-tuned audio chain is on by default for any
-            // mediaDevices stream. It runs AGC + noise suppression + echo
-            // cancellation over the loopback feed — fine for voice calls,
-            // disastrous for music: gain pumping, transient softening,
-            // tonal smearing. Turning all three off gives Chromium's pure
-            // capture without DSP, so what we encode matches what plays.
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-          }
-        : false,
-    });
+    // Audio degrades on its own inside acquireDisplayStream — see the ladder
+    // there. armPickedSource is passed as the re-arm hook so every retry
+    // still targets the source the user picked. On Linux this can't regress
+    // the sidecar flow: source audio is discarded via omitSourceAudio
+    // anyway, and we don't clear withSystemAudio for Linux below.
+    const acquired = await acquireDisplayStream(
+      { frameRate: { ideal: sourceFps, max: sourceFps } },
+      opts.withSystemAudio,
+      armPickedSource,
+      opts.onLog,
+    );
+    sourceStream = acquired.stream;
+    systemAudioDropped = acquired.systemAudioDropped;
   } catch (err) {
     // Last-ditch fallback to the legacy constraint — useful in case some
     // Windows setup blocks getDisplayMedia for our preselected source.
+    // Audio is deliberately omitted here: acquireDisplayStream already
+    // exhausted the audio ladder, so re-requesting desktop audio would just
+    // reproduce the same failure and take the video down with it.
     opts.onLog?.("warn", `getDisplayMedia failed (${describeError(err)}); falling back to legacy capture.`);
     const constraints = {
-      audio: opts.withSystemAudio
-        ? { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: opts.source.id } }
-        : false,
+      audio: false,
       video: {
         mandatory: {
           chromeMediaSource: "desktop",
@@ -161,16 +253,46 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
     sourceStream = await navigator.mediaDevices.getUserMedia(
       constraints as unknown as MediaStreamConstraints,
     );
+    systemAudioDropped = opts.withSystemAudio;
+  }
+
+  // Privacy guard. If the user picked a window but we ended up with a whole
+  // monitor, we are about to record more than they consented to while the UI
+  // still shows the window's name. That is strictly worse than not recording,
+  // so abort rather than degrade.
+  //
+  // This fired for real: the audio-degradation retries above didn't re-arm the
+  // main process's single-use source selection, so rungs 2 and 3 fell through
+  // to the default screen and captured a full 1440p desktop when a Discord
+  // window was picked. armPickedSource fixes the cause; this catches any
+  // future path that loses the selection the same way.
+  if (opts.source.kind === "window") {
+    const surface = (sourceStream.getVideoTracks()[0]?.getSettings() as
+      MediaTrackSettings & { displaySurface?: string } | undefined)?.displaySurface;
+    if (surface === "monitor") {
+      sourceStream.getTracks().forEach((t) => t.stop());
+      throw new Error(
+        "Capture returned a full screen when a window was selected — aborting to avoid "
+        + "recording more than you picked. Please try again.",
+      );
+    }
   }
 
   const audioTrackList = sourceStream.getAudioTracks();
   const videoTrackList = sourceStream.getVideoTracks();
-  if (opts.withSystemAudio && audioTrackList.length === 0) {
-    opts.onLog?.(
-      "warn",
-      `Capture returned ${videoTrackList.length} video, 0 audio — system audio loopback unavailable on this Windows install.`,
-    );
-  } else {
+  if (opts.withSystemAudio && audioTrackList.length === 0 && !IS_LINUX) {
+    // Chromium can also hand back a video-only stream without throwing, so
+    // this catches the silent variant of the same problem. Skipped when
+    // acquireDisplayStream already reported the drop, and on Linux where a
+    // trackless source stream is the expected sidecar arrangement.
+    if (!systemAudioDropped) {
+      opts.onLog?.(
+        "warn",
+        `Capture returned ${videoTrackList.length} video, 0 audio — system audio loopback unavailable on this output device.`,
+      );
+      systemAudioDropped = true;
+    }
+  } else if (audioTrackList.length > 0) {
     const aDesc = audioTrackList.map((t) => {
       const s = t.getSettings();
       const ch = s.channelCount ?? "?";
@@ -183,6 +305,13 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
     );
   }
 
+  // Off Linux, a dropped loopback means the recording genuinely has no
+  // system audio — don't tell the main process otherwise. On Linux the
+  // sidecar is the audio source, so withSystemAudio must stand regardless of
+  // what the portal handed back here.
+  const lostSystemAudio = systemAudioDropped && !IS_LINUX;
+  if (lostSystemAudio) opts.onSystemAudioUnavailable?.();
+
   return wrapStreamIntoSession({
     sourceStream,
     mode: opts.source.kind === "window" ? "window" : "screen",
@@ -193,7 +322,7 @@ export async function startCapture(opts: StartCaptureOptions): Promise<CaptureSe
     captureQuality: opts.captureQuality,
     outputDir: opts.outputDir,
     withMic: opts.withMic,
-    withSystemAudio: opts.withSystemAudio,
+    withSystemAudio: opts.withSystemAudio && !lostSystemAudio,
     omitSourceAudio: IS_LINUX,
     cropRect: opts.cropRect ?? null,
     onChunk: opts.onChunk,
@@ -218,6 +347,9 @@ export interface AcquiredStream {
   inferredKind: "screen" | "window";
   sourceName: string;
   sourceId: string;
+  // System audio was asked for but the OS wouldn't open the loopback
+  // endpoint. Meaningless on Linux, where the sidecar supplies audio.
+  systemAudioDropped: boolean;
 }
 
 export async function acquireDisplayMediaStream(
@@ -226,12 +358,14 @@ export async function acquireDisplayMediaStream(
   const preset = opts.customQuality ? effectivePreset(opts.preset, opts.customQuality) : PRESETS[opts.preset];
   const sourceFps = opts.captureQuality?.fps ?? preset.fps;
 
-  await window.cove.setNextDisplayMedia(opts.kind);
+  const armKind = () => window.cove.setNextDisplayMedia(opts.kind);
+  await armKind();
 
-  const sourceStream = await navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: { ideal: sourceFps, max: sourceFps } },
-    audio: opts.withSystemAudio,
-  });
+  const { stream: sourceStream, systemAudioDropped } = await acquireDisplayStream(
+    { frameRate: { ideal: sourceFps, max: sourceFps } },
+    opts.withSystemAudio,
+    armKind,
+  );
 
   const videoTrack = sourceStream.getVideoTracks()[0];
   if (videoTrack) {
@@ -251,13 +385,18 @@ export async function acquireDisplayMediaStream(
     (inferredKind === "window" ? "Window" : "Screen");
   const sourceId = picked?.id ?? `displaymedia:${videoTrack?.id ?? "unknown"}`;
 
-  return { sourceStream, inferredKind, sourceName, sourceId };
+  return { sourceStream, inferredKind, sourceName, sourceId, systemAudioDropped };
 }
 
 export function startCaptureFromAcquiredStream(
   acquired: AcquiredStream,
   opts: Omit<StartDisplayMediaOptions, "kind" | "fallbackName">,
 ): Promise<CaptureSession> {
+  // Linux keeps withSystemAudio regardless — the sidecar, not this stream,
+  // is the audio source there.
+  const lostSystemAudio = acquired.systemAudioDropped && !IS_LINUX;
+  if (lostSystemAudio) opts.onSystemAudioUnavailable?.();
+
   return wrapStreamIntoSession({
     sourceStream: acquired.sourceStream,
     mode: acquired.inferredKind,
@@ -268,7 +407,7 @@ export function startCaptureFromAcquiredStream(
     captureQuality: opts.captureQuality,
     outputDir: opts.outputDir,
     withMic: opts.withMic,
-    withSystemAudio: opts.withSystemAudio,
+    withSystemAudio: opts.withSystemAudio && !lostSystemAudio,
     omitSourceAudio: IS_LINUX,
     cropRect: opts.cropRect ?? null,
     onChunk: opts.onChunk,
@@ -707,6 +846,9 @@ export interface ReplayBufferOptions {
   // at start, save lifecycle notes — so they show up in the in-app log
   // panel and not just devtools.
   onLog?: (level: "info" | "warn" | "error" | "good", text: string) => void;
+  // Fired when system audio was requested but the OS wouldn't provide it and
+  // the buffer started video-only. Non-fatal — the buffer is still running.
+  onSystemAudioUnavailable?: () => void;
 }
 
 export interface ReplayBufferHandle {
@@ -728,24 +870,32 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
 
   // Acquire source — same dance as normal capture, just without finalize.
   let sourceStream: MediaStream;
-  if (opts.source) {
-    await window.cove.setPickedDisplayMediaSource(opts.source.id);
-    await window.cove.setNextDisplayMedia(opts.source.kind === "window" ? "window" : "screen");
-  } else {
-    await window.cove.setNextDisplayMedia(opts.sourceKind);
-  }
+  const armReplaySource = async () => {
+    if (opts.source) {
+      await window.cove.setPickedDisplayMediaSource(opts.source.id);
+      await window.cove.setNextDisplayMedia(opts.source.kind === "window" ? "window" : "screen");
+    } else {
+      await window.cove.setNextDisplayMedia(opts.sourceKind);
+    }
+  };
+  await armReplaySource();
+  let replaySystemAudioDropped = false;
   try {
-    sourceStream = await navigator.mediaDevices.getDisplayMedia({
-      // Constrain source fps to the replay quality target — no point
-      // asking the portal for 60 fps when we'll cap at 30 (Performance),
-      // and asking for 60 only when the preset actually wants it spares
-      // the OS unnecessary frame production.
-      video: { frameRate: { ideal: qualityPreset.fps, max: qualityPreset.fps } },
-      audio: opts.withSystemAudio
-        ? { channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 },
-            echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-        : false,
-    });
+    // Constrain source fps to the replay quality target — no point asking
+    // the portal for 60 fps when we'll cap at 30 (Performance), and asking
+    // for 60 only when the preset actually wants it spares the OS
+    // unnecessary frame production. Audio degrades independently so a
+    // loopback-hostile output device can't kill the whole replay buffer,
+    // re-arming the picked source before each retry.
+    const acquired = await acquireDisplayStream(
+      { frameRate: { ideal: qualityPreset.fps, max: qualityPreset.fps } },
+      opts.withSystemAudio,
+      armReplaySource,
+      opts.onLog,
+    );
+    sourceStream = acquired.stream;
+    replaySystemAudioDropped = acquired.systemAudioDropped && !IS_LINUX;
+    if (replaySystemAudioDropped) opts.onSystemAudioUnavailable?.();
   } catch (err) {
     if (opts.source?.kind === "window") {
       throw new Error(targetLostMessage);
@@ -863,7 +1013,7 @@ export async function startReplayBuffer(opts: ReplayBufferOptions): Promise<Repl
       preset: opts.preset,
       outputDir: opts.outputDir,
       withMic: opts.withMic,
-      withSystemAudio: opts.withSystemAudio,
+      withSystemAudio: opts.withSystemAudio && !replaySystemAudioDropped,
       isReplay: true,
       sourceId: opts.source?.id ?? "replay",
       sourceName: opts.source?.name ?? "Replay buffer",
