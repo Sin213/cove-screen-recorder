@@ -2,6 +2,14 @@
 
 All notable changes to Cove Screen Recorder are documented in this file.
 
+## [3.3.1] - 2026-07-31
+
+### Fixed
+
+- System audio recording no longer fails the entire capture when the OS refuses to open the loopback endpoint on a particular output device (some vendor headset endpoints never support loopback capture). Cove now retries with progressively looser audio constraints and falls back to video-only if none succeed, surfacing a warning toast instead of blocking the recording.
+- Gallery delete failures are now surfaced with the actual error message instead of being silently swallowed, both for single-card deletes and bulk delete.
+- Output directories starting with `~` (for example `~/Videos`) now resolve correctly for delete and clipboard-copy operations instead of failing every path check.
+
 ## [3.3.0] - 2026-07-26
 
 ### Added
